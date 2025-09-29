@@ -584,11 +584,8 @@ struct PodcastListView: View {
                // Episode list is scrolling - hide TabView and show home button
                if !isScrolling.wrappedValue {
                    isScrolling.wrappedValue = true
-                   // CRITICAL FIX: Only hide footer menu if user has ever played content
-                   let hasEverPlayedContent = UserDefaults.standard.bool(forKey: "hasEverPlayedContent")
-                   if hasEverPlayedContent {
-                       isFooterMenuHidden.wrappedValue = true
-                   }
+                   // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
+                   // REMOVED: Direct isFooterMenuHidden assignment - let ContentView shouldHideFooterMenu logic handle this
                }
            }
            .onReceive(NotificationCenter.default.publisher(for: .episodeListScrollingStopped)) { _ in
@@ -884,11 +881,8 @@ struct PodcastListView: View {
                         // Update when drag distance is significant enough
                         if !isScrolling.wrappedValue {
                             isScrolling.wrappedValue = true
-                            // CRITICAL FIX: Only hide footer menu if user has ever played content
-                            let hasEverPlayedContent = UserDefaults.standard.bool(forKey: "hasEverPlayedContent")
-                            if hasEverPlayedContent {
-                                isFooterMenuHidden.wrappedValue = true
-                            }
+                            // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
+                            // REMOVED: Direct isFooterMenuHidden assignment - let ContentView shouldHideFooterMenu logic handle this
                         }
                         UserDefaults.standard.set(true, forKey: "isUserScrolling")
                         // Post notification for PodcastPlayer scroll detection

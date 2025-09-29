@@ -308,7 +308,7 @@ struct ContentSubmissionView: View {
                         if !isScrolling {
                             print("🏠 DEBUG: Setting isScrolling = true in ContentSubmissionView (roleSelectionView)")
                             isScrolling = true
-                            isFooterMenuHidden = true
+                            // REMOVED: isFooterMenuHidden = true - let ContentView shouldHideFooterMenu logic handle this
                         }
                     }
                 }
@@ -447,7 +447,7 @@ struct ContentSubmissionView: View {
                             if !isScrolling {
                                 print("🏠 DEBUG: Setting isScrolling = true in ContentSubmissionView (submissionFormView)")
                                 isScrolling = true
-                                isFooterMenuHidden = true
+                                // REMOVED: isFooterMenuHidden = true - let ContentView shouldHideFooterMenu logic handle this
                             }
                         }
                     }

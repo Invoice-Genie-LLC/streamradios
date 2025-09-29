@@ -155,12 +155,12 @@ struct SettingsView: View {
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
                         .onChanged { _ in
-                            // IMMEDIATE update - no conditions, just set it
+                            // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
                             DispatchQueue.main.async {
                                 if !isScrolling {
                                     print("🏠 DEBUG: Setting isScrolling = true in SettingsView")
                                     isScrolling = true
-                                    isFooterMenuHidden = true
+                                    // REMOVED: isFooterMenuHidden = true - let ContentView shouldHideFooterMenu logic handle this
                                 }
                             }
                         }
@@ -2290,12 +2290,12 @@ struct InternalDataManagementView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
                 .onChanged { _ in
-                    // IMMEDIATE update - no conditions, just set it
+                    // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
                     DispatchQueue.main.async {
                         if !isScrolling {
                             print("🏠 DEBUG: Setting isScrolling = true in InternalDataManagementView")
                             isScrolling = true
-                            isFooterMenuHidden = true
+                            // REMOVED: isFooterMenuHidden = true - let ContentView shouldHideFooterMenu logic handle this
                         }
                     }
                 }

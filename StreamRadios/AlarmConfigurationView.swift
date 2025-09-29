@@ -109,7 +109,7 @@ struct AlarmConfigurationView: View {
                                 if !isScrolling {
                                     print("🏠 DEBUG: Setting isScrolling = true in AlarmConfigurationView")
                                     isScrolling = true
-                                    isFooterMenuHidden = true
+                                    // REMOVED: isFooterMenuHidden = true - let ContentView shouldHideFooterMenu logic handle this
                                 }
                             }
                         }

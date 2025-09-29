@@ -296,6 +296,14 @@ struct ContentView: View {
             // Update tab bar visibility when scroll state changes
             updateTabBarVisibility()
         }
+        .onChange(of: shouldHideFooterMenu) { _, newValue in
+            // CRITICAL: Automatically update isFooterMenuHidden based on shouldHideFooterMenu logic
+            // This ensures TabView hides when scrolling after first-time playback
+            if newValue != isFooterMenuHidden {
+                isFooterMenuHidden = newValue
+                print("🏠 ContentView: Auto-updating isFooterMenuHidden to \(newValue) based on shouldHideFooterMenu")
+            }
+        }
         .onChange(of: selectedTab) { oldValue, newValue in
             // Do NOT clear iTunes artwork when navigating between views
             // iTunes artwork should only be cleared when actually stopping the radio player
@@ -392,15 +400,30 @@ struct ContentView: View {
     
     /// Determines if footer menu should be hidden
     /// Hides when scrolling or when manually hidden via home button
+    /// Only hides after user has played content for the first time
     private var shouldHideFooterMenu: Bool {
         // Always show menu if no content is playing
-        guard shouldShowGlobalPlayer else { return false }
+        guard shouldShowGlobalPlayer else { 
+            print("🏠 ContentView: shouldHideFooterMenu = false (no global player)")
+            return false 
+        }
         
-        // Hide menu when scrolling
-        if isScrolling { return true }
+        // FIRST-TIME USER PROTECTION: Never hide TabView on fresh install until content has been played
+        guard PlaybackManager.shared.hasEverPlayedContent() else { 
+            print("🏠 ContentView: shouldHideFooterMenu = false (fresh install - content never played)")
+            return false 
+        }
+        
+        // Hide menu when scrolling (only after content has been played)
+        if isScrolling { 
+            print("🏠 ContentView: shouldHideFooterMenu = true (scrolling after content played)")
+            return true 
+        }
         
         // Show/hide menu based on home button state
-        return isFooterMenuHidden
+        let result = isFooterMenuHidden
+        print("🏠 ContentView: shouldHideFooterMenu = \(result) (based on home button state)")
+        return result
     }
     
     /// Updates tab bar visibility using UIKit with enhanced animations

@@ -48,6 +48,12 @@ class PlaybackManager: ObservableObject {
         UserDefaults.standard.set(player.rawValue, forKey: "LastActivePlayer")
         UserDefaults.standard.synchronize() // Force immediate save
         
+        // FIRST-TIME PLAYBACK TRACKING: Mark that content has been played for TabView hiding behavior
+        if player != .none && !hasEverPlayedContent() {
+            markContentAsPlayed()
+            print("🎵 PlaybackManager: First-time content playback detected - enabling TabView hiding on scroll")
+        }
+        
         // Always log during restoration to help debug
         print("🎵 PlaybackManager: Active player changed from \(previousPlayer) to \(player) (saved to UserDefaults)")
         lastLoggedActivePlayer = player
@@ -70,6 +76,19 @@ class PlaybackManager: ObservableObject {
         return player
     }
     
+    // MARK: - First-Time Playback Tracking
+    
+    /// Check if user has ever played any content (radio or podcast)
+    func hasEverPlayedContent() -> Bool {
+        return UserDefaults.standard.bool(forKey: "HasEverPlayedContent")
+    }
+    
+    /// Mark that content has been played for the first time
+    private func markContentAsPlayed() {
+        UserDefaults.standard.set(true, forKey: "HasEverPlayedContent")
+        UserDefaults.standard.synchronize()
+        print("🎵 PlaybackManager: Marked content as played - TabView hiding on scroll now enabled")
+    }
     
     private func setupCentralizedAudioSession() {
         // CRITICAL FIX: Move audio session configuration to background queue to prevent main thread blocking

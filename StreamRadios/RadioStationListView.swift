@@ -498,12 +498,8 @@ struct RadioStationListView: View {
                             print("🏠 DEBUG: Setting isScrolling = true in RadioStationListView")
                             isScrolling = true
                             // CRITICAL FIX: Only hide footer menu if user has ever played content
-                            // On fresh install, keep menu visible until user plays something for the first time
-                            let hasEverPlayedContent = UserDefaults.standard.bool(forKey: "hasEverPlayedContent")
-                            if hasEverPlayedContent {
-                                isFooterMenuHidden = true
-                            }
-                            print("🏠 DEBUG: hasEverPlayedContent = \(hasEverPlayedContent), isFooterMenuHidden = \(isFooterMenuHidden)")
+                            // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
+                            // REMOVED: Direct isFooterMenuHidden assignment - let ContentView shouldHideFooterMenu logic handle this
                         }
                     }
                 }
