@@ -75,6 +75,9 @@ struct RadioStationListView: View {
     // Country picker sheet state
     @State private var showingCountryPicker = false
     
+    // Search container state
+    @State private var isSearchPresented = false
+    
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
@@ -95,23 +98,6 @@ struct RadioStationListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.adaptiveBackground)
-        .toolbar {
-            ToolbarItemGroup(placement: .navigationBarTrailing) {
-                // Add station button (always shown when not editing)
-                if !isEditing {
-                    Button(action: {
-                        if viewModel.selectedCountry == "Select Country" {
-                            alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                        } else {
-                            selectedStationForEdit = nil
-                            activeSheet = .addStation
-                        }
-                    }) {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
-        }
         .onAppear(perform: setup)
         .onAppear {
             setup()
@@ -274,6 +260,78 @@ struct RadioStationListView: View {
         }
     }
     
+    // MARK: - Navigation Bar Button Container
+    
+    @ViewBuilder
+    private var navigationBarButtonContainer: some View {
+        if #available(iOS 26.0, *) {
+            // iOS 26+ with Liquid Glass
+            navigationBarButtonContent
+                .glassEffect(in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            // iOS < 26 fallback
+            navigationBarButtonContent
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.adaptiveSecondaryBackground.opacity(0.8))
+                )
+        }
+    }
+    
+    @ViewBuilder
+    private var navigationBarButtonContent: some View {
+        HStack(spacing: 8) {
+            // Search toggle button
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isSearchPresented.toggle()
+                    if !isSearchPresented {
+                        searchText = ""
+                    }
+                }
+            }) {
+                Image(systemName: isSearchPresented ? "xmark" : "magnifyingglass")
+                    .foregroundColor(.white)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+            
+            // Sort button
+            Button(action: {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                    viewModel.isAscendingSort.toggle()
+                }
+            }) {
+                Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                    .foregroundColor(.white)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+            
+            // Add station button
+            Button(action: {
+                if viewModel.selectedCountry == "Select Country" {
+                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                } else {
+                    selectedStationForEdit = nil
+                    activeSheet = .addStation
+                }
+            }) {
+                Image(systemName: "plus")
+                    .foregroundColor(.white)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.clear)
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+        )
+    }
+    
     private var emptyStateView: some View {
         VStack {
             // RECENT, FAVORITES & ALL TAB FIX: Don't show anything when stations exist but tabs are empty
@@ -376,6 +434,7 @@ struct RadioStationListView: View {
                             .padding(.vertical, 8)
                             .background(.blue)
                             .cornerRadius(8)
+        
                         }
                     }
                     
@@ -1648,6 +1707,86 @@ struct RadioStationListView_Previews: PreviewProvider {
         .environmentObject(viewModel)
         .environmentObject(radioPlayer)
         .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Custom Radio Search Bar
+struct CustomRadioSearchBar: View {
+    @Binding var searchText: String
+    @Binding var isPresented: Bool
+    var placeholder: String = "Search..."
+    @Environment(\.colorScheme) var colorScheme
+    @FocusState private var isTextFieldFocused: Bool
+    
+    private var searchBarBackgroundColor: Color {
+        if #available(iOS 26.0, *) {
+            return Color.clear // For liquid glass effect
+        } else {
+            return colorScheme == .dark ? Color(.systemGray5) : Color(.systemGray6)
+        }
+    }
+    
+    private var textColor: Color {
+        colorScheme == .dark ? .white : .primary
+    }
+    
+    private var iconColor: Color {
+        colorScheme == .dark ? .gray : .secondary
+    }
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Search field with icons
+            HStack(spacing: 8) {
+                // Magnifying glass icon
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(iconColor)
+                    .font(.system(size: 16, weight: .medium))
+                
+                // Text field
+                TextField(placeholder, text: $searchText)
+                    .font(.system(size: 16))
+                    .foregroundColor(textColor)
+                    .focused($isTextFieldFocused)
+                    .submitLabel(.search)
+                
+                // Clear button when text exists
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(iconColor)
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(searchBarBackgroundColor)
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+            )
+            
+            // Cancel button
+            Button("Cancel") {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isPresented = false
+                    searchText = ""
+                    isTextFieldFocused = false
+                }
+            }
+            .foregroundColor(.blue)
+            .font(.system(size: 16))
+        }
+        .onAppear {
+            // Auto-focus when search bar appears
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isTextFieldFocused = true
+            }
+        }
     }
 }
 

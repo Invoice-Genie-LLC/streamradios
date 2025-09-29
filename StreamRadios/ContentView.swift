@@ -41,6 +41,7 @@ struct ContentView: View {
     @State private var scrollToEpisodeID: String?
 
     @State private var searchText = ""
+    @State private var isSearchPresented = false
     
     // Add state to force UI refresh when sync completes
     @State private var syncCompletionRefreshID = UUID()
@@ -480,6 +481,37 @@ struct ContentView: View {
         return nil
     }
 
+
+    // MARK: - Conditional Liquid Glass Modifier
+    
+    struct ConditionalLiquidGlass: ViewModifier {
+        let cornerRadius: CGFloat
+        
+        func body(content: Content) -> some View {
+            if #available(iOS 26.0, *) {
+                content
+                    .glassEffect(in: RoundedRectangle(cornerRadius: cornerRadius))
+            } else {
+                content
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.3),
+                                        Color.white.opacity(0.1)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+                    .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+            }
+        }
+    }
+
     // MARK: - Radio Tab Content with Full Original Functionality
     
     private var radioTabContent: some View {
@@ -490,7 +522,7 @@ struct ContentView: View {
                 
                 VStack(spacing: 0) {
                     // Top navigation area - Browse by Country section prominently at top
-                    VStack(spacing: 16) {
+                    VStack(spacing: 8) {
                         // Browse by Country section - now prominently at the top
                         VStack(spacing: 12) {
                             // Section header
@@ -505,19 +537,53 @@ struct ContentView: View {
                                 
                                 Spacer()
                                 
-                                // Add station button
-                                Button(action: {
-                                    if viewModel.selectedCountry == "Select Country" {
-                                        alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                                    } else {
-                                        activeSheet = .addStation
+                                // Button Container with rounded background
+                                HStack(spacing: 8) {
+                                    // Search toggle button
+                                    Button(action: {
+                                        isSearchPresented.toggle()
+                                        if !isSearchPresented {
+                                            searchText = ""
+                                        }
+                                    }) {
+                                        Image(systemName: "magnifyingglass")
+                                            .foregroundColor(.white)
+                                            .font(.system(size: 20, weight: .medium))
+                                            .frame(width: 32, height: 32)
                                     }
-                                }) {
-                                    Image(systemName: "plus")
-                                        .font(.title3)
-                                        .foregroundColor(.blue)
-                                        .frame(width: 36, height: 36)
+                                    
+                                    // Sort button
+                                    Button(action: {
+                                        viewModel.sortStationsAlphabetically()
+                                    }) {
+                                        Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                            .foregroundColor(.white)
+                                            .font(.system(size: 20, weight: .medium))
+                                            .frame(width: 32, height: 32)
+                                    }
+                                    
+                                    // Add station button
+                                    Button(action: {
+                                        if viewModel.selectedCountry == "Select Country" {
+                                            alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                                        } else {
+                                            activeSheet = .addStation
+                                        }
+                                    }) {
+                                        Image(systemName: "plus")
+                                            .foregroundColor(.white)
+                                            .font(.system(size: 20, weight: .medium))
+                                            .frame(width: 32, height: 32)
+                                    }
                                 }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(Color(red: 0x19/255.0, green: 0x19/255.0, blue: 0x18/255.0))
+                                )
+                                .modifier(ConditionalLiquidGlass(cornerRadius: 20))
+                                .padding(.top, 1)
                             }
                             .padding(.horizontal, 16)
                             
@@ -559,16 +625,27 @@ struct ContentView: View {
                             }
                             .padding(.horizontal, 16)
                         }
-                        .padding(.vertical, 1)
+                        .padding(.vertical, 12)
                         .background(Color.adaptiveSectionBackground)
                         .cornerRadius(12)
                         .padding(.horizontal, 16)
+                        .padding(.bottom, 4)
                         
-                        // Sub-tabs: Recent, Favorites, All - moved below country selection
-                        elegantTabBar
-                        
-                        // Search box for filtering stations
+                        // Search box for filtering stations - moved above tabs
                         searchBar
+                        
+                        // Radio syncing indicator - positioned above tabs
+                        if selectedTab == .radio {
+                            HStack {
+                                RadioSyncIndicator()
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, -4)
+                        }
+                        
+                        // Sub-tabs: Recent, Favorites, All - moved below search
+                        elegantTabBar
 
                     }
                     .padding(.top, topPadding)
@@ -778,62 +855,46 @@ struct ContentView: View {
     
     @ViewBuilder
     private var searchBar: some View {
-        HStack {
-            // Radio syncing indicator on the left side
-            if selectedTab == .radio {
-                RadioSyncIndicator()
-            }
-            
+        if isSearchPresented {
             HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.adaptiveSecondaryText)
-                    .font(.body)
-                
-                TextField("Search stations...", text: $searchText)
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .font(.body)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                if !searchText.isEmpty {
-                    Button(action: {
-                        searchText = ""
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .font(.body)
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.adaptiveSecondaryText)
+                        .font(.body)
+                    
+                    TextField("Search stations...", text: $searchText)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.body)
+                        .foregroundColor(.adaptivePrimaryText)
+                    
+                    if !searchText.isEmpty {
+                        Button(action: {
+                            searchText = ""
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.adaptiveSecondaryText)
+                                .font(.body)
+                        }
                     }
+                    
+                    // Cancel button
+                    Button("Cancel") {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isSearchPresented = false
+                            searchText = ""
+                        }
+                    }
+                    .foregroundColor(.blue)
+                    .font(.system(size: 16))
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(Color.adaptiveSectionBackground)
             .cornerRadius(10)
-            
-            // Sorting arrow - enabled for All and Favorites tabs only (not Recent)
-            if selectedTab == .radio && !isEditingMode && viewModel.selectedSubTab != .recent {
-                Button(action: {
-                    // If on Favorites, warn that custom order will be replaced
-                    if viewModel.selectedSubTab == .favorites {
-                        alertManager.showCustomAlert(for: .confirmFavoritesSortChange, deleteAction: { 
-                            // Toggle direction and apply alphabetical ordering to favorites, then persist to CloudKit
-                            viewModel.sortStationsAlphabetically()
-                            Task { @MainActor in
-                                await viewModel.applyAlphabeticalSortToFavoritesAndPersist(ascending: viewModel.isAscendingSort)
-                            }
-                        })
-                    } else {
-                        // Non-favorites tabs: just toggle alphabetical sort preference
-                        viewModel.sortStationsAlphabetically()
-                    }
-                }) {
-                    Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                        .font(.title2)
-                }
-                .padding(.leading, 8)
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, -8)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, -5)
     }
     
     @ViewBuilder
