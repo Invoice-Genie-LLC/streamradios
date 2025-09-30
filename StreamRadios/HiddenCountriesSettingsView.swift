@@ -159,16 +159,10 @@ struct HiddenCountriesSettingsView: View {
             )
         }
         .background(backgroundColor)
-        .navigationTitle("")
+        .navigationTitle("Hidden Countries")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(false)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Hidden Countries")
-                    .font(.headline)
-                    .foregroundColor(primaryTextColor)
-            }
-            
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 8) {
                     // Search button

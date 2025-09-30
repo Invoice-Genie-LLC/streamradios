@@ -8,6 +8,35 @@
 import SwiftUI
 import FlagKit
 
+// MARK: - Conditional Liquid Glass Modifier
+struct CountryPickerLiquidGlass: ViewModifier {
+    let cornerRadius: CGFloat
+    
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            content
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.3),
+                                    Color.white.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+        }
+    }
+}
+
 // MARK: - Progress View Models
 class CountryDeletionProgressViewModel: ObservableObject {
     @Published var progress: Double = 0.0
@@ -113,6 +142,7 @@ struct CountryPicker: View {
     @Environment(\.presentationMode) var presentationMode
     
     @State private var searchText = ""
+    @State private var isSearchPresented = false
     @State private var recentCountries: [String] = []
     @State private var showingDeleteAlert = false
     @State private var countryToDelete: Country? = nil
@@ -143,37 +173,15 @@ struct CountryPicker: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Search bar with safe area consideration
-                VStack(spacing: 0) {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .font(.body)
-                        
-                        TextField("Search countries...", text: $searchText)
-                            .font(.body)
-                            .textFieldStyle(PlainTextFieldStyle())
-                            .foregroundColor(.adaptivePrimaryText)
-                        
-                        if !searchText.isEmpty {
-                            Button(action: {
-                                searchText = ""
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.adaptiveSecondaryText)
-                                    .font(.body)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.adaptiveFieldBackground)
-                    .cornerRadius(12)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 60) // Increased padding to account for custom header
+                // Search bar with liquid glass style (conditional)
+                if isSearchPresented {
+                    CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search countries...")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+                        .background(Color.adaptiveBackground)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                .padding(.bottom, 16)
-                .background(Color.adaptiveBackground)
                 
                 List {
                     // Recent selections section
@@ -300,45 +308,34 @@ struct CountryPicker: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             )
-            .navigationBarHidden(true)
-            .overlay(
-                // Custom header to exactly match Add Station style
-                VStack(spacing: 0) {
-                    HStack {
-                        Button("Cancel") {
-                            presentationMode.wrappedValue.dismiss()
-                        }
-                        .foregroundColor(.blue)
-                        .font(.body)
-                        
-                        Spacer()
-                        
-                        Text("Select Country")
-                            .font(.body)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                        
-                        Spacer()
-                        
-                        // Invisible button for balance (same width as Cancel)
-                        Button("Cancel") { }
-                            .foregroundColor(.clear)
-                            .font(.body)
-                            .disabled(true)
+            .navigationTitle("Select Country")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.black)
-                    
-                    // Separator line to match Add Station
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(height: 0.5)
-                    
-                    Spacer()
+                    .foregroundColor(.blue)
                 }
-                , alignment: .top
-            )
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isSearchPresented.toggle()
+                            if !isSearchPresented {
+                                searchText = ""
+                            }
+                        }
+                    }) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.white)
+                            .font(.system(size: 20, weight: .medium))
+                            .frame(width: 32, height: 32)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+            }
         }
         .background(Color.adaptiveBackground)
         .onAppear {
