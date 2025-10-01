@@ -669,7 +669,7 @@ class RadioStationCloudKitManager: ObservableObject {
     }
     
     /// Process CloudKit records in batches with progress tracking and resumable support
-    private func processBatchRecordsWithProgressResumable(_ records: [CKRecord], stationsToProcess: [RadioStation], batchSize: Int, totalStations: Int, alreadyProcessed: Int, progressCallback: @escaping (Double, Int, String) -> Void) async throws {
+    private func processBatchRecordsWithProgressResumable(_ records: [CKRecord], stationsToProcess: [RadioStation], batchSize: Int, totalStations: Int, alreadyProcessed: Int, country: String?, progressCallback: @escaping (Double, Int, String) -> Void) async throws {
         guard !records.isEmpty else { return }
         
         let totalBatches = (records.count + batchSize - 1) / batchSize
@@ -696,7 +696,8 @@ class RadioStationCloudKitManager: ObservableObject {
                 let modifyOperation = CKModifyRecordsOperation(recordsToSave: batchRecords, recordIDsToDelete: nil)
                 
                 // Set conservative CloudKit operation settings to prevent rate limiting
-                modifyOperation.savePolicy = .changedKeys
+                // Use .allKeys for favorite order updates (when country is nil) to force update all fields
+                modifyOperation.savePolicy = (country == nil) ? .allKeys : .changedKeys
                 modifyOperation.qualityOfService = .utility // Lower priority to reduce rate limiting
                 modifyOperation.isLongLived = false // Keep operations short for better rate limiting behavior
                 
@@ -1164,26 +1165,35 @@ class RadioStationCloudKitManager: ObservableObject {
         // Update stationsToProcess with deduplicated list
         let batchDeduplicatedStations = deduplicatedStations
         
-        // CRITICAL: Check against existing CloudKit records to prevent unnecessary saves
-        print("📡 🔍 CLOUDKIT DUPLICATE CHECK: Checking \(batchDeduplicatedStations.count) stations against existing CloudKit records")
-        let finalStationsToProcess = await filterOutExistingCloudKitStations(batchDeduplicatedStations)
-        
-        // Early return if no stations need to be saved
-        guard !finalStationsToProcess.isEmpty else {
-            print("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All \(stations.count) stations already exist in CloudKit")
-            print("📡 ✅ DUPLICATE PREVENTION SUCCESSFUL: No expensive CloudKit operations performed")
-            os_log("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All %d stations already exist in CloudKit", log: log, type: .info, stations.count)
+        // For favorite order updates, we need to UPDATE existing records, not skip them
+        // Only skip duplicate checking for new station additions
+        let finalStationsToProcess: [RadioStation]
+        if country == nil {
+            // When country is nil, this is likely a favorite order sync - process all stations
+            print("📡 🔄 FAVORITE ORDER SYNC: Processing all \(batchDeduplicatedStations.count) stations (will update existing records)")
+            finalStationsToProcess = batchDeduplicatedStations
+        } else {
+            // For country-specific saves, check for duplicates
+            print("📡 🔍 CLOUDKIT DUPLICATE CHECK: Checking \(batchDeduplicatedStations.count) stations against existing CloudKit records")
+            finalStationsToProcess = await filterOutExistingCloudKitStations(batchDeduplicatedStations)
             
-            // Complete the sync state as successful
-            SyncStateManager.shared.completeRadioStationSync()
-            
-            // Report completion with clear messaging
-            await MainActor.run {
-                progressCallback(1.0, 0, "All \(stations.count) stations already exist - no CloudKit operations needed")
+            // Early return if no stations need to be saved
+            guard !finalStationsToProcess.isEmpty else {
+                print("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All \(stations.count) stations already exist in CloudKit")
+                print("📡 ✅ DUPLICATE PREVENTION SUCCESSFUL: No expensive CloudKit operations performed")
+                os_log("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All %d stations already exist in CloudKit", log: log, type: .info, stations.count)
+                
+                // Complete the sync state as successful
+                SyncStateManager.shared.completeRadioStationSync()
+                
+                // Report completion with clear messaging
+                await MainActor.run {
+                    progressCallback(1.0, 0, "All \(stations.count) stations already exist - no CloudKit operations needed")
+                }
+                
+                print("📡 🏁 BATCH SAVE TERMINATION: Returning early to prevent expensive operations")
+                return
             }
-            
-            print("📡 🏁 BATCH SAVE TERMINATION: Returning early to prevent expensive operations")
-            return
         }
         
         // Additional safety check: If we're trying to save a very high percentage of existing stations, 
@@ -1217,6 +1227,35 @@ class RadioStationCloudKitManager: ObservableObject {
         let preparationChunkSize = 100
         let totalChunks = (finalStationsToProcess.count + preparationChunkSize - 1) / preparationChunkSize
         
+        // For favorite order updates (country == nil), fetch existing records first
+        var existingRecordsMap: [String: CKRecord] = [:]
+        if country == nil {
+            print("📡 🔍 FAVORITE ORDER: Fetching existing records to update favoriteOrder...")
+            let recordIDs = finalStationsToProcess.map { CKRecord.ID(recordName: $0.id) }
+            
+            // Fetch existing records in batches
+            let fetchBatchSize = 100
+            for batchStart in stride(from: 0, to: recordIDs.count, by: fetchBatchSize) {
+                let batchEnd = min(batchStart + fetchBatchSize, recordIDs.count)
+                let batchIDs = Array(recordIDs[batchStart..<batchEnd])
+                
+                do {
+                    let fetchedRecords = try await privateDatabase.records(for: batchIDs)
+                    for (recordID, result) in fetchedRecords {
+                        switch result {
+                        case .success(let record):
+                            existingRecordsMap[recordID.recordName] = record
+                        case .failure(let error):
+                            print("📡 ⚠️ FAVORITE ORDER: Could not fetch record \(recordID.recordName): \(error)")
+                        }
+                    }
+                } catch {
+                    print("📡 ❌ FAVORITE ORDER: Error fetching batch: \(error)")
+                }
+            }
+            print("📡 ✅ FAVORITE ORDER: Fetched \(existingRecordsMap.count) existing records")
+        }
+        
         for chunkIndex in 0..<totalChunks {
             let startIndex = chunkIndex * preparationChunkSize
             let endIndex = min(startIndex + preparationChunkSize, finalStationsToProcess.count)
@@ -1224,7 +1263,15 @@ class RadioStationCloudKitManager: ObservableObject {
             
             for station in stationChunk {
                 let recordID = CKRecord.ID(recordName: station.id)
-                let record = CKRecord(recordType: RecordType.radioStation, recordID: recordID)
+                
+                // Use existing record if available, otherwise create new
+                let record: CKRecord
+                if let existingRecord = existingRecordsMap[station.id] {
+                    record = existingRecord
+                    print("📡 🔄 FAVORITE ORDER: Updating existing record for \(station.name)")
+                } else {
+                    record = CKRecord(recordType: RecordType.radioStation, recordID: recordID)
+                }
                 
                 // Update record fields
                 record["name"] = station.name as CKRecordValue
@@ -1267,7 +1314,7 @@ class RadioStationCloudKitManager: ObservableObject {
         // Process in smaller batches to prevent CloudKit rate limiting
         let batchSize = 50 // Reduced batch size for better CloudKit performance
         print("📡 🚀 OPTIMIZED BATCH SAVE: Starting batch save of \(recordsToSave.count) records in batches of \(batchSize)")
-        try await processBatchRecordsWithProgressResumable(recordsToSave, stationsToProcess: finalStationsToProcess, batchSize: batchSize, totalStations: totalStations, alreadyProcessed: alreadyProcessed, progressCallback: progressCallback)
+        try await processBatchRecordsWithProgressResumable(recordsToSave, stationsToProcess: finalStationsToProcess, batchSize: batchSize, totalStations: totalStations, alreadyProcessed: alreadyProcessed, country: country, progressCallback: progressCallback)
         
         // Mark sync as complete
         SyncStateManager.shared.completeRadioStationSync()

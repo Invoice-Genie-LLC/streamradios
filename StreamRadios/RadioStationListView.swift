@@ -79,25 +79,33 @@ struct RadioStationListView: View {
     @State private var isSearchPresented = false
     
     var body: some View {
-        GeometryReader { geometry in
-            if viewModel.isLoading {
-                StylishLoaderView(
-                    title: "Loading Stations",
-                    phase: viewModel.loadingPhase,
-                    progress: viewModel.loadingProgress,
-                    current: viewModel.loadingStationsCount,
-                    total: viewModel.totalStationsToLoad
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.adaptiveBackground)
-            } else if filteredStations.isEmpty {
-                emptyStateView
-            } else {
-                stationsListView(screenWidth: geometry.size.width)
+        ZStack {
+            GeometryReader { geometry in
+                if viewModel.isLoading {
+                    StylishLoaderView(
+                        title: "Loading Stations",
+                        phase: viewModel.loadingPhase,
+                        progress: viewModel.loadingProgress,
+                        current: viewModel.loadingStationsCount,
+                        total: viewModel.totalStationsToLoad
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.adaptiveBackground)
+                } else if filteredStations.isEmpty {
+                    emptyStateView
+                } else {
+                    stationsListView(screenWidth: geometry.size.width)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.adaptiveBackground)
+            
+            // Custom Alert Overlay
+            if alertManager.showCustomAlert {
+                CustomAlertContainer()
+                    .environmentObject(alertManager)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.adaptiveBackground)
         .onAppear(perform: setup)
         .onAppear {
             setup()
@@ -281,7 +289,7 @@ struct RadioStationListView: View {
     @ViewBuilder
     private var navigationBarButtonContent: some View {
         HStack(spacing: 8) {
-            // Search toggle button
+            // Search toggle button - Shows in all tabs
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     isSearchPresented.toggle()
@@ -296,19 +304,31 @@ struct RadioStationListView: View {
                     .frame(width: 28, height: 28)
             }
             
-            // Sort button
-            Button(action: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                    viewModel.isAscendingSort.toggle()
+            // Sort button - Only show in Favorites and All tabs
+            if selectedSubTab == .favorites || selectedSubTab == .all {
+                Button(action: {
+                    print("🔄 Sort button tapped in \(selectedSubTab == .favorites ? "Favorites" : "All") tab")
+                    // Show alert for Favorites tab to warn about modifying order
+                    if selectedSubTab == .favorites {
+                        print("⚠️ Showing favorites sort confirmation alert")
+                        alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                            print("✅ User confirmed favorites sort change")
+                            viewModel.sortFavoritesAlphabetically()
+                        }
+                    } else {
+                        // All tab - no alert needed
+                        print("✅ Sorting All tab immediately (no alert)")
+                        viewModel.sortStationsAlphabetically()
+                    }
+                }) {
+                    Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                        .foregroundColor(.white)
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 28, height: 28)
                 }
-            }) {
-                Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                    .foregroundColor(.white)
-                    .font(.system(size: 16, weight: .medium))
-                    .frame(width: 28, height: 28)
             }
             
-            // Add station button
+            // Add station button - Shows in all tabs
             Button(action: {
                 if viewModel.selectedCountry == "Select Country" {
                     alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
@@ -1283,9 +1303,14 @@ struct RadioStationListView: View {
             // Always ordered chronologically (most recent first) - no alphabetical sorting
             stations = viewModel.recentStations()
         case .favorites:
-            // Favorites must always respect CloudKit-synced favoriteOrder.
-            // Do NOT apply alphabetical sorting here, otherwise it overrides the persisted order.
+            // Favorites tab: Get favorite stations
+            // The favoriteStations() method already returns stations sorted by favoriteOrder
+            // which respects the user's manual drag-and-drop arrangement
             stations = viewModel.favoriteStations()
+            
+            // Note: We don't apply alphabetical sorting here to preserve manual reordering.
+            // When user taps the sort button, it will trigger a re-sort through the alert,
+            // but the manual favoriteOrder takes precedence for display.
         }
         
         return stations

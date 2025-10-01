@@ -3033,20 +3033,34 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Move station within favorites list and update favoriteOrder values
     func moveFavoriteStation(from source: IndexSet, to destination: Int) {
+        print("📡 🔄 DRAG AND DROP: Starting moveFavoriteStation - source: \(source), destination: \(destination)")
+        
         var favoritesList = favoriteStations()
+        print("📡 📊 DRAG AND DROP: Current favorites count: \(favoritesList.count)")
+        
         favoritesList.move(fromOffsets: source, toOffset: destination)
         
         // Update favoriteOrder values
         for (index, favorite) in favoritesList.enumerated() {
             if let stationIndex = stations.firstIndex(where: { $0.id == favorite.id }) {
+                let oldOrder = stations[stationIndex].favoriteOrder
                 stations[stationIndex].favoriteOrder = index
+                print("📡 🔢 DRAG AND DROP: Updated \(favorite.name) - old order: \(oldOrder ?? -1), new order: \(index)")
             }
         }
         
         // Save to CoreData
+        print("📡 💾 DRAG AND DROP: Saving to CoreData...")
         saveStationsToCoreData()
         
+        // Save favorite order to UserDefaults for immediate persistence
+        let favoriteOrderDict = Dictionary(uniqueKeysWithValues: favoritesList.enumerated().map { ($0.element.id, $0.offset) })
+        UserDefaults.standard.set(favoriteOrderDict, forKey: "FavoriteStationsOrder")
+        UserDefaults.standard.synchronize()
+        print("📡 💾 DRAG AND DROP: Saved favorite order to UserDefaults for \(favoritesList.count) stations")
+        
         // ENHANCED CLOUDKIT SYNC: Sync favorite order changes to CloudKit
+        print("📡 ☁️ DRAG AND DROP: Starting CloudKit sync...")
         Task {
             await syncFavoriteOrderChangesToCloudKit()
         }
@@ -3061,7 +3075,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             ]
         )
         
-        print("📡 🔄 Updated favorite order values for \(favoritesList.count) stations and notified CarPlay")
+        print("📡 ✅ DRAG AND DROP: Completed - Updated favorite order values for \(favoritesList.count) stations and notified CarPlay")
     }
     
     /// Sort stations alphabetically and toggle sort direction
@@ -3073,6 +3087,47 @@ class RadioStationViewModel: NSObject, ObservableObject {
         UserDefaults.standard.set(isAscendingSort, forKey: "RadioStationSortAscending")
         
         print("📡 📝 Toggled radio station sort direction to: \(isAscendingSort ? "A-Z" : "Z-A")")
+    }
+    
+    /// Sort favorite stations alphabetically and update their favoriteOrder
+    func sortFavoritesAlphabetically() {
+        // Toggle sort direction
+        isAscendingSort.toggle()
+        
+        // Get all favorite stations
+        var favorites = favoriteStations()
+        
+        // Sort alphabetically based on the toggle
+        if isAscendingSort {
+            favorites.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        } else {
+            favorites.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+        }
+        
+        // Update favoriteOrder values based on new alphabetical order
+        for (index, favorite) in favorites.enumerated() {
+            if let stationIndex = stations.firstIndex(where: { $0.id == favorite.id }) {
+                stations[stationIndex].favoriteOrder = index
+            }
+        }
+        
+        // Save to CoreData
+        saveStationsToCoreData()
+        
+        // Save favorite order to UserDefaults
+        let favoriteOrderDict = Dictionary(uniqueKeysWithValues: favorites.enumerated().map { ($0.element.id, $0.offset) })
+        UserDefaults.standard.set(favoriteOrderDict, forKey: "FavoriteStationsOrder")
+        UserDefaults.standard.synchronize()
+        
+        // Save the sort direction to UserDefaults
+        UserDefaults.standard.set(isAscendingSort, forKey: "RadioStationSortAscending")
+        
+        // Sync to CloudKit
+        Task {
+            await syncFavoriteOrderChangesToCloudKit()
+        }
+        
+        print("📡 📝 Sorted \(favorites.count) favorites alphabetically: \(isAscendingSort ? "A-Z" : "Z-A")")
     }
     
     /// Load sorting preferences from UserDefaults

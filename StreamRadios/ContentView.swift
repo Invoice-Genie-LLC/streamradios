@@ -539,7 +539,7 @@ struct ContentView: View {
                                 
                                 // Button Container with rounded background
                                 HStack(spacing: 8) {
-                                    // Search toggle button
+                                    // Search toggle button - Shows in all tabs
                                     Button(action: {
                                         isSearchPresented.toggle()
                                         if !isSearchPresented {
@@ -552,17 +552,27 @@ struct ContentView: View {
                                             .frame(width: 32, height: 32)
                                     }
                                     
-                                    // Sort button
-                                    Button(action: {
-                                        viewModel.sortStationsAlphabetically()
-                                    }) {
-                                        Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                            .foregroundColor(.white)
-                                            .font(.system(size: 20, weight: .medium))
-                                            .frame(width: 32, height: 32)
+                                    // Sort button - Only show in Favorites and All tabs
+                                    if viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all {
+                                        Button(action: {
+                                            // Show alert for Favorites tab to warn about modifying order
+                                            if viewModel.selectedSubTab == .favorites {
+                                                alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                                                    viewModel.sortFavoritesAlphabetically()
+                                                }
+                                            } else {
+                                                // All tab - no alert needed
+                                                viewModel.sortStationsAlphabetically()
+                                            }
+                                        }) {
+                                            Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                                .foregroundColor(.white)
+                                                .font(.system(size: 20, weight: .medium))
+                                                .frame(width: 32, height: 32)
+                                        }
                                     }
                                     
-                                    // Add station button
+                                    // Add station button - Shows in all tabs
                                     Button(action: {
                                         if viewModel.selectedCountry == "Select Country" {
                                             alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
