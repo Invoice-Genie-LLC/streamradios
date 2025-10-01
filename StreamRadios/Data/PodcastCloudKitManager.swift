@@ -2467,7 +2467,7 @@ class PodcastCloudKitManager: ObservableObject {
         os_log("🔄 Starting CloudKit sync for podcast feeds", log: log, type: .info)
         
         let query = CKQuery(recordType: RecordType.podcastFeed, predicate: NSPredicate(value: true))
-        query.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        query.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
         
         do {
             let (matchResults, _) = try await privateDatabase.records(matching: query)
@@ -2506,6 +2506,7 @@ class PodcastCloudKitManager: ObservableObject {
         
         let artworkUrl = record["artworkUrl"] as? String
         let descriptionText = record["descriptionText"] as? String
+        let order = record["order"] as? Int ?? 0
         
         // Handle artwork/icon data
         var iconData: String?
@@ -2531,65 +2532,92 @@ class PodcastCloudKitManager: ObservableObject {
             description: descriptionText,
             iconData: iconData,
             imageData: imageData,
-            episodes: [] // Episodes will be loaded separately via RSS
+            episodes: [], // Episodes will be loaded separately via RSS
+            order: order
         )
     }
     
     /// Save podcast feed to CloudKit with best-effort duplicate prevention
-    func savePodcastFeedToCloudKit(_ feed: PodcastFeed) async throws {
+    func savePodcastFeedToCloudKit(_ feed: PodcastFeed, oldURL: String? = nil) async throws {
         let recordID = CKRecord.ID(recordName: feed.id)
+        os_log("💾 SAVE: Attempting to save feed '%@' with ID: %@", log: log, type: .info, feed.title, feed.id)
         
-        // Step 1: Best-effort duplicate check - if successful and finds duplicates, update instead
-        // If duplicate check fails due to network issues, proceed with normal save
-        do {
-            os_log("🔍 Checking for duplicate feeds by URL: %@", log: log, type: .info, feed.url)
-            
-            let urlPredicate = NSPredicate(format: "url == %@", feed.url)
-            let query = CKQuery(recordType: RecordType.podcastFeed, predicate: urlPredicate)
-            // Note: Removed sortDescriptors because modificationDate is not marked as sortable in CloudKit schema
-            
-            let (matchResults, _) = try await privateDatabase.records(matching: query)
-            
-            // If we found existing feeds with the same URL, update the first one instead
-            if let existingMatch = matchResults.first,
-               case .success(let existingRecord) = existingMatch.1 {
-                os_log("🔄 Found existing feed with same URL, updating instead of creating: %@", log: log, type: .info, feed.title)
-                
-                // Update the existing record
-                existingRecord["title"] = feed.title as CKRecordValue
-                existingRecord["url"] = feed.url as CKRecordValue
-                existingRecord["artworkUrl"] = feed.artworkUrl as CKRecordValue?
-                existingRecord["descriptionText"] = feed.descriptionText as CKRecordValue?
-                existingRecord["lastUpdated"] = Date() as CKRecordValue
-                
-                // Handle image data
-                if let imageData = feed.imageData {
-                    let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
-                    try imageData.write(to: tempURL)
-                    existingRecord["iconData"] = CKAsset(fileURL: tempURL)
-                }
-                
-                // Save the updated existing record
-                _ = try await privateDatabase.save(existingRecord)
-                os_log("✅ Updated existing podcast feed in CloudKit: %@", log: log, type: .info, feed.title)
-                return
-            }
-            
-            os_log("✅ No duplicate feeds found by URL, proceeding with new record: %@", log: log, type: .info, feed.title)
-            
-        } catch {
-            // If duplicate check fails (network issues, etc.), proceed with normal save
-            // This ensures feeds can still be saved even if CloudKit is having issues
-            os_log("⚠️ Duplicate check failed, proceeding with normal save anyway: %@", log: log, type: .default, error.localizedDescription)
+        if let oldURL = oldURL, oldURL != feed.url {
+            os_log("🔄 URL CHANGED: Old URL: %@ → New URL: %@", log: log, type: .info, oldURL, feed.url)
         }
         
-        // Step 2: Try to fetch record by ID or create new
+        // Step 1: Try to fetch record by ID first (this is the primary way to update existing feeds)
         var record: CKRecord
+        var isExistingRecord = false
+        
         do {
             record = try await privateDatabase.record(for: recordID)
-            os_log("🔄 Found existing feed by ID, updating: %@", log: log, type: .info, feed.title)
+            isExistingRecord = true
+            let cloudKitURL = record["url"] as? String
+            
+            // Log URL change if applicable
+            if let cloudKitURL = cloudKitURL, cloudKitURL != feed.url {
+                os_log("🔄 EDIT: Found existing feed by ID, updating URL: %@ → %@", log: log, type: .info, cloudKitURL, feed.url)
+                os_log("🔄 EDIT: Updating feed '%@' (ID: %@) - URL changed but keeping same record", log: log, type: .info, feed.title, feed.id)
+            } else {
+                os_log("🔄 EDIT: Found existing feed by ID, updating: %@ (ID: %@)", log: log, type: .info, feed.title, feed.id)
+            }
         } catch CKError.unknownItem {
-            os_log("✅ Creating new feed record: %@", log: log, type: .info, feed.title)
+            os_log("✅ NEW: Record doesn't exist yet by ID: %@ (ID: %@)", log: log, type: .info, feed.title, feed.id)
+            
+            // Step 2: If we have an old URL, search for a record with that URL
+            if let oldURL = oldURL {
+                do {
+                    os_log("🔍 Searching for existing record with old URL: %@", log: log, type: .info, oldURL)
+                    
+                    let urlPredicate = NSPredicate(format: "url == %@", oldURL)
+                    let query = CKQuery(recordType: RecordType.podcastFeed, predicate: urlPredicate)
+                    
+                    let (matchResults, _) = try await privateDatabase.records(matching: query)
+                    
+                    // If we found a record with the old URL, update it with the new URL
+                    if let existingMatch = matchResults.first,
+                       case .success(let existingRecord) = existingMatch.1 {
+                        os_log("🔄 FOUND OLD RECORD: Found record with old URL, will update it with new URL", log: log, type: .info)
+                        os_log("🔄 FOUND OLD RECORD: Updating record ID %@ with new URL: %@", log: log, type: .info, existingRecord.recordID.recordName, feed.url)
+                        record = existingRecord
+                        isExistingRecord = true
+                    } else {
+                        os_log("⚠️ OLD URL NOT FOUND: No record found with old URL, will create new record", log: log, type: .info)
+                        record = CKRecord(recordType: RecordType.podcastFeed, recordID: recordID)
+                    }
+                } catch {
+                    os_log("⚠️ Old URL search failed, creating new record: %@", log: log, type: .default, error.localizedDescription)
+                    record = CKRecord(recordType: RecordType.podcastFeed, recordID: recordID)
+                }
+            } else {
+                // Step 3: No old URL provided, check for duplicate with current URL
+                do {
+                    os_log("🔍 Checking for duplicate feeds by current URL: %@", log: log, type: .info, feed.url)
+                    
+                    let urlPredicate = NSPredicate(format: "url == %@", feed.url)
+                    let query = CKQuery(recordType: RecordType.podcastFeed, predicate: urlPredicate)
+                    
+                    let (matchResults, _) = try await privateDatabase.records(matching: query)
+                    
+                    // If we found existing feeds with the same URL, update that one instead
+                    if let existingMatch = matchResults.first,
+                       case .success(let existingRecord) = existingMatch.1,
+                       existingRecord.recordID.recordName != feed.id {
+                        os_log("🔄 DUPLICATE: Found existing feed with same URL but different ID, updating that one: %@", log: log, type: .info, feed.title)
+                        record = existingRecord
+                        isExistingRecord = true
+                    } else {
+                        os_log("✅ No duplicates found, creating new record: %@", log: log, type: .info, feed.title)
+                        record = CKRecord(recordType: RecordType.podcastFeed, recordID: recordID)
+                    }
+                } catch {
+                    os_log("⚠️ Duplicate check failed, creating new record: %@", log: log, type: .default, error.localizedDescription)
+                    record = CKRecord(recordType: RecordType.podcastFeed, recordID: recordID)
+                }
+            }
+        } catch {
+            os_log("⚠️ Error fetching record by ID: %@", log: log, type: .default, error.localizedDescription)
             record = CKRecord(recordType: RecordType.podcastFeed, recordID: recordID)
         }
         
@@ -2598,6 +2626,7 @@ class PodcastCloudKitManager: ObservableObject {
         record["url"] = feed.url as CKRecordValue
         record["artworkUrl"] = feed.artworkUrl as CKRecordValue?
         record["descriptionText"] = feed.descriptionText as CKRecordValue?
+        record["order"] = feed.order as CKRecordValue
         record["lastUpdated"] = Date() as CKRecordValue
         
         // Handle image data
@@ -2609,7 +2638,12 @@ class PodcastCloudKitManager: ObservableObject {
         
         // Save the record
         _ = try await privateDatabase.save(record)
-        os_log("✅ Saved podcast feed to CloudKit: %@", log: log, type: .info, feed.title)
+        
+        if isExistingRecord {
+            os_log("✅ UPDATED existing podcast feed in CloudKit: %@ (ID: %@)", log: log, type: .info, feed.title, feed.id)
+        } else {
+            os_log("✅ CREATED new podcast feed in CloudKit: %@ (ID: %@)", log: log, type: .info, feed.title, feed.id)
+        }
     }
     
     /// Delete podcast feed and all associated episode states from CloudKit

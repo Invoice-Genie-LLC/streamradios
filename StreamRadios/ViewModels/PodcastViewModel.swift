@@ -24,8 +24,9 @@ struct PodcastFeed: Identifiable, Codable, Equatable {
     var imageData: Data?
     var episodes: [PodcastEpisode] = []
     var maxEpisodes: Int? = nil // Optional episode limit - nil means unlimited
+    var order: Int = 0 // Order for manual sorting and CloudKit sync
     
-    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = [], maxEpisodes: Int? = nil) {
+    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = [], maxEpisodes: Int? = nil, order: Int = 0) {
         self.id = id
         self.title = title
         self.url = url
@@ -35,6 +36,7 @@ struct PodcastFeed: Identifiable, Codable, Equatable {
         self.imageData = imageData
         self.episodes = episodes
         self.maxEpisodes = maxEpisodes
+        self.order = order
     }
     
     // Equatable implementation
@@ -7098,6 +7100,44 @@ class PodcastViewModel: ObservableObject {
         // Clean up any duplicates that might have been created
         await cleanupDuplicateFeeds()
         
+        // CRITICAL: Load feeds from CoreData first, then restore order
+        await MainActor.run {
+            print("📡 🔄 LOADING FEEDS FROM COREDATA BEFORE ORDER RESTORATION...")
+            self.loadFeedsFromCoreData()
+        }
+        
+        // Wait for feeds to load
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        
+        // CRITICAL: Restore correct order from CloudKit feeds before saving to CoreData
+        await MainActor.run {
+            print("📡 🔢 FEEDS LOADED: \(self.podcastFeeds.count) feeds in memory")
+            
+            // Create a map of CloudKit feed orders
+            let cloudKitOrderMap = Dictionary(uniqueKeysWithValues: cloudKitFeeds.map { ($0.url, $0.order) })
+            
+            print("📡 🔢 RESTORING ORDER FROM CLOUDKIT (loadFreshInstallPodcastData):")
+            for cloudFeed in cloudKitFeeds {
+                print("📡 🔢 CloudKit: \(cloudFeed.title) - order: \(cloudFeed.order)")
+            }
+            
+            // Update order for all feeds based on CloudKit data
+            for index in self.podcastFeeds.indices {
+                let feed = self.podcastFeeds[index]
+                if let cloudKitOrder = cloudKitOrderMap[feed.url] {
+                    self.podcastFeeds[index].order = cloudKitOrder
+                    print("📡 🔢 RESTORED: \(feed.title) - order: \(cloudKitOrder)")
+                }
+            }
+            
+            print("📡 🔢 SAVING FINAL ORDER TO COREDATA:")
+            for (index, feed) in self.podcastFeeds.enumerated() {
+                print("📡 🔢 Final Feed [\(index)]: \(feed.title) - order: \(feed.order)")
+            }
+            self.saveFeedsToCoreData()
+            print("✅ Saved feeds with correct order to CoreData")
+        }
+        
         // CRITICAL: Clear episode cache and reload feeds from Core Data AFTER all RSS processing and cleanup
         await episodeManager.clearAllCache()
         
@@ -7181,6 +7221,12 @@ class PodcastViewModel: ObservableObject {
     private func processFreshInstallFeeds(_ cloudKitFeeds: [PodcastFeed]) async {
         print("🚀 Processing \(cloudKitFeeds.count) feeds for fresh install")
         
+        // Log the order of feeds from CloudKit
+        print("📡 🔢 CLOUDKIT FEED ORDER:")
+        for (index, feed) in cloudKitFeeds.enumerated() {
+            print("📡 🔢 CloudKit Feed [\(index)]: \(feed.title) - order property: \(feed.order)")
+        }
+        
         await MainActor.run {
             self.isLoading = true
         }
@@ -7188,6 +7234,12 @@ class PodcastViewModel: ObservableObject {
         // Remove duplicates from CloudKit feeds before processing
         let uniqueFeeds = removeDuplicateFeeds(cloudKitFeeds)
         print("📊 Removed \(cloudKitFeeds.count - uniqueFeeds.count) duplicate feeds from CloudKit data")
+        
+        // Log the order after deduplication
+        print("📡 🔢 AFTER DEDUPLICATION:")
+        for (index, feed) in uniqueFeeds.enumerated() {
+            print("📡 🔢 Unique Feed [\(index)]: \(feed.title) - order property: \(feed.order)")
+        }
         
         // Check what feeds already exist in Core Data to prevent duplicate processing
         let existingFeedUrls = await getExistingFeedUrls()
@@ -7225,7 +7277,7 @@ class PodcastViewModel: ObservableObject {
                 for feed in batch {
                     group.addTask {
                         do {
-                            print("📡 Processing feed: \(feed.title)")
+                            print("📡 Processing feed: \(feed.title) with order: \(feed.order)")
                             
                             // Use FeedManager to properly add feed with RSS parsing
                             guard let url = URL(string: feed.url) else {
@@ -7236,10 +7288,18 @@ class PodcastViewModel: ObservableObject {
                             let addedFeed = try await self.feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false)
                             print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
                             
+                            // CRITICAL: Preserve the order from CloudKit
+                            await MainActor.run {
+                                if let index = self.podcastFeeds.firstIndex(where: { $0.id == addedFeed.id }) {
+                                    self.podcastFeeds[index].order = feed.order
+                                    print("📡 🔢 PRESERVED ORDER: Set \(addedFeed.title) order to \(feed.order)")
+                                }
+                            }
+                            
                         } catch {
                             print("❌ Failed to process feed \(feed.title): \(error)")
                             
-                            // Save feed without episodes if RSS parsing fails
+                            // Save feed without episodes if RSS parsing fails (preserving order)
                             try? await self.saveFeedToCoreData(feed)
                         }
                     }
@@ -7262,6 +7322,33 @@ class PodcastViewModel: ObservableObject {
         
         // Clean up any duplicates that might have been created
         await cleanupDuplicateFeeds()
+        
+        // CRITICAL: Restore correct order from CloudKit feeds before saving to CoreData
+        await MainActor.run {
+            // Create a map of CloudKit feed orders
+            let cloudKitOrderMap = Dictionary(uniqueKeysWithValues: cloudKitFeeds.map { ($0.url, $0.order) })
+            
+            print("📡 🔢 RESTORING ORDER FROM CLOUDKIT:")
+            for cloudFeed in cloudKitFeeds {
+                print("📡 🔢 CloudKit: \(cloudFeed.title) - order: \(cloudFeed.order)")
+            }
+            
+            // Update order for all feeds based on CloudKit data
+            for index in self.podcastFeeds.indices {
+                let feed = self.podcastFeeds[index]
+                if let cloudKitOrder = cloudKitOrderMap[feed.url] {
+                    self.podcastFeeds[index].order = cloudKitOrder
+                    print("📡 🔢 RESTORED: \(feed.title) - order: \(cloudKitOrder)")
+                }
+            }
+            
+            print("📡 🔢 SAVING FINAL ORDER TO COREDATA:")
+            for (index, feed) in self.podcastFeeds.enumerated() {
+                print("📡 🔢 Final Feed [\(index)]: \(feed.title) - order: \(feed.order)")
+            }
+            self.saveFeedsToCoreData()
+            print("✅ Saved feeds with correct order to CoreData")
+        }
         
         // CRITICAL: Clear episode cache and reload feeds from Core Data AFTER all RSS processing and cleanup
         await episodeManager.clearAllCache()
@@ -9039,8 +9126,10 @@ extension PodcastViewModel {
     @available(*, deprecated, message: "Use new feed management")
     func updatePodcastFeed(_ feed: PodcastFeed) {
         print("📡 PodcastViewModel - Before update:")
+        var oldURL: String? = nil
         if let existingFeed = podcastFeeds.first(where: { $0.id == feed.id }) {
             print("📡   Existing - Title: '\(existingFeed.title)', URL: '\(existingFeed.url)'")
+            oldURL = existingFeed.url
         }
         print("📡   New - Title: '\(feed.title)', URL: '\(feed.url)'")
         
@@ -9064,7 +9153,8 @@ extension PodcastViewModel {
         // Save to CloudKit in background
         Task {
             do {
-                try await cloudKitManager.savePodcastFeedToCloudKit(feed)
+                // Pass old URL to CloudKit manager so it can find and update the old record
+                try await cloudKitManager.savePodcastFeedToCloudKit(feed, oldURL: oldURL)
                 print("☁️ Successfully saved podcast feed to CloudKit: \(feed.title)")
             } catch {
                 print("❌ Failed to save podcast feed to CloudKit: \(error)")
@@ -9084,6 +9174,7 @@ extension PodcastViewModel {
     /// For PodcastListView compatibility
     @available(*, deprecated, message: "Use new feed management")
     func sortFeedsAlphabetically() {
+        print("📡 🔄 PODCAST SORT: Starting alphabetical sort...")
         isAscendingSort.toggle()
         
         podcastFeeds.sort { feed1, feed2 in
@@ -9097,8 +9188,27 @@ extension PodcastViewModel {
         // Update feed order to match sorted feeds
         podcastFeedOrder = podcastFeeds.map { $0.id }
         
+        // Update order property for each feed
+        for (index, feed) in podcastFeeds.enumerated() {
+            if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
+                podcastFeeds[feedIndex].order = index
+                print("📡 🔢 PODCAST SORT: \(feed.title) - new order: \(index)")
+            }
+        }
+        
         // SORTING FIX: Save the sorted order to Core Data to persist the changes
         saveFeedsToCoreData()
+        
+        // Save to UserDefaults
+        UserDefaults.standard.set(podcastFeedOrder, forKey: "PodcastFeedOrder")
+        UserDefaults.standard.synchronize()
+        print("📡 💾 PODCAST SORT: Saved feed order to UserDefaults for \(podcastFeeds.count) feeds")
+        
+        // Sync to CloudKit
+        print("📡 ☁️ PODCAST SORT: Starting CloudKit sync...")
+        Task {
+            await syncPodcastFeedOrderToCloudKit()
+        }
         
         // Notify CarPlay immediately about podcast feed order change
         NotificationCenter.default.post(
@@ -9112,11 +9222,12 @@ extension PodcastViewModel {
         
         // CRITICAL: Trigger UI refresh to show the sorted order immediately
         objectWillChange.send()
-        print("🎯 SORTING: Applied \(isAscendingSort ? "A-Z" : "Z-A") sort and triggered UI refresh")
+        print("🎯 PODCAST SORT: Applied \(isAscendingSort ? "A-Z" : "Z-A") sort and triggered UI refresh")
     }
     
     /// Update podcast feed order manually and notify CarPlay immediately
     func updatePodcastFeedOrder(_ newOrder: [String]) {
+        print("📡 🔄 PODCAST DRAG AND DROP: Starting updatePodcastFeedOrder with \(newOrder.count) feeds")
         podcastFeedOrder = newOrder
         
         // Reorder the podcastFeeds array to match the new order
@@ -9139,8 +9250,28 @@ extension PodcastViewModel {
         
         podcastFeeds = reorderedFeeds
         
+        // Update order property for each feed
+        for (index, feed) in podcastFeeds.enumerated() {
+            if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
+                let oldOrder = podcastFeeds[feedIndex].order
+                podcastFeeds[feedIndex].order = index
+                print("📡 🔢 PODCAST DRAG AND DROP: \(feed.title) - old order: \(oldOrder), new order: \(index)")
+            }
+        }
+        
         // Save the new order to Core Data
         saveFeedsToCoreData()
+        
+        // Save to UserDefaults
+        UserDefaults.standard.set(podcastFeedOrder, forKey: "PodcastFeedOrder")
+        UserDefaults.standard.synchronize()
+        print("📡 💾 PODCAST DRAG AND DROP: Saved feed order to UserDefaults for \(podcastFeeds.count) feeds")
+        
+        // Sync to CloudKit
+        print("📡 ☁️ PODCAST DRAG AND DROP: Starting CloudKit sync...")
+        Task {
+            await syncPodcastFeedOrderToCloudKit()
+        }
         
         // Notify CarPlay immediately about podcast feed order change
         NotificationCenter.default.post(
@@ -9149,7 +9280,54 @@ extension PodcastViewModel {
             userInfo: ["newOrder": podcastFeedOrder]
         )
         
-        print("🎙️ Updated podcast feed order and notified CarPlay")
+        print("🎙️ PODCAST DRAG AND DROP: Updated podcast feed order and notified CarPlay")
+    }
+    
+    /// Sync podcast feed order to CloudKit
+    func syncPodcastFeedOrderToCloudKit() async {
+        print("📡 🚨 PODCAST FEED ORDER SYNC: Starting batch feed order sync to CloudKit...")
+        
+        guard !podcastFeeds.isEmpty else {
+            print("📡 ⚠️ PODCAST FEED ORDER SYNC: No feeds to sync")
+            return
+        }
+        
+        // Update DataSyncManager to show we're starting a save operation
+        await MainActor.run {
+            DataSyncManager.shared.podcastFeedsStatus = .inProgress
+            DataSyncManager.shared.podcastFeedsOperation = "Saving podcast feeds to iCloud"
+            DataSyncManager.shared.podcastFeedsProgress = 0.0
+            DataSyncManager.shared.podcastFeedsTotalCount = podcastFeeds.count
+            DataSyncManager.shared.podcastFeedsCurrentCount = 0
+        }
+        
+        // Save each feed to CloudKit
+        var savedCount = 0
+        for (index, feed) in podcastFeeds.enumerated() {
+            do {
+                try await cloudKitManager.savePodcastFeedToCloudKit(feed)
+                savedCount += 1
+                
+                await MainActor.run {
+                    DataSyncManager.shared.podcastFeedsProgress = Double(savedCount) / Double(podcastFeeds.count)
+                    DataSyncManager.shared.podcastFeedsCurrentCount = savedCount
+                    DataSyncManager.shared.podcastFeedsOperation = "Saved \(savedCount)/\(podcastFeeds.count) feeds to iCloud"
+                }
+                
+                print("📡 ✅ PODCAST FEED ORDER SYNC: Saved \(feed.title) (order: \(index))")
+            } catch {
+                print("📡 ❌ PODCAST FEED ORDER SYNC: Failed to save \(feed.title): \(error)")
+            }
+        }
+        
+        // Mark operation as completed
+        await MainActor.run {
+            DataSyncManager.shared.podcastFeedsStatus = .completed
+            DataSyncManager.shared.podcastFeedsOperation = "Saved \(savedCount) feeds to CloudKit"
+            DataSyncManager.shared.podcastFeedsProgress = 1.0
+        }
+        
+        print("📡 ✅ PODCAST FEED ORDER SYNC: Successfully synced \(savedCount) feeds to CloudKit")
     }
     
     /// Load sorting preferences from UserDefaults
@@ -9367,7 +9545,7 @@ extension PodcastViewModel {
                     existingFeed.descriptionText = feed.descriptionText
                     existingFeed.iconData = feed.iconData
                     existingFeed.imageData = feed.imageData
-                    existingFeed.sortOrder = Int16(index)
+                    existingFeed.sortOrder = Int16(feed.order)  // Use feed.order instead of index
                 } else {
                     // Create new feed if it doesn't exist
                     let newFeed = FeedModel(context: context)
@@ -9378,7 +9556,7 @@ extension PodcastViewModel {
                     newFeed.descriptionText = feed.descriptionText
                     newFeed.iconData = feed.iconData
                     newFeed.imageData = feed.imageData
-                    newFeed.sortOrder = Int16(index)
+                    newFeed.sortOrder = Int16(feed.order)  // Use feed.order instead of index
                 }
             }
             
@@ -9486,16 +9664,24 @@ extension PodcastViewModel {
                     description: feedModel.descriptionText,
                     iconData: feedModel.iconData,
                     imageData: feedModel.imageData,
-                    episodes: episodes
+                    episodes: episodes,
+                    order: Int(feedModel.sortOrder)  // Load order from CoreData
                 )
                 loadedFeeds.append(feed)
             }
             
             // CRITICAL: Assign to @Published properties on main thread to trigger UI updates
             Task { @MainActor in
+                // Sort feeds by order property to ensure correct display order
+                let sortedFeeds = loadedFeeds.sorted { $0.order < $1.order }
+                print("📡 🔢 SORTED FEEDS BY ORDER:")
+                for (index, feed) in sortedFeeds.enumerated() {
+                    print("📡 🔢 Sorted Feed [\(index)]: \(feed.title) - order: \(feed.order)")
+                }
+                
                 // Batch property updates to prevent multiple UI refreshes
-                self.podcastFeeds = loadedFeeds
-                self.podcastFeedOrder = loadedFeeds.map { $0.id }
+                self.podcastFeeds = sortedFeeds
+                self.podcastFeedOrder = sortedFeeds.map { $0.id }
                 
                 // 🛡️ CRITICAL: Register all feeds with FeedIsolationManager immediately after loading
                 for feed in loadedFeeds {
@@ -9825,6 +10011,8 @@ extension PodcastViewModel {
     
     /// Move feed order (following radio station pattern)
     func movePodcastFeed(from source: IndexSet, to destination: Int) {
+        print("📡 🔄 PODCAST DRAG AND DROP: Starting movePodcastFeed - source: \(source), destination: \(destination)")
+        
         podcastFeedOrder.move(fromOffsets: source, toOffset: destination)
         
         // Reorder the actual feeds array to match
@@ -9836,8 +10024,28 @@ extension PodcastViewModel {
         }
         podcastFeeds = reorderedFeeds
         
+        // Update order property for each feed
+        for (index, feed) in podcastFeeds.enumerated() {
+            if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
+                let oldOrder = podcastFeeds[feedIndex].order
+                podcastFeeds[feedIndex].order = index
+                print("📡 🔢 PODCAST DRAG AND DROP: \(feed.title) - old order: \(oldOrder), new order: \(index)")
+            }
+        }
+        
         // Save the new order to Core Data
         saveFeedsToCoreData()
+        
+        // Save to UserDefaults
+        UserDefaults.standard.set(podcastFeedOrder, forKey: "PodcastFeedOrder")
+        UserDefaults.standard.synchronize()
+        print("📡 💾 PODCAST DRAG AND DROP: Saved feed order to UserDefaults for \(podcastFeeds.count) feeds")
+        
+        // Sync to CloudKit
+        print("📡 ☁️ PODCAST DRAG AND DROP: Starting CloudKit sync...")
+        Task {
+            await syncPodcastFeedOrderToCloudKit()
+        }
         
         // Notify CarPlay immediately about podcast feed order change
         NotificationCenter.default.post(
@@ -9849,7 +10057,7 @@ extension PodcastViewModel {
             ]
         )
         
-        print("🎙️ Moved podcast feed and notified CarPlay of new order")
+        print("🎙️ PODCAST DRAG AND DROP: Moved podcast feed and notified CarPlay of new order")
     }
     
     /// Clear all episode states from EpisodeStateManager during bulk deletion

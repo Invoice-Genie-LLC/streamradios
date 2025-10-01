@@ -126,6 +126,7 @@ class DataStore {
                     let artworkUrl = record["artworkUrl"] as? String
                     let iconData = self.retrieveImageData(from: record, forKey: "iconData")
                     let imageData = self.retrieveImageData(from: record, forKey: "image")
+                    let order = record["order"] as? Int ?? 0
                     
                     return PodcastFeed(
                         id: record.recordID.recordName,
@@ -133,11 +134,15 @@ class DataStore {
                         url: url,
                         artworkUrl: artworkUrl,
                         iconData: iconData?.base64EncodedString(),
-                        imageData: imageData
+                        imageData: imageData,
+                        order: order
                     )
                 }
-                print("Fetched \(feeds.count) podcast feeds from CloudKit.")
-                completion(feeds, nil)
+                
+                // Sort feeds by order before returning
+                let sortedFeeds = feeds.sorted { $0.order < $1.order }
+                print("Fetched \(sortedFeeds.count) podcast feeds from CloudKit (sorted by order)")
+                completion(sortedFeeds, nil)
             }
         }
     
