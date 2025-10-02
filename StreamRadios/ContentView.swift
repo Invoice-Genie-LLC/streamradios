@@ -1086,7 +1086,7 @@ struct CompactPlayerView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 
-                // Tappable text area for opening player sheet
+                // Tappable text area for opening player sheet - expanded to fill space
                 Button(action: {
                     print("📝 Text area tapped - OPENING player sheet")
                     isPlayerSheetPresented.toggle()
@@ -1125,10 +1125,11 @@ struct CompactPlayerView: View {
                             connectionStatusView
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, 12) // Add spacing from play button
+                    .contentShape(Rectangle()) // Make entire area tappable
                 }
                 .buttonStyle(PlainButtonStyle())
-                
-                Spacer()
                 
                 // Essential controls only - just play/pause button
                 Button(action: {
