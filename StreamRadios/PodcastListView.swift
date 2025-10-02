@@ -1927,11 +1927,7 @@ struct EpisodeRowView: View {
                 VStack(alignment: .center, spacing: 8) {
                     // Bookmark button
                     Button(action: {
-                        if isPlaying {
-                            showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
-                        } else {
-                            viewModel.toggleFavorite(for: episode)
-                        }
+                        viewModel.toggleFavorite(for: episode)
                     }) {
                         Image(systemName: currentEpisode.state.isFavorite ? "bookmark.fill" : "bookmark")
                             .foregroundColor(currentEpisode.state.isFavorite ? .blue : .adaptiveSecondaryText)
@@ -1943,11 +1939,7 @@ struct EpisodeRowView: View {
                         if viewModel.currentTab == 2 && currentEpisode.state.isDownloaded {
                             // Downloads tab: Show trash can for downloaded episodes
                             Button(action: {
-                                if isPlaying {
-                                    showBannerAlert(message: "You can't delete downloads while the episode is playing.")
-                                } else {
-                                    showingDeleteConfirmation = true
-                                }
+                                showingDeleteConfirmation = true
                             }) {
                                 Image(systemName: "trash")
                                     .foregroundColor(.red)
@@ -2115,9 +2107,7 @@ struct EpisodeRowView: View {
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
             
-            if isPlaying {
-                showBannerAlert(message: "You can't download episodes while playing.")
-            } else if !episode.state.isDownloaded && !isDownloading {
+            if !episode.state.isDownloaded && !isDownloading {
                 // Check subscription for download feature
                 if !subscriptionManager.isSubscribedOrInTrial {
                     showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
@@ -2734,11 +2724,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             VStack(alignment: .center, spacing: 8) {
                 // Bookmark button
                 Button(action: {
-                    if isPlaying {
-                        showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
-                    } else {
-                        viewModel.toggleFavorite(for: episode)
-                    }
+                    viewModel.toggleFavorite(for: episode)
                 }) {
                     Image(systemName: currentEpisode.state.isFavorite ? "bookmark.fill" : "bookmark")
                         .foregroundColor(currentEpisode.state.isFavorite ? .blue : .adaptiveSecondaryText)
@@ -2750,11 +2736,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     if viewModel.currentTab == 2 && currentEpisode.state.isDownloaded {
                         // Downloads tab: Show trash can for downloaded episodes
                         Button(action: {
-                            if isPlaying {
-                                showBannerAlert(message: "You can't delete downloads while the episode is playing.")
-                            } else {
-                                showingDeleteConfirmation = true
-                            }
+                            showingDeleteConfirmation = true
                         }) {
                             Image(systemName: "trash")
                                 .foregroundColor(.red)
@@ -2876,9 +2858,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
             
-            if isPlaying {
-                showBannerAlert(message: "You can't download episodes while playing.")
-            } else if !episode.state.isDownloaded && !isDownloading {
+            if !episode.state.isDownloaded && !isDownloading {
                 // Check subscription for download feature
                 if !subscriptionManager.isSubscribedOrInTrial {
                     showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
