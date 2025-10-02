@@ -2542,7 +2542,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func toggleFavorite(for station: RadioStation) {
-        if let index = stations.firstIndex(of: station), !isStationCurrentlyPlaying(stations[index]) {
+        if let index = stations.firstIndex(of: station) {
             var updatedStation = stations[index]
             updatedStation.isFavorite.toggle()
             

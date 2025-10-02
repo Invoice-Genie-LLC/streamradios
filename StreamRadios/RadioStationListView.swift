@@ -1180,24 +1180,12 @@ struct RadioStationListView: View {
     }
     
     private func handleFavoriteButtonTap(for station: RadioStation) {
-        print("🔄 Favorite button tapped for: \(station.name), isCurrentlyPlaying: \(viewModel.isStationCurrentlyPlaying(station))")
-        
-        if viewModel.isStationCurrentlyPlaying(station) {
-            print("⚠️ Station is actively playing, showing error")
-            withAnimation(.easeIn(duration: 0.3)) {
-                showFavoriteError = true
-            }
-            UIDevice.playHapticFeedback()
-        } else {
-            print("❤️ Toggling favorite for: \(station.name)")
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                viewModel.toggleFavorite(for: station)
-            }
-            viewModel.saveStationsToCoreData()
+        print("❤️ Toggling favorite for: \(station.name)")
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+            viewModel.toggleFavorite(for: station)
         }
+        viewModel.saveStationsToCoreData()
     }
-    
-
     
     private var filteredStations: [RadioStation] {
         // Only filter for radio tab
