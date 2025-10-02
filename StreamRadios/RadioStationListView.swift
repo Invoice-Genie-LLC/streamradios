@@ -615,7 +615,13 @@ struct RadioStationListView: View {
                 }
             }
         }
-        .onChange(of: selectedSubTab) { _, _ in
+        .onChange(of: selectedSubTab) { oldValue, newValue in
+            // CRITICAL: Disable editing mode when switching away from Favorites tab
+            if isEditing && newValue != .favorites {
+                print("🔄 Tab switched from \(oldValue.title) to \(newValue.title) - disabling edit mode")
+                isEditing = false
+            }
+            
             if !isEditing {
                 DispatchQueue.main.async {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
