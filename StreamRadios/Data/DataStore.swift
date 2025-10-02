@@ -663,11 +663,59 @@ class DataStore {
         }
     }
 
-    // Save stations to CloudKit - replaces all existing stations
+    // Save stations to CloudKit - with duplicate prevention by URL
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
-        // During import, we want to force save all stations regardless of existing ones
-        // This ensures fresh data replaces any potentially stale CloudKit records
-        processAllStations(stations, completion: completion)
+        print("📡 🔍 FRESH INSTALL: Checking for existing stations before saving \(stations.count) stations to CloudKit")
+        
+        // Fetch existing station URLs to prevent duplicates
+        fetchExistingStationURLs { existingURLs, error in
+            guard error == nil else {
+                print("⚠️ Error fetching existing station URLs, proceeding with save anyway: \(error?.localizedDescription ?? "Unknown error")")
+                self.processAllStations(stations, completion: completion)
+                return
+            }
+            
+            print("📡 🔍 FRESH INSTALL: Found \(existingURLs.count) existing station URLs in CloudKit")
+            
+            // Filter out stations that already exist by URL
+            let newStations = stations.filter { station in
+                // Normalize URLs for comparison
+                let normalizedURL = station.url.lowercased()
+                let normalizedExistingURLs = existingURLs.map { $0.lowercased() }
+                
+                // Also check for protocol variations (http vs https)
+                let urlWithoutProtocol = normalizedURL
+                    .replacingOccurrences(of: "https://", with: "")
+                    .replacingOccurrences(of: "http://", with: "")
+                
+                let hasURLDuplicate = normalizedExistingURLs.contains(normalizedURL) ||
+                                    normalizedExistingURLs.contains { existingURL in
+                                        let existingWithoutProtocol = existingURL
+                                            .replacingOccurrences(of: "https://", with: "")
+                                            .replacingOccurrences(of: "http://", with: "")
+                                        return existingWithoutProtocol == urlWithoutProtocol
+                                    }
+                
+                if hasURLDuplicate {
+                    print("📻 🚫 FRESH INSTALL DUPLICATE: Station \(station.name) (URL: \(station.url)) already exists in CloudKit, skipping")
+                    return false
+                }
+                
+                return true
+            }
+            
+            let duplicatesFiltered = stations.count - newStations.count
+            print("📡 📊 FRESH INSTALL SUMMARY: Filtered \(duplicatesFiltered) duplicate stations, will save \(newStations.count) new stations")
+            
+            if newStations.isEmpty {
+                print("📡 ✅ FRESH INSTALL: All \(stations.count) stations already exist in CloudKit (duplicates prevented)")
+                completion(true, [])
+                return
+            }
+            
+            print("📡 🆕 FRESH INSTALL: Saving \(newStations.count) unique new stations to CloudKit")
+            self.processAllStations(newStations, completion: completion)
+        }
     }
     
     // Original method for incremental saves (used elsewhere)
