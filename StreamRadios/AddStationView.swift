@@ -159,7 +159,6 @@ struct AddStationView: View {
                 Button("Cancel") {
                     presentedSheet = nil
                 }
-                .font(.body)
                 .foregroundColor(.blue)
                 
                 Spacer()
@@ -173,7 +172,6 @@ struct AddStationView: View {
                 Button("Add") {
                     saveStation()
                 }
-                .font(.body)
                 .foregroundColor(.blue)
             }
             .padding(.horizontal, 20)

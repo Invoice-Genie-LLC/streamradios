@@ -911,6 +911,8 @@ struct PodcastPlayerSheetView: View {
     
     private func deleteDownload() {
         print("🗑️ Starting download deletion for episode: \(episode.title)")
+        print("🗑️ Episode ID: \(episode.id)")
+        print("🗑️ Current download state: \(EpisodeStateManager.shared.isDownloaded(episode.id))")
         
         // Clear any download progress state immediately on main thread
         viewModel.downloadProgress.removeValue(forKey: episode.id)
@@ -918,13 +920,20 @@ struct PodcastPlayerSheetView: View {
         
         // Delete the download
         viewModel.toggleDownload(for: episode)
+        print("🗑️ Called toggleDownload on viewModel")
         
         // Force immediate UI refresh
         refreshTrigger.toggle()
         print("🔄 Immediate UI refresh triggered after download deletion")
         
+        // Force view update
+        DispatchQueue.main.async {
+            self.refreshTrigger.toggle()
+            print("🔄 Second UI refresh on main thread")
+        }
+        
         // Verify state and do additional refresh if needed
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             let currentDownloadState = EpisodeStateManager.shared.isDownloaded(self.episode.id)
             let hasProgress = self.viewModel.downloadProgress[self.episode.id] != nil
             
@@ -932,9 +941,21 @@ struct PodcastPlayerSheetView: View {
             
             // If there's still inconsistent state, force another refresh
             if currentDownloadState || hasProgress {
-                print("⚠️ Inconsistent state detected, forcing additional refresh")
+                print("⚠️ Inconsistent state detected after 0.3s, forcing additional refresh")
                 self.viewModel.downloadProgress.removeValue(forKey: self.episode.id)
                 self.refreshTrigger.toggle()
+                
+                // Force update the episode state directly
+                EpisodeStateManager.shared.setDownloaded(self.episode.id, isDownloaded: false)
+                print("🗑️ Forced download state to false in EpisodeStateManager")
+                
+                // One more refresh to ensure UI updates
+                DispatchQueue.main.async {
+                    self.refreshTrigger.toggle()
+                    print("🔄 Final UI refresh after forced state update")
+                }
+            } else {
+                print("✅ Download successfully deleted and state is consistent")
             }
         }
     }
