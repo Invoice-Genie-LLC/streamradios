@@ -72,19 +72,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     /// Load podcast data directly from Core Data for CarPlay
+  
     private func loadPodcastDataFromCoreData() async {
-        os_log("🚗 CarPlay: Loading podcast data from Core Data", log: log, type: .info)
-        
-        // ADDITIONAL SAFETY CHECK: Double-check if podcast is playing before proceeding
-        let podcastPlayer = PodcastPlayer.shared
-        let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
-        let hasUserIntent = podcastPlayer.userWantsToPlay
-        let isActivePlayer = PlaybackManager.shared.activePlayer == .podcast
-        
-        if isPodcastPlaying || (hasUserIntent && podcastPlayer.currentEpisode != nil && isActivePlayer) {
-            os_log("🚗 CarPlay: Aborting loadPodcastDataFromCoreData - podcast is playing or has active session", log: log, type: .info)
-            return
-        }
+        os_log("🚗 CarPlay: Loading podcast data from Core Data (independent mode)", log: log, type: .info)
+        print("🚗 CarPlay: Loading podcast feeds independently from Core Data...")
         
         // Use the main context and perform operations on its queue to avoid threading issues
         let context = CoreDataStack.shared.context
@@ -139,51 +130,30 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         await MainActor.run {
             // Get the feed order from PodcastViewModel to maintain consistency
             let feedOrder = PodcastViewModel.shared.podcastFeedOrder
-            CarPlayManager.shared.configurePodcastData(podcastFeeds, feedOrder: feedOrder)
-            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, podcastFeeds.count)
-            print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds in order")
             
-            // DEBUGGING: Force immediate template refresh if we have feeds
-            if !podcastFeeds.isEmpty {
-                print("🚗 CarPlay: DEBUG - Podcast feeds loaded, forcing immediate template refresh")
-                
-                // Force refresh the podcast tab template
-                self.refreshPodcastTabTemplate()
-                
-                // Force refresh current template if needed
-                self.refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
-                
-                print("🚗 CarPlay: DEBUG - Template refresh completed")
-            } else {
-                print("🚗 CarPlay: DEBUG - No podcast feeds found in Core Data")
-                
-                // Try to trigger PodcastViewModel to load data if no feeds found (only if safe to do so)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    // CRITICAL FIX: Don't reload if podcast is playing to prevent episode restart
-                    let podcastPlayer = PodcastPlayer.shared
-                    let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
-                    let hasUserIntent = podcastPlayer.userWantsToPlay
-                    let isActivePlayer = PlaybackManager.shared.activePlayer == .podcast
-                    
-                    if !isPodcastPlaying && !(hasUserIntent && podcastPlayer.currentEpisode != nil && isActivePlayer) {
-                        print("🚗 CarPlay: DEBUG - Attempting to trigger PodcastViewModel data load")
-                        PodcastViewModel.shared.loadFeedsFromCoreData()
-                    } else {
-                        print("🚗 CarPlay: DEBUG - Skipping PodcastViewModel data load - podcast is playing or has active session")
-                    }
-                    
-                    // Re-check after a delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        let updatedFeeds = PodcastViewModel.shared.podcastFeeds
-                        let feedOrder = PodcastViewModel.shared.podcastFeedOrder
-                        print("🚗 CarPlay: DEBUG - After PodcastViewModel load: \(updatedFeeds.count) feeds")
-                        if !updatedFeeds.isEmpty {
-                            CarPlayManager.shared.configurePodcastData(updatedFeeds, feedOrder: feedOrder)
-                            self.refreshPodcastTabTemplate()
-                        }
-                    }
+            // CRITICAL FIX: Sync maxEpisodes from PodcastViewModel to ensure episode limits are respected
+            var feedsWithLimits = podcastFeeds
+            for i in 0..<feedsWithLimits.count {
+                let feedId = feedsWithLimits[i].id
+                if let viewModelFeed = PodcastViewModel.shared.podcastFeeds.first(where: { $0.id == feedId }),
+                   let maxEpisodes = viewModelFeed.maxEpisodes {
+                    feedsWithLimits[i].maxEpisodes = maxEpisodes
+                    os_log("🚗 CarPlay: Synced maxEpisodes=%d for feed '%@'", log: self.log, type: .debug, maxEpisodes, feedsWithLimits[i].title)
                 }
             }
+            
+            CarPlayManager.shared.configurePodcastData(feedsWithLimits, feedOrder: feedOrder)
+            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, feedsWithLimits.count)
+            print("🚗 CarPlay: Configured with \(feedsWithLimits.count) podcast feeds in order")
+            
+            // CRITICAL FIX: Always refresh templates when feeds are loaded
+            print("🚗 CarPlay: Refreshing CarPlay templates with loaded podcast feeds")
+            self.refreshPodcastTabTemplate()
+            
+            // Also refresh current template if we're viewing a podcast
+            self.refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+            
+            print("🚗 CarPlay: Podcast data loading completed with \(podcastFeeds.count) feeds")
         }
     }
     
@@ -1387,6 +1357,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         print("🚗 CarPlay: Creating Podcast tab - DEBUG START")
         
+        // CRITICAL FIX: Ensure podcast data is loaded from Core Data before creating tab
+        // This ensures feeds are available even if the phone app is closed
+        Task {
+            await loadPodcastDataFromCoreData()
+        }
+        
         // Get podcasts from CarPlayManager and order them the same as PodcastListView
         let carPlayManager = CarPlayManager.shared
         let allPodcastFeeds = carPlayManager.getPodcastFeeds()
@@ -1496,8 +1472,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
             
             // PERFORMANCE OPTIMIZATION: Load only initial batch for fast CarPlay response
-            let initialBatchSize = min(50, totalEpisodes) // Load max 50 episodes initially
-            os_log("🚗 CarPlay: Podcast '%@' has %d episodes, loading initial batch of %d for fast response", log: self.log, type: .info, podcast.title, totalEpisodes, initialBatchSize)
+            // CRITICAL FIX: Respect maxEpisodes limit when calculating initial batch size
+            var effectiveTotal = totalEpisodes
+            if let maxEpisodes = podcast.maxEpisodes, maxEpisodes > 0 {
+                effectiveTotal = min(totalEpisodes, maxEpisodes)
+                os_log("🚗 CarPlay: Feed has maxEpisodes limit of %d (total in DB: %d)", log: self.log, type: .info, maxEpisodes, totalEpisodes)
+            }
+            
+            let initialBatchSize = min(50, effectiveTotal) // Load max 50 episodes initially (or maxEpisodes if lower)
+            os_log("🚗 CarPlay: Podcast '%@' loading initial batch of %d episodes (effective total: %d)", log: self.log, type: .info, podcast.title, initialBatchSize, effectiveTotal)
             
             self.loadInitialEpisodesForPodcast(podcast, limit: initialBatchSize) { episodes in
                 var updatedPodcast = podcast
@@ -1647,9 +1630,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             episodeItems.append(item)
         }
         
-        // Add "Load More Episodes" option if there are more episodes to load
-        if loadedCount < totalEpisodes {
-            let remainingCount = totalEpisodes - loadedCount
+        // CRITICAL FIX: Calculate effective maximum episodes respecting maxEpisodes limit
+        let effectiveMaximum: Int
+        if let maxEpisodes = podcast.maxEpisodes, maxEpisodes > 0 {
+            effectiveMaximum = min(totalEpisodes, maxEpisodes)
+            os_log("🚗 CarPlay: Effective maximum episodes: %d (total: %d, limit: %d)", log: self.log, type: .debug, effectiveMaximum, totalEpisodes, maxEpisodes)
+        } else {
+            effectiveMaximum = totalEpisodes
+        }
+        
+        // Add "Load More Episodes" option only if there are more episodes within the limit
+        if loadedCount < effectiveMaximum {
+            let remainingCount = effectiveMaximum - loadedCount
             let loadMoreItem = CPListItem(text: "Load More Episodes",
                                          detailText: "\(remainingCount) more episodes available",
                                          image: UIImage(systemName: "ellipsis.circle"))
@@ -1657,6 +1649,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.loadAllRemainingEpisodes(podcast, completion: completion)
             }
             episodeItems.append(loadMoreItem)
+        } else if let maxEpisodes = podcast.maxEpisodes, maxEpisodes > 0, loadedCount >= maxEpisodes {
+            os_log("🚗 CarPlay: Not showing Load More - reached maxEpisodes limit (%d/%d)", log: self.log, type: .info, loadedCount, maxEpisodes)
         }
         
         // Only add Episodes section if we have remaining episodes or load more option
@@ -3396,13 +3390,29 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 episodeRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
                 episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
                 
+                // CRITICAL FIX: Respect maxEpisodes limit to prevent loading too many episodes
+                if let maxEpisodes = podcastFeed.maxEpisodes, maxEpisodes > 0 {
+                    episodeRequest.fetchLimit = maxEpisodes
+                    os_log("🚗 CarPlay: Applying episode limit of %d for feed '%@'", log: self.log, type: .info, maxEpisodes, podcastFeed.title)
+                }
+                
                 let managedEpisodes = try context.fetch(episodeRequest)
                 
                 // CRITICAL: Ensure EpisodeStateManager is available before conversion
                 // This guarantees episode states work even when main app is closed
                 var episodes: [PodcastEpisode] = []
+                var filteredCount = 0
                 
                 for managedEpisode in managedEpisodes {
+                    // VALIDATION: Skip episodes with invalid data (0 duration, empty title, empty audio URL)
+                    guard managedEpisode.duration > 0,
+                          let title = managedEpisode.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          let audioUrl = managedEpisode.audioUrl, !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        filteredCount += 1
+                        os_log("🚗 CarPlay: FILTERED invalid episode - duration: %.1f, title: '%@'", log: self.log, type: .debug, managedEpisode.duration, managedEpisode.title ?? "nil")
+                        continue
+                    }
+                    
                     // Convert using the standard method which handles EpisodeStateManager access
                     var episode = managedEpisode.toPodcastEpisode()
                     
@@ -3416,7 +3426,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     episodes.append(episode)
                 }
                 
-                os_log("🚗 CarPlay: Successfully loaded %d episodes for podcast '%@' (with fallback support)", log: self.log, type: .info, episodes.count, podcastFeed.title)
+                if filteredCount > 0 {
+                    os_log("🚗 CarPlay: Filtered out %d invalid episodes (0 duration or empty data)", log: self.log, type: .info, filteredCount)
+                }
+                
+                os_log("🚗 CarPlay: Successfully loaded %d valid episodes for podcast '%@' (filtered: %d)", log: self.log, type: .info, episodes.count, podcastFeed.title, filteredCount)
                 
                 DispatchQueue.main.async {
                     completion(episodes)
@@ -3443,15 +3457,35 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 episodeRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
                 episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
-                episodeRequest.fetchLimit = limit
+                
+                // CRITICAL FIX: Respect maxEpisodes limit if it's lower than the requested limit
+                let effectiveLimit: Int
+                if let maxEpisodes = podcastFeed.maxEpisodes, maxEpisodes > 0 {
+                    effectiveLimit = min(limit, maxEpisodes)
+                    os_log("🚗 CarPlay: Applying effective limit of %d (requested: %d, max: %d)", log: self.log, type: .info, effectiveLimit, limit, maxEpisodes)
+                } else {
+                    effectiveLimit = limit
+                }
+                
+                episodeRequest.fetchLimit = effectiveLimit
                 
                 let managedEpisodes = try context.fetch(episodeRequest)
                 
                 // CRITICAL: Ensure EpisodeStateManager is available before conversion
                 // This guarantees episode states work even when main app is closed
                 var episodes: [PodcastEpisode] = []
+                var filteredCount = 0
                 
                 for managedEpisode in managedEpisodes {
+                    // VALIDATION: Skip episodes with invalid data (0 duration, empty title, empty audio URL)
+                    guard managedEpisode.duration > 0,
+                          let title = managedEpisode.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          let audioUrl = managedEpisode.audioUrl, !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        filteredCount += 1
+                        os_log("🚗 CarPlay: FILTERED invalid episode - duration: %.1f, title: '%@'", log: self.log, type: .debug, managedEpisode.duration, managedEpisode.title ?? "nil")
+                        continue
+                    }
+                    
                     // Convert using the standard method which handles EpisodeStateManager access
                     var episode = managedEpisode.toPodcastEpisode()
                     
@@ -3465,7 +3499,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     episodes.append(episode)
                 }
                 
-                os_log("🚗 CarPlay: Successfully loaded initial %d episodes for podcast '%@' (with fallback support)", log: self.log, type: .info, episodes.count, podcastFeed.title)
+                if filteredCount > 0 {
+                    os_log("🚗 CarPlay: Filtered out %d invalid episodes from initial load (0 duration or empty data)", log: self.log, type: .info, filteredCount)
+                }
+                
+                os_log("🚗 CarPlay: Successfully loaded initial %d valid episodes for podcast '%@' (filtered: %d)", log: self.log, type: .info, episodes.count, podcastFeed.title, filteredCount)
                 
                 DispatchQueue.main.async {
                     completion(episodes)
@@ -3483,7 +3521,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
 
     
-    /// Get total episode count from CoreData
+    /// Get total VALID episode count from CoreData (excludes 0-duration and invalid episodes)
+    /// CRITICAL FIX: Only counts episodes that will actually be displayed after validation
     private func getEpisodeCount(for podcastFeed: PodcastFeed, completion: @escaping (Int) -> Void) {
         let context = CoreDataStack.shared.context
         
@@ -3491,12 +3530,36 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             do {
                 let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
-                episodeCountRequest.includesPropertyValues = false
                 
-                let count = try context.count(for: episodeCountRequest)
+                // Apply maxEpisodes limit if set
+                if let maxEpisodes = podcastFeed.maxEpisodes, maxEpisodes > 0 {
+                    episodeCountRequest.fetchLimit = maxEpisodes
+                    episodeCountRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                }
+                
+                // Fetch episodes to validate them (more accurate than simple count)
+                let managedEpisodes = try context.fetch(episodeCountRequest)
+                
+                // Count only valid episodes (same validation as loading)
+                var validCount = 0
+                for managedEpisode in managedEpisodes {
+                    // Apply same validation as loadEpisodesForPodcast
+                    if managedEpisode.duration > 0,
+                       let title = managedEpisode.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       let audioUrl = managedEpisode.audioUrl, !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        validCount += 1
+                    }
+                }
+                
+                let totalCount = managedEpisodes.count
+                let filteredCount = totalCount - validCount
+                
+                if filteredCount > 0 {
+                    os_log("🚗 CarPlay: Episode count for '%@': %d valid (filtered %d invalid)", log: self.log, type: .info, podcastFeed.title, validCount, filteredCount)
+                }
                 
                 DispatchQueue.main.async {
-                    completion(count)
+                    completion(validCount)
                 }
                 
             } catch {
@@ -3509,26 +3572,43 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
-    /// Get total episode count from CoreData synchronously
+    /// Get total VALID episode count from CoreData synchronously (excludes 0-duration and invalid episodes)
+    /// CRITICAL FIX: Only counts episodes that will actually be displayed after validation
     private func getEpisodeCountSync(for podcastFeed: PodcastFeed) -> Int {
         let context = CoreDataStack.shared.context
-        var count = 0
+        var validCount = 0
         
         context.performAndWait {
             do {
                 let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
-                episodeCountRequest.includesPropertyValues = false
                 
-                count = try context.count(for: episodeCountRequest)
+                // Apply maxEpisodes limit if set
+                if let maxEpisodes = podcastFeed.maxEpisodes, maxEpisodes > 0 {
+                    episodeCountRequest.fetchLimit = maxEpisodes
+                    episodeCountRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                }
+                
+                // Fetch episodes to validate them (more accurate than simple count)
+                let managedEpisodes = try context.fetch(episodeCountRequest)
+                
+                // Count only valid episodes (same validation as loading)
+                for managedEpisode in managedEpisodes {
+                    // Apply same validation as loadEpisodesForPodcast
+                    if managedEpisode.duration > 0,
+                       let title = managedEpisode.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       let audioUrl = managedEpisode.audioUrl, !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        validCount += 1
+                    }
+                }
                 
             } catch {
                 os_log("🚗 CarPlay: Error counting episodes for podcast '%@': %@", log: self.log, type: .error, podcastFeed.title, error.localizedDescription)
-                count = 0
+                validCount = 0
             }
         }
         
-        return count
+        return validCount
     }
     
     // MARK: - CarPlay Compliance Validation
