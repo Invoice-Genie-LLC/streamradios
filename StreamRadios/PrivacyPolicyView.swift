@@ -22,10 +22,6 @@ struct PrivacyPolicyView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header Divider
-            Divider()
-                .background(Color.gray.opacity(0.3))
-            
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     // Our Commitment Section
