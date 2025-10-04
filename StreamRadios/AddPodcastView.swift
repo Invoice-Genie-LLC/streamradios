@@ -480,7 +480,7 @@ struct AddPodcastView: View {
                             podcastDetailsCard
                         }
                         .padding(.horizontal, 16)
-                        .padding(.top, 80) // Add padding for custom navigation bar
+                        .padding(.top, 20)
                         .padding(.bottom, 80)
                     }
                     
@@ -495,7 +495,34 @@ struct AddPodcastView: View {
                         }
                 )
             }
-            .navigationBarHidden(true)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(navigationTitle)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.adaptivePrimaryText)
+                }
+                
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        if !isAddingPodcast {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            isPresented = false
+                        }
+                    }
+                    .foregroundColor(isAddingPodcast ? .gray : .blue)
+                    .disabled(isAddingPodcast)
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(actionButtonText) {
+                        validateAndSavePodcast()
+                    }
+                    .foregroundColor(isAddingPodcast ? .gray : .blue)
+                    .disabled(isAddingPodcast)
+                }
+            }
             .onAppear {
                 print("🔧 DEBUG: AddPodcastView onAppear - podcastToEdit: \(podcastToEdit?.title ?? "nil")")
                 print("🔧 DEBUG: AddPodcastView onAppear - current title binding: '\(title)', url binding: '\(url)'")
@@ -542,7 +569,6 @@ struct AddPodcastView: View {
             }
         }
         .background(Color.adaptiveBackground)
-        .overlay(simpleNavigationBar, alignment: .top)
         .overlay(
             Group {
                 if showAlert {
@@ -740,48 +766,6 @@ struct AddPodcastView: View {
         }
     }
     
-    // MARK: - Navigation Bar
-    
-    @ViewBuilder
-    private var simpleNavigationBar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button("Cancel") {
-                    if !isAddingPodcast {
-                        // Dismiss keyboard
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        
-                        isPresented = false
-                    }
-                }
-                .font(.body)
-                .foregroundColor(isAddingPodcast ? .gray : .blue)
-                .disabled(isAddingPodcast)
-                
-                Spacer()
-                
-                Text(navigationTitle)
-                    .font(.headline)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                Spacer()
-                
-                Button(actionButtonText) {
-                    validateAndSavePodcast()
-                }
-                .font(.body)
-                .foregroundColor(isAddingPodcast ? .gray : .blue)
-                .disabled(isAddingPodcast)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 15)
-            .padding(.bottom, 15)
-            .background(Color.adaptiveSecondaryBackground)
-            
-            Divider()
-                .background(Color.adaptiveSeparator)
-        }
-    }
 }
 
 

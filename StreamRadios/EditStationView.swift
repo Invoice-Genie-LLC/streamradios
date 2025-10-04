@@ -56,21 +56,45 @@ struct EditStationView: View {
     }
     
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 40) {
-                        stationIconSection
-                        formFieldsSection
+        NavigationView {
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    ScrollView {
+                        VStack(spacing: 40) {
+                            stationIconSection
+                            formFieldsSection
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 20)
+                        .padding(.bottom, 40)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 80)
-                    .padding(.bottom, 40)
+                }
+                .background(Color.adaptiveSheetBackground.ignoresSafeArea())
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Edit Station")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.adaptivePrimaryText)
+                }
+                
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        activeSheet = nil
+                    }
+                    .foregroundColor(.blue)
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        saveStation()
+                    }
+                    .foregroundColor(.blue)
                 }
             }
-            .background(Color.adaptiveSheetBackground.ignoresSafeArea())
         }
-        .overlay(simpleNavigationBar, alignment: .top)
         .overlay(
             Group {
                 if showAlert {
@@ -118,38 +142,6 @@ struct EditStationView: View {
     }
     
     // MARK: - Simple UI Components
-    
-    @ViewBuilder
-    private var simpleNavigationBar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button("Cancel") {
-                    activeSheet = nil
-                }
-                .foregroundColor(.blue)
-                
-                Spacer()
-                
-                Text("Edit Station")
-                    .font(.headline)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                Spacer()
-                
-                Button("Save") {
-                    saveStation()
-                }
-                .foregroundColor(.blue)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 15)
-            .padding(.bottom, 15)
-            .background(Color.adaptiveSecondaryBackground)
-            
-            Divider()
-                .background(Color.adaptiveSeparator)
-        }
-    }
     
     @ViewBuilder
     private var stationIconSection: some View {

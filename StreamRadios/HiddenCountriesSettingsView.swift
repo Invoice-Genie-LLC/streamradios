@@ -164,44 +164,60 @@ struct HiddenCountriesSettingsView: View {
         .navigationBarBackButtonHidden(false)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 8) {
-                    // Search button
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isSearchPresented.toggle()
+                Group {
+                    if isSearchPresented {
+                        // Cancel button when search is active
+                        Button("Cancel") {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                isSearchPresented = false
+                                searchText = ""
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            }
                         }
-                    }) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.white)
-                            .font(.system(size: 20, weight: .medium))
-                            .frame(width: 32, height: 32)
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    } else {
+                        HStack(spacing: 8) {
+                            // Search button
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    isSearchPresented = true
+                                }
+                            }) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 20, weight: .medium))
+                                    .frame(width: 32, height: 32)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Menu button
+                            Menu {
+                                Button("Hide All") {
+                                    hideAllCountries()
+                                }
+                                
+                                Button("Show All") {
+                                    showAllCountries()
+                                }
+                                
+                                Button("Reset to Default") {
+                                    resetToDefault()
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 20, weight: .medium))
+                                    .frame(width: 32, height: 32)
+                            }
+                            .menuStyle(.borderlessButton)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                       // .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Menu button
-                    Menu {
-                        Button("Hide All") {
-                            hideAllCountries()
-                        }
-                        
-                        Button("Show All") {
-                            showAllCountries()
-                        }
-                        
-                        Button("Reset to Default") {
-                            resetToDefault()
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundColor(.white)
-                            .font(.system(size: 20, weight: .medium))
-                            .frame(width: 32, height: 32)
-                    }
-                    .menuStyle(.borderlessButton)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-               // .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
             }
         }
         .onAppear {

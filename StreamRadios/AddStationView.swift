@@ -76,7 +76,7 @@ struct AddStationView: View {
                                 formFieldsSection
                             }
                             .padding(.horizontal, 24)
-                            .padding(.top, 80)
+                            .padding(.top, 20)
                             .padding(.bottom, keyboardHeight + 60) // Extra padding for keyboard + buffer
                         }
                         .scrollDisabled(false) // Disable automatic scrolling
@@ -94,10 +94,30 @@ struct AddStationView: View {
                     )
                 }
             }
-            .navigationTitle("")
-            .navigationBarHidden(true)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Add Station")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.adaptivePrimaryText)
+                }
+                
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        presentedSheet = nil
+                    }
+                    .foregroundColor(.blue)
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add") {
+                        saveStation()
+                    }
+                    .foregroundColor(.blue)
+                }
+            }
         }
-        .overlay(simpleNavigationBar, alignment: .top)
         .overlay(
             Group {
                 if showAlert {
@@ -151,38 +171,6 @@ struct AddStationView: View {
     }
     
     // MARK: - Simple UI Components
-    
-    @ViewBuilder
-    private var simpleNavigationBar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button("Cancel") {
-                    presentedSheet = nil
-                }
-                .foregroundColor(.blue)
-                
-                Spacer()
-                
-                Text("Add Station")
-                    .font(.headline)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                Spacer()
-                
-                Button("Add") {
-                    saveStation()
-                }
-                .foregroundColor(.blue)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 15)
-            .padding(.bottom, 15)
-            .background(Color.adaptiveSecondaryBackground)
-            
-            Divider()
-                .background(Color.adaptiveSeparator)
-        }
-    }
     
     @ViewBuilder
     private var stationIconSection: some View {

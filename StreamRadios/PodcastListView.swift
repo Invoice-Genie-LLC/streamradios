@@ -413,37 +413,49 @@ struct PodcastListView: View {
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
                        if !isEditing && selectedPodcast == nil {
                            HStack(spacing: 8) {
-                               // Search button
-                               Button(action: {
-                                   withAnimation(.easeInOut(duration: 0.3)) {
-                                       isSearchPresented.toggle()
+                               if isSearchPresented {
+                                   // Cancel button when search is active
+                                   Button("Cancel") {
+                                       withAnimation(.easeInOut(duration: 0.3)) {
+                                           isSearchPresented = false
+                                           searchText = ""
+                                           UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                       }
                                    }
-                               }) {
-                                   Image(systemName: "magnifyingglass")
-                                       .foregroundColor(.white)
-                                       .font(.system(size: 16, weight: .medium))
-                                       .frame(width: 32, height: 32)
-                               }
-                               
-                               // Sort button
-                               Button(action: {
-                                   // Show confirmation alert for podcast sorting
-                                   alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
-                                       viewModel.sortFeedsAlphabetically()
-                                   })
-                               }) {
-                                   Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                       .foregroundColor(.white)
-                                       .font(.system(size: 16, weight: .medium))
-                                       .frame(width: 32, height: 32)
-                               }
-                               
-                               // Plus button
-                               Button(action: { showingSearchPodcasts = true }) {
-                                   Image(systemName: "plus")
-                                       .foregroundColor(.white)
-                                       .font(.system(size: 16, weight: .medium))
-                                       .frame(width: 32, height: 32)
+                                   .foregroundColor(.blue)
+                               } else {
+                                   // Search button
+                                   Button(action: {
+                                       withAnimation(.easeInOut(duration: 0.3)) {
+                                           isSearchPresented = true
+                                       }
+                                   }) {
+                                       Image(systemName: "magnifyingglass")
+                                           .foregroundColor(.white)
+                                           .font(.system(size: 16, weight: .medium))
+                                           .frame(width: 32, height: 32)
+                                   }
+                                   
+                                   // Sort button
+                                   Button(action: {
+                                       // Show confirmation alert for podcast sorting
+                                       alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
+                                           viewModel.sortFeedsAlphabetically()
+                                       })
+                                   }) {
+                                       Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                           .foregroundColor(.white)
+                                           .font(.system(size: 16, weight: .medium))
+                                           .frame(width: 32, height: 32)
+                                   }
+                                   
+                                   // Plus button
+                                   Button(action: { showingSearchPodcasts = true }) {
+                                       Image(systemName: "plus")
+                                           .foregroundColor(.white)
+                                           .font(.system(size: 16, weight: .medium))
+                                           .frame(width: 32, height: 32)
+                                   }
                                }
                            }
                        }
@@ -1377,58 +1389,44 @@ struct CustomSearchBar: View {
     }
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Search field with icons
-            HStack(spacing: 8) {
-                // Magnifying glass icon
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(iconColor)
-                    .font(.system(size: 16, weight: .medium))
-                
-                // Text field
-                TextField(placeholder, text: $searchText)
-                    .font(.system(size: 16))
-                    .foregroundColor(textColor)
-                    .focused($isTextFieldFocused)
-                    .submitLabel(.search)
-                    .onChange(of: searchText) { _, newValue in
-                        // Limit search text and trigger episode search
-                        let limitedText = String(newValue.prefix(100))
-                        if limitedText != searchText {
-                            searchText = limitedText
-                        }
-                        PodcastViewModel.shared.searchSavedEpisodesAcrossPodcasts(searchText)
-                    }
-                
-                // Clear button when text exists
-                if !searchText.isEmpty {
-                    Button(action: {
-                        searchText = ""
-                        PodcastViewModel.shared.searchSavedEpisodesAcrossPodcasts("")
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(iconColor)
-                            .font(.system(size: 16, weight: .medium))
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(searchBarBackgroundColor)
-            .cornerRadius(12)
+        // Search field with icons
+        HStack(spacing: 8) {
+            // Magnifying glass icon
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(iconColor)
+                .font(.system(size: 16, weight: .medium))
             
-            // Cancel button
-            Button("Cancel") {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    isPresented = false
+            // Text field
+            TextField(placeholder, text: $searchText)
+                .font(.system(size: 16))
+                .foregroundColor(textColor)
+                .focused($isTextFieldFocused)
+                .submitLabel(.search)
+                .onChange(of: searchText) { _, newValue in
+                    // Limit search text and trigger episode search
+                    let limitedText = String(newValue.prefix(100))
+                    if limitedText != searchText {
+                        searchText = limitedText
+                    }
+                    PodcastViewModel.shared.searchSavedEpisodesAcrossPodcasts(searchText)
+                }
+            
+            // Clear button when text exists
+            if !searchText.isEmpty {
+                Button(action: {
                     searchText = ""
                     PodcastViewModel.shared.searchSavedEpisodesAcrossPodcasts("")
-                    isTextFieldFocused = false
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(iconColor)
+                        .font(.system(size: 16, weight: .medium))
                 }
             }
-            .foregroundColor(.blue)
-            .font(.system(size: 16))
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(searchBarBackgroundColor)
+        .cornerRadius(12)
         .onAppear {
             // Auto-focus when search bar appears
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

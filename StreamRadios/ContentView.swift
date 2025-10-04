@@ -533,56 +533,71 @@ struct ContentView: View {
                                 Spacer()
                                 
                                 // Button Container with rounded background
-                                HStack(spacing: 8) {
-                                    // Search toggle button - Shows in all tabs
-                                    Button(action: {
-                                        isSearchPresented.toggle()
-                                        if !isSearchPresented {
-                                            searchText = ""
-                                        }
-                                    }) {
-                                        Image(systemName: "magnifyingglass")
-                                            .foregroundColor(.white)
-                                            .font(.system(size: 20, weight: .medium))
-                                            .frame(width: 32, height: 32)
-                                    }
-                                    
-                                    // Sort button - Only show in Favorites and All tabs
-                                    if viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all {
-                                        Button(action: {
-                                            // Show alert for Favorites tab to warn about modifying order
-                                            if viewModel.selectedSubTab == .favorites {
-                                                alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
-                                                    viewModel.sortFavoritesAlphabetically()
-                                                }
-                                            } else {
-                                                // All tab - no alert needed
-                                                viewModel.sortStationsAlphabetically()
+                                Group {
+                                    if isSearchPresented {
+                                        // Only Cancel button when search is active
+                                        Button("Cancel") {
+                                            withAnimation(.easeInOut(duration: 0.3)) {
+                                                isSearchPresented = false
+                                                searchText = ""
+                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                                             }
-                                        }) {
-                                            Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                                .foregroundColor(.white)
-                                                .font(.system(size: 20, weight: .medium))
-                                                .frame(width: 32, height: 32)
                                         }
-                                    }
-                                    
-                                    // Add station button - Shows in all tabs
-                                    Button(action: {
-                                        if viewModel.selectedCountry == "Select Country" {
-                                            alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                                        } else {
-                                            activeSheet = .addStation
+                                        .foregroundColor(.blue)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                    } else {
+                                        HStack(spacing: 8) {
+                                            // Search toggle button - Shows in all tabs
+                                            Button(action: {
+                                                withAnimation(.easeInOut(duration: 0.3)) {
+                                                    isSearchPresented = true
+                                                }
+                                            }) {
+                                                Image(systemName: "magnifyingglass")
+                                                    .foregroundColor(.white)
+                                                    .font(.system(size: 20, weight: .medium))
+                                                    .frame(width: 32, height: 32)
+                                            }
+                                            
+                                            // Sort button - Only show in Favorites and All tabs
+                                            if viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all {
+                                                Button(action: {
+                                                    // Show alert for Favorites tab to warn about modifying order
+                                                    if viewModel.selectedSubTab == .favorites {
+                                                        alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                                                            viewModel.sortFavoritesAlphabetically()
+                                                        }
+                                                    } else {
+                                                        // All tab - no alert needed
+                                                        viewModel.sortStationsAlphabetically()
+                                                    }
+                                                }) {
+                                                    Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                                        .foregroundColor(.white)
+                                                        .font(.system(size: 20, weight: .medium))
+                                                        .frame(width: 32, height: 32)
+                                                }
+                                            }
+                                            
+                                            // Add station button - Shows in all tabs
+                                            Button(action: {
+                                                if viewModel.selectedCountry == "Select Country" {
+                                                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                                                } else {
+                                                    activeSheet = .addStation
+                                                }
+                                            }) {
+                                                Image(systemName: "plus")
+                                                    .foregroundColor(.white)
+                                                    .font(.system(size: 20, weight: .medium))
+                                                    .frame(width: 32, height: 32)
+                                            }
                                         }
-                                    }) {
-                                        Image(systemName: "plus")
-                                            .foregroundColor(.white)
-                                            .font(.system(size: 20, weight: .medium))
-                                            .frame(width: 32, height: 32)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
                                     }
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 20)
                                         .fill(Color(red: 0x19/255.0, green: 0x19/255.0, blue: 0x18/255.0))
@@ -625,12 +640,9 @@ struct ContentView: View {
                                         }
                                     }
                                 )
-                                
-                                Spacer()
                             }
-                            .padding(.horizontal, 16)
                         }
-                        .padding(.vertical, 12)
+                        .padding(16)
                         .background(Color.adaptiveSectionBackground)
                         .cornerRadius(12)
                         .padding(.horizontal, 16)
@@ -666,7 +678,8 @@ struct ContentView: View {
                                          isPlayerSheetPresented: $isPlayerSheetPresented,
                                          searchText: $searchText,
                                          isScrolling: $isScrolling,
-                                         isFooterMenuHidden: $isFooterMenuHidden)
+                                         isFooterMenuHidden: $isFooterMenuHidden,
+                                         isSearchPresented: $isSearchPresented)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
                     
@@ -862,35 +875,23 @@ struct ContentView: View {
     private var searchBar: some View {
         if isSearchPresented {
             HStack {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.adaptiveSecondaryText)
-                        .font(.body)
-                    
-                    TextField("Search stations...", text: $searchText)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .font(.body)
-                        .foregroundColor(.adaptivePrimaryText)
-                    
-                    if !searchText.isEmpty {
-                        Button(action: {
-                            searchText = ""
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .font(.body)
-                        }
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .font(.body)
+                
+                TextField("Search stations...", text: $searchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.body)
+                    .foregroundColor(.adaptivePrimaryText)
+                
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .font(.body)
                     }
-                    
-                    // Cancel button
-                    Button("Cancel") {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isSearchPresented = false
-                            searchText = ""
-                        }
-                    }
-                    .foregroundColor(.blue)
-                    .font(.system(size: 16))
                 }
             }
             .padding(.horizontal, 12)

@@ -175,12 +175,25 @@ struct CountryPicker: View {
             VStack(spacing: 0) {
                 // Search bar with liquid glass style (conditional)
                 if isSearchPresented {
-                    CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search countries...")
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
-                        .background(Color.adaptiveBackground)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    HStack(spacing: 12) {
+                        CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search countries...")
+                        
+                        // Cancel button
+                        Button("Cancel") {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                isSearchPresented = false
+                                searchText = ""
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            }
+                        }
+                        .foregroundColor(.blue)
+                        .font(.system(size: 16))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .background(Color.adaptiveBackground)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 
                 List {

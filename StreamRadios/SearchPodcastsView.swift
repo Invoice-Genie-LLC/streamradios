@@ -18,6 +18,7 @@ struct SearchPodcastsView: View {
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
     @StateObject private var searchService = PodcastSearchService()
     @State private var searchText = ""
+    @State private var isSearchPresented = false
     @State private var searchTask: Task<Void, Never>?
     @State private var showingAddPodcast = false
     @State private var selectedPodcast: PodcastFeed?
@@ -48,9 +49,11 @@ struct SearchPodcastsView: View {
         NavigationView {
             ZStack(alignment: .bottom) {
                 VStack(spacing: 0) {
-                    // Search Header
-                    searchHeader
-                        .padding(.top, 80) // Add padding for custom navigation bar
+                    // Search Header - only show when search is presented
+                    if isSearchPresented {
+                        searchHeader
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                     
                     ScrollView {
                         LazyVStack(spacing: 16) {
@@ -61,10 +64,10 @@ struct SearchPodcastsView: View {
                                 searchResultsList
                             } else if !searchText.isEmpty && !searchService.isSearching {
                                 noResultsView
-                                                    } else {
-                            // Show popular podcasts section when no search
-                            popularPodcastsSection
-                        }
+                            } else {
+                                // Show popular podcasts section when no search
+                                popularPodcastsSection
+                            }
                             
                             // Error Message
                             if let error = searchService.searchError {
@@ -75,6 +78,7 @@ struct SearchPodcastsView: View {
                             creditSection
                         }
                         .padding(.horizontal, 16)
+                        .padding(.top, isSearchPresented ? 0 : 20)
                         .padding(.bottom, 80)
                     }
                 }
@@ -86,9 +90,71 @@ struct SearchPodcastsView: View {
                         }
                 )
             }
-            .navigationBarHidden(true)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Search Podcasts")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.adaptivePrimaryText)
+                }
+                
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") {
+                        searchText = ""
+                        isSearchPresented = false
+                        searchService.clearResults()
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        isPresented = false
+                    }
+                    .foregroundColor(.blue)
+                }
+                
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    HStack(spacing: 8) {
+                        if isSearchPresented {
+                            // Cancel button when search is active
+                            Button("Cancel") {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    isSearchPresented = false
+                                    searchText = ""
+                                    searchService.clearResults()
+                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                }
+                            }
+                            .foregroundColor(.blue)
+                        } else {
+                            // Search button
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    isSearchPresented = true
+                                }
+                            }) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .frame(width: 32, height: 32)
+                            }
+                            
+                            // Separator
+                            Text("|")
+                                .foregroundColor(.gray.opacity(0.5))
+                                .font(.system(size: 18))
+                            
+                            // Add URL button
+                            Button("Add URL") {
+                                newPodcastTitle = ""
+                                newPodcastURL = ""
+                                showingAddPodcast = true
+                            }
+                            .foregroundColor(.blue)
+                        }
+                    }
+                }
+            }
             .onAppear {
                 searchText = ""
+                isSearchPresented = false
                 searchService.clearResults()
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 
@@ -99,7 +165,6 @@ struct SearchPodcastsView: View {
             }
         }
         .background(Color.adaptiveBackground)
-        .overlay(navigationBar, alignment: .top)
         .overlay(
             Group {
                 if showAlert {
@@ -151,45 +216,6 @@ struct SearchPodcastsView: View {
     }
     
     // MARK: - UI Components
-    
-    @ViewBuilder
-    private var navigationBar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button("Close") {
-                    searchText = ""
-                    searchService.clearResults()
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    isPresented = false
-                }
-                .font(.body)
-                .foregroundColor(.blue)
-                
-                Spacer()
-                
-                Text("Search Podcasts")
-                    .font(.headline)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                Spacer()
-                
-                Button("Add URL") {
-                    newPodcastTitle = ""
-                    newPodcastURL = ""
-                    showingAddPodcast = true
-                }
-                .font(.body)
-                .foregroundColor(.blue)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 15)
-            .padding(.bottom, 15)
-            .background(Color.adaptiveSecondaryBackground)
-            
-            Divider()
-                .background(Color.adaptiveSeparator)
-        }
-    }
     
     @ViewBuilder
     private var searchHeader: some View {
