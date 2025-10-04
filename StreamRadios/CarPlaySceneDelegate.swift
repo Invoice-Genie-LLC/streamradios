@@ -1429,6 +1429,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         let stations = carPlayManager.getStations(for: country)
         
+        // Stations are now sorted alphabetically to match phone app order
+        let sortOrder = RadioStationViewModel.shared.isAscendingSort ? "ascending" : "descending"
+        os_log("🚗 CarPlay: Displaying %d stations for '%@' in %@ alphabetical order", log: log, type: .info, stations.count, country, sortOrder)
+        
         var stationItems: [CPListItem] = []
         
         // Show ALL stations for the country - no artificial limits
@@ -2241,6 +2245,45 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             print("🚗 CarPlay: Received podcast order change - refreshing podcast template")
             self?.refreshPodcastTabTemplate()
         }
+        
+        // CRITICAL FIX: Listen for instant artwork sync which is posted when radio playback changes
+        // This ensures the equalizer indicator updates immediately when stations start/stop playing
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("InstantCarPlayArtworkSync"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            
+            // Check if this is a radio station update
+            if let userInfo = notification.userInfo,
+               let nowPlayingStationId = userInfo["stationId"] as? String {
+                os_log("🚗 CarPlay: Radio playback changed to station ID: %@ - refreshing for equalizer update", log: self.log, type: .info, nowPlayingStationId)
+                
+                // CRITICAL FIX: Pass the station ID from notification to avoid timing issues
+                // The notification contains the NEW station being played, while RadioPlayer might still have old station
+                
+                // Immediately refresh stations tab to update the equalizer indicator
+                self.refreshStationsTabTemplate(nowPlayingStationId: nowPlayingStationId)
+                
+                // Also refresh recents and downloads tabs
+                self.refreshRecentsTabTemplate(nowPlayingStationId: nowPlayingStationId)
+                self.refreshDownloadsTabTemplate()
+                
+                // CRITICAL: If user is viewing a country's station list, refresh it immediately too
+                if let interfaceController = self.interfaceController,
+                   let topTemplate = interfaceController.topTemplate as? CPListTemplate,
+                   let templateTitle = topTemplate.title,
+                   // Check if this is a country station list (not one of the main tabs)
+                   templateTitle != "Recent" && templateTitle != "Radio" && templateTitle != "Podcast" && templateTitle != "Downloads" {
+                    
+                    os_log("🚗 CarPlay: Refreshing visible country station list: '%@'", log: self.log, type: .info, templateTitle)
+                    
+                    // Refresh the current country station list
+                    self.refreshCurrentCountryStationList(country: templateTitle, nowPlayingStationId: nowPlayingStationId)
+                }
+            }
+        }
     }
     
     /// Refresh the stations template immediately when order changes
@@ -2595,13 +2638,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         RunLoop.current.run()
     }
     
-    private func refreshRecentsTabTemplate() {
+    /// Refresh the recents tab template to show updated recently played content
+    /// - Parameter nowPlayingStationId: Optional station ID from notification (preferred over RadioPlayer state)
+    private func refreshRecentsTabTemplate(nowPlayingStationId: String? = nil) {
         guard let interfaceController = self.interfaceController else {
             os_log("🚗 CarPlay: Cannot refresh recents - no interface controller", log: log, type: .error)
             return
         }
         
-        os_log("🚗 CarPlay: Refreshing recents tab template", log: log, type: .info)
+        if let nowPlayingStationId = nowPlayingStationId {
+            os_log("🚗 CarPlay: Refreshing recents tab template with nowPlayingStationId: %@", log: log, type: .info, nowPlayingStationId)
+        } else {
+            os_log("🚗 CarPlay: Refreshing recents tab template (no nowPlayingStationId)", log: log, type: .info)
+        }
         
         // Get the current root template
         guard let tabBarTemplate = interfaceController.rootTemplate as? CPTabBarTemplate else {
@@ -2620,14 +2669,39 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             let recentStations = carPlayManager.getRecentStations()
             let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
             
+            os_log("🚗 CarPlay Recents: Found %d recent stations", log: self.log, type: .info, recentStations.count)
+            if let nowPlayingStationId = nowPlayingStationId {
+                // Log all station IDs to help debug
+                for station in recentStations {
+                    os_log("🚗 CarPlay Recents: Station '%@' has ID: %@", log: self.log, type: .debug, station.name, station.id)
+                }
+            }
+            
             // Create new sections with updated data
             var newSections: [CPListSection] = []
             
             // Recent stations section FIRST (as requested)
             var recentStationItems: [CPListItem] = []
+            var equalizerSetCount = 0
             for station in recentStations {
                 let timeAgo = formatTimeAgo(station.lastPlayed)
-                let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                
+                // CRITICAL FIX: Use nowPlayingStationId from notification if available (avoids timing issues)
+                let isCurrentlyPlaying: Bool
+                if let nowPlayingStationId = nowPlayingStationId {
+                    // Use the station ID from the notification (most up-to-date)
+                    isCurrentlyPlaying = station.id == nowPlayingStationId
+                    if isCurrentlyPlaying {
+                        equalizerSetCount += 1
+                        os_log("🚗 CarPlay Recents: ✅ Setting equalizer ON for '%@' (ID matches nowPlayingStationId: %@)", log: self.log, type: .info, station.name, nowPlayingStationId)
+                    }
+                } else {
+                    // Fallback to RadioPlayer state
+                    isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                    if isCurrentlyPlaying {
+                        equalizerSetCount += 1
+                    }
+                }
                 
                 let item = CPListItem(text: station.name,
                                      detailText: "Played \(timeAgo) • \(station.country)",
@@ -2731,7 +2805,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Update the sections directly on the existing template - this preserves navigation
             recentsTab.updateSections(newSections)
             
-            os_log("🚗 CarPlay: Successfully updated recents tab sections without changing navigation", log: self.log, type: .info)
+            os_log("🚗 CarPlay Recents: ✅ Successfully updated with %d stations, %d with equalizer indicator", log: self.log, type: .info, recentStations.count, equalizerSetCount)
+            
+            if equalizerSetCount == 0 && nowPlayingStationId != nil {
+                os_log("⚠️ CarPlay Recents: WARNING - nowPlayingStationId provided but no stations matched!", log: self.log, type: .error)
+            }
         } else {
             os_log("🚗 CarPlay: Recents tab index out of bounds or not a list template", log: log, type: .error)
         }
@@ -2945,8 +3023,58 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
+    /// Refresh the currently visible country station list to update equalizer indicators
+    /// - Parameter nowPlayingStationId: Optional station ID from notification (preferred over RadioPlayer state)
+    private func refreshCurrentCountryStationList(country: String, nowPlayingStationId: String? = nil) {
+        guard let interfaceController = self.interfaceController,
+              let topTemplate = interfaceController.topTemplate as? CPListTemplate else {
+            return
+        }
+        
+        os_log("🚗 CarPlay: Refreshing country station list for '%@' with updated equalizer indicators", log: log, type: .info, country)
+        
+        let carPlayManager = CarPlayManager.shared
+        let stations = carPlayManager.getStations(for: country)
+        
+        var stationItems: [CPListItem] = []
+        
+        for station in stations {
+            // CRITICAL FIX: Use nowPlayingStationId from notification if available (avoids timing issues)
+            let isCurrentlyPlaying: Bool
+            if let nowPlayingStationId = nowPlayingStationId {
+                // Use the station ID from the notification (most up-to-date)
+                isCurrentlyPlaying = station.id == nowPlayingStationId
+            } else {
+                // Fallback to RadioPlayer state
+                isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+            }
+            
+            let item = CPListItem(text: station.name,
+                                 detailText: station.country,
+                                 image: carPlayManager.getStationArtwork(for: station))
+            
+            // Set Apple standard highlighting for currently playing station
+            if #available(iOS 14.0, *) {
+                item.isPlaying = isCurrentlyPlaying
+            }
+            
+            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.playStation(station, completion: completion)
+            }
+            stationItems.append(item)
+        }
+        
+        let section = CPListSection(items: stationItems, header: "\(country) Stations (\(stations.count))", sectionIndexTitle: nil)
+        
+        // Update the sections to reflect the new playing state
+        topTemplate.updateSections([section])
+        
+        os_log("🚗 CarPlay: Successfully refreshed country station list for '%@' with %d stations", log: log, type: .info, country, stations.count)
+    }
+    
     /// Refresh the stations tab template to show updated radio station highlighting
-    private func refreshStationsTabTemplate() {
+    /// - Parameter nowPlayingStationId: Optional station ID from notification (preferred over RadioPlayer state)
+    private func refreshStationsTabTemplate(nowPlayingStationId: String? = nil) {
         guard let interfaceController = self.interfaceController else {
             os_log("🚗 CarPlay: Cannot refresh stations - no interface controller", log: log, type: .error)
             return
@@ -2976,7 +3104,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             if !favoriteStations.isEmpty {
                 var favoriteStationItems: [CPListItem] = []
                 for station in favoriteStations {
-                    let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                    // CRITICAL FIX: Use nowPlayingStationId from notification if available (avoids timing issues)
+                    let isCurrentlyPlaying: Bool
+                    if let nowPlayingStationId = nowPlayingStationId {
+                        // Use the station ID from the notification (most up-to-date)
+                        isCurrentlyPlaying = station.id == nowPlayingStationId
+                    } else {
+                        // Fallback to RadioPlayer state
+                        isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                    }
                     
                     let item = CPListItem(text: station.name,
                                          detailText: station.country,
@@ -2995,6 +3131,30 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 
                 let favoriteSection = CPListSection(items: favoriteStationItems, header: "Favorites", sectionIndexTitle: nil)
                 newSections.append(favoriteSection)
+            }
+            
+            // CRITICAL FIX: Add Browse by Country section (same as createStationsTab)
+            // This was missing and causing the country list to disappear when refreshing
+            let availableCountries = carPlayManager.getAvailableCountries()
+            
+            if !availableCountries.isEmpty {
+                var countryItems: [CPListItem] = []
+                for country in availableCountries {
+                    let stations = carPlayManager.getStations(for: country)
+                    let item = CPListItem(text: country,
+                                         detailText: "\(stations.count) stations",
+                                         image: carPlayManager.getFlagImage(for: country))
+                    item.handler = { [weak self] item, completion in
+                        self?.showStationsForCountry(country, completion: completion)
+                    }
+                    countryItems.append(item)
+                }
+                
+                if !countryItems.isEmpty {
+                    let countrySection = CPListSection(items: countryItems, header: "Browse by Country", sectionIndexTitle: nil)
+                    newSections.append(countrySection)
+                    os_log("🚗 CarPlay: Added country section with %d countries to stations tab", log: self.log, type: .debug, countryItems.count)
+                }
             }
             
             if newSections.isEmpty {

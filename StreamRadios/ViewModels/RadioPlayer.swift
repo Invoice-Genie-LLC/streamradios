@@ -1902,6 +1902,20 @@ class RadioPlayer: NSObject, ObservableObject {
         print("📍 STABILITY: Set currentlyPlayingStation to '\(station.name)' from '\(station.country)'")
         print("📍 STABILITY: Station display will remain stable regardless of future country picker changes")
         
+        // CRITICAL FIX: Immediately notify CarPlay of station change for instant equalizer update
+        // This ensures the equalizer indicator updates immediately, not one station behind
+        NotificationCenter.default.post(
+            name: NSNotification.Name("InstantCarPlayArtworkSync"),
+            object: nil,
+            userInfo: [
+                "stationId": station.id,
+                "metadata": "",
+                "hasArtwork": false,
+                "syncType": "station_change"
+            ]
+        )
+        print("🚗 INSTANT: Notified CarPlay of station change to '\(station.name)' (ID: \(station.id))")
+        
         // Clear all metadata and iTunes artwork when switching stations
         // This ensures old song artwork doesn't carry over to the new station
         metadata = nil

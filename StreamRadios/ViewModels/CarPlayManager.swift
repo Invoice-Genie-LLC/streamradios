@@ -210,7 +210,17 @@ class CarPlayManager: ObservableObject {
     }
     
     func getStations(for country: String) -> [RadioStation] {
-        return radioStations.filter { $0.country == country }
+        let filteredStations = radioStations.filter { $0.country == country }
+        
+        // CRITICAL FIX: Sort stations alphabetically to match phone app order
+        // Use the same sorting logic as RadioStationViewModel and RadioStationListView
+        let isAscendingSort = RadioStationViewModel.shared.isAscendingSort
+        
+        if isAscendingSort {
+            return filteredStations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        } else {
+            return filteredStations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+        }
     }
     
     func getFavoriteStations() -> [RadioStation] {
