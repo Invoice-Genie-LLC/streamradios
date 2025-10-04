@@ -65,7 +65,6 @@ class PlaybackManager: ObservableObject {
     /// Get the last active player from UserDefaults for app startup restoration
     func getLastActivePlayer() -> ActivePlayer? {
         let rawValue = UserDefaults.standard.string(forKey: "LastActivePlayer")
-        print("🔍 PlaybackManager: Raw LastActivePlayer value: \(rawValue ?? "nil")")
         
         guard let rawValue = rawValue,
               let player = ActivePlayer(rawValue: rawValue) else {

@@ -405,26 +405,21 @@ struct ContentView: View {
     private var shouldHideFooterMenu: Bool {
         // Always show menu if no content is playing
         guard shouldShowGlobalPlayer else { 
-            print("🏠 ContentView: shouldHideFooterMenu = false (no global player)")
             return false 
         }
         
         // FIRST-TIME USER PROTECTION: Never hide TabView on fresh install until content has been played
         guard PlaybackManager.shared.hasEverPlayedContent() else { 
-            print("🏠 ContentView: shouldHideFooterMenu = false (fresh install - content never played)")
             return false 
         }
         
         // Hide menu when scrolling (only after content has been played)
         if isScrolling { 
-            print("🏠 ContentView: shouldHideFooterMenu = true (scrolling after content played)")
             return true 
         }
         
         // Show/hide menu based on home button state
-        let result = isFooterMenuHidden
-        print("🏠 ContentView: shouldHideFooterMenu = \(result) (based on home button state)")
-        return result
+        return isFooterMenuHidden
     }
     
     /// Updates tab bar visibility using UIKit with enhanced animations

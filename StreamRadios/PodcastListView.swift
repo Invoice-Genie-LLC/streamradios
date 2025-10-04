@@ -2635,10 +2635,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 
                 // Loading overlay similar to radio station implementation
                 let shouldShowLoading = localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && podcastPlayer.loadingEpisodeId != nil)
-                let _ = print("🎬 LOADING DEBUG: Episode \(episode.title) - localLoadingState: \(localLoadingState), loadingEpisodeId: \(podcastPlayer.loadingEpisodeId ?? "nil"), episodeId: \(episode.id), isPlaying: \(isPlaying), shouldShow: \(shouldShowLoading)")
                 
                 if shouldShowLoading {
-                    let _ = print("🎬 OPTIMIZED LOADING OVERLAY: Showing for episode \(episode.title), localLoadingState: \(localLoadingState), loadingEpisodeId: \(podcastPlayer.loadingEpisodeId ?? "nil"), currentEpisode: \(podcastPlayer.currentEpisode?.id ?? "nil"), isPlaying: \(isPlaying)")
                     ZStack {
                         // Semi-transparent circular overlay with more visibility
                         Circle()
@@ -3339,6 +3337,8 @@ struct PodcastPlayerView: View {
             }
         }
         
+        // PERFORMANCE: LazyVStack already handles virtualization, no need to manually limit episodes
+        // Just display all episodes and let SwiftUI handle the rendering optimization
         return ForEach(episodes, id: \.id) { episode in
             OptimizedEpisodeRowView(
                 episode: episode,

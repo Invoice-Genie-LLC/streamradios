@@ -273,6 +273,42 @@ class PodcastFeedManager {
         return result
     }
     
+    /// PERFORMANCE: Check for new episodes by parsing only first N items from RSS
+    /// This allows showing new episodes immediately without parsing entire feed
+    func checkForNewEpisodes(_ feedId: String, sampleSize: Int = 50) async throws -> [PodcastEpisode] {
+        guard let existingFeed = try await getExistingFeed(feedId: feedId) else {
+            throw FeedError.feedNotFound
+        }
+        
+        os_log("🔍 Checking for new episodes in feed: %@ (sample: %d)", log: log, type: .info, existingFeed.title, sampleSize)
+        
+        // Fetch and parse only first N episodes
+        let (_, sampleEpisodes) = try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .utility) {
+                do {
+                    let feedData = try await self.fetchRSSDataWithRetry(url: URL(string: existingFeed.url)!, feedTitle: existingFeed.title)
+                    let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url, progressCallback: nil)
+                    // Use limited parsing for performance
+                    let result = try await parser.parseWithLimit(episodeLimit: sampleSize)
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        
+        // Get existing episode IDs from Core Data
+        let existingEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+        let existingIds = Set(existingEpisodes.map { $0.id })
+        
+        // Find new episodes
+        let newEpisodes = sampleEpisodes.filter { !existingIds.contains($0.id) }
+        
+        os_log("✅ Found %d new episodes in sample of %d", log: log, type: .info, newEpisodes.count, sampleEpisodes.count)
+        
+        return newEpisodes
+    }
+    
     // MARK: - Private Methods
     
     private func getExistingFeed(feedId: String) async throws -> PodcastFeed? {
@@ -983,6 +1019,41 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
                 do {
                     let result = try self.buildResult()
                     continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// PERFORMANCE: Parse with early episode limit for immediate display
+    /// Returns first N episodes quickly, allowing UI to show new content immediately
+    func parseWithLimit(episodeLimit: Int = 50) async throws -> (PodcastFeed, [PodcastEpisode]) {
+        // Store original episode limit
+        let originalEpisodes = episodes
+        var limitReached = false
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                self.progressCallback?(0.1, "Parsing first \(episodeLimit) episodes...")
+                
+                // Parse RSS but stop after limit
+                guard self.parser.parse() else {
+                    if let parserError = self.parser.parserError {
+                        os_log("❌ Limited RSS Parser failed: %@", log: OSLog.default, type: .error, parserError.localizedDescription)
+                        continuation.resume(throwing: FeedError.parsingFailed)
+                    } else {
+                        continuation.resume(throwing: FeedError.parsingFailed)
+                    }
+                    return
+                }
+                
+                do {
+                    // Build result with limited episodes
+                    let result = try self.buildResult()
+                    // Return only first N episodes for immediate display
+                    let limitedEpisodes = Array(result.1.prefix(episodeLimit))
+                    continuation.resume(returning: (result.0, limitedEpisodes))
                 } catch {
                     continuation.resume(throwing: error)
                 }
