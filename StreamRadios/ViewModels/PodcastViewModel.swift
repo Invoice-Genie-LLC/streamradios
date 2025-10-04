@@ -595,6 +595,15 @@ class PodcastViewModel: ObservableObject {
             
             // Get episodes from isolation manager
             let isolatedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
+            print("📊 EPISODE SOURCE: Got \(isolatedEpisodes.count) episodes from isolation manager for feed \(feedId)")
+            
+            // Log first few episode titles to check formatting
+            if !isolatedEpisodes.isEmpty {
+                print("📋 EPISODE TITLES (first 3):")
+                for (index, episode) in isolatedEpisodes.prefix(3).enumerated() {
+                    print("   [\(index)] ID: \(episode.id.prefix(8))... Title: \(episode.title)")
+                }
+            }
             
             // 🛡️ SMART EMPTY STATE HANDLING: Check for available snapshot before returning empty
             if isolatedEpisodes.isEmpty {
@@ -625,22 +634,36 @@ class PodcastViewModel: ObservableObject {
                 feedIsolationManager.replaceEpisodesForFeed(validatedEpisodes, feedId: feedId)
             }
             
+            // 🚨 CRITICAL: Remove episodes with empty titles (corrupted data)
+            let nonEmptyEpisodes = validatedEpisodes.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if nonEmptyEpisodes.count != validatedEpisodes.count {
+                let emptyCount = validatedEpisodes.count - nonEmptyEpisodes.count
+                print("🚨 EMPTY TITLES: Found \(emptyCount) episodes with empty titles - removing them")
+                for episode in validatedEpisodes where episode.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    print("🚨 EMPTY TITLE: Episode ID \(episode.id.prefix(12))... has empty title - REMOVING")
+                }
+                // Update isolation manager with cleaned episodes
+                feedIsolationManager.replaceEpisodesForFeed(nonEmptyEpisodes, feedId: feedId)
+            }
+            
             // Clear transition flag since we have valid episodes
             _feedTransitionInProgress = false
             
             // 🚨 CRITICAL DEDUPLICATION: Remove any duplicate episode IDs before displaying
             var seenIds = Set<String>()
-            let deduplicatedEpisodes = validatedEpisodes.filter { episode in
+            var duplicateCount = 0
+            let deduplicatedEpisodes = nonEmptyEpisodes.filter { episode in
                 if seenIds.contains(episode.id) {
-                    print("🚨 DEDUP GETTER: Removing duplicate episode ID \(episode.id) - \(episode.title)")
+                    duplicateCount += 1
+                    print("🚨 DEDUP GETTER [\(duplicateCount)]: Removing duplicate episode ID \(episode.id.prefix(8))... - \(episode.title)")
                     return false
                 }
                 seenIds.insert(episode.id)
                 return true
             }
             
-            if deduplicatedEpisodes.count != validatedEpisodes.count {
-                print("🚨 DEDUP GETTER: Removed \(validatedEpisodes.count - deduplicatedEpisodes.count) duplicate episodes")
+            if deduplicatedEpisodes.count != nonEmptyEpisodes.count {
+                print("🚨 DEDUP GETTER: Removed \(nonEmptyEpisodes.count - deduplicatedEpisodes.count) duplicate episodes")
                 // Update isolation manager with deduplicated list
                 feedIsolationManager.replaceEpisodesForFeed(deduplicatedEpisodes, feedId: feedId)
             }

@@ -195,8 +195,38 @@ class PodcastCoreDataManager {
         let managedEpisodes = try context.fetch(episodeRequest)
         let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
         
+        os_log("📊 CORE DATA: Loaded %d episodes from database for feed %@", log: self.log, type: .info, episodes.count, feedId)
+        
+        // Log first few episode titles to check formatting
+        if !episodes.isEmpty {
+            os_log("📋 CORE DATA TITLES (first 3):", log: self.log, type: .info)
+            for (index, episode) in episodes.prefix(3).enumerated() {
+                let titlePreview = String(episode.title.prefix(60))
+                os_log("   [%d] ID: %@... Title: %@", log: self.log, type: .info, index, String(episode.id.prefix(8)), titlePreview)
+            }
+        }
+        
         // 🛡️ CONTAMINATION PREVENTION: Double-check all episodes belong to the requested feed
         let safeEpisodes = episodes.filter { $0.feedId == feedId }
+        
+        // 🚨 CORRUPTION DETECTION: Check for episodes with empty titles
+        let validEpisodes = safeEpisodes.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if validEpisodes.count != safeEpisodes.count {
+            let corruptedCount = safeEpisodes.count - validEpisodes.count
+            os_log("🚨 CORE DATA CORRUPTION: Found %d episodes with empty titles for feed %@", log: self.log, type: .error, corruptedCount, feedId)
+            
+            // Log the corrupted episodes
+            let corruptedEpisodes = safeEpisodes.filter { $0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            for episode in corruptedEpisodes.prefix(5) {
+                os_log("🚨 CORRUPTED EPISODE: ID '%@' has empty title", log: self.log, type: .error, episode.id)
+            }
+            
+            // Trigger immediate cleanup of corrupted episodes
+            Task.detached(priority: .background) {
+                await self.deleteCorruptedEpisodes(feedId: feedId, corruptedEpisodeIds: corruptedEpisodes.map { $0.id })
+            }
+        }
+        
         if safeEpisodes.count != episodes.count {
             let contaminatedCount = episodes.count - safeEpisodes.count
             print("🚨 CORE DATA CONTAMINATION: Found \(contaminatedCount) episodes with wrong feedId in Core Data for feed \(feedId)")
@@ -213,7 +243,7 @@ class PodcastCoreDataManager {
             }
         }
         
-        return safeEpisodes
+        return validEpisodes
     }
     
     /// Get episodes for a specific feed (optimized for UI access)
@@ -415,8 +445,18 @@ class PodcastCoreDataManager {
         // Ensure all episodes have unique IDs to prevent duplicates from the start
         let uniqueEpisodes = removeDuplicatesFromParsedEpisodes(parsedEpisodes)
         let totalEpisodes = uniqueEpisodes.count
+        let duplicatesFound = parsedEpisodes.count - totalEpisodes
         
-        os_log("🔄 Starting reconciliation for feed %@ with %d episodes (%d after deduplication)", log: self.log, type: .info, feedId, totalEpisodes, parsedEpisodes.count - totalEpisodes)
+        os_log("🔄 Starting reconciliation for feed %@ with %d episodes (%d duplicates removed from RSS)", log: self.log, type: .info, feedId, totalEpisodes, duplicatesFound)
+        
+        // Log first few parsed episode titles to check formatting from RSS
+        if !uniqueEpisodes.isEmpty {
+            os_log("📋 PARSED FROM RSS (first 3):", log: self.log, type: .info)
+            for (index, episode) in uniqueEpisodes.prefix(3).enumerated() {
+                let titlePreview = String(episode.title.prefix(60))
+                os_log("   [%d] ID: %@... Title: %@", log: self.log, type: .info, index, String(episode.id.prefix(8)), titlePreview)
+            }
+        }
         
         // Use Task.detached to ensure complete background processing and prevent main thread blocking
         try await withCheckedThrowingContinuation { continuation in
@@ -437,9 +477,13 @@ class PodcastCoreDataManager {
         var duplicatesRemoved = 0
         
         for episode in episodes {
-            if uniqueEpisodes[episode.id] != nil {
+            if let existingEpisode = uniqueEpisodes[episode.id] {
                 duplicatesRemoved += 1
-                os_log("🗑️ Removing duplicate episode from parsed data: %@", log: self.log, type: .debug, episode.id)
+                let titlePreview1 = String(existingEpisode.title.prefix(50))
+                let titlePreview2 = String(episode.title.prefix(50))
+                os_log("🗑️ RSS DUPLICATE [%d]: ID %@...", log: self.log, type: .info, duplicatesRemoved, String(episode.id.prefix(8)))
+                os_log("   First:  %@", log: self.log, type: .info, titlePreview1)
+                os_log("   Second: %@", log: self.log, type: .info, titlePreview2)
                 continue
             }
             uniqueEpisodes[episode.id] = episode
@@ -496,6 +540,7 @@ class PodcastCoreDataManager {
             var processed = 0
             var insertedCount = 0
             var updatedCount = 0
+            var rejectedCount = 0  // Track rejected episodes with empty titles
             
             for chunk in episodes.chunked(into: chunkSize) {
                 // Check for user scrolling before processing each chunk
@@ -506,6 +551,14 @@ class PodcastCoreDataManager {
                 }
                 
                 for episode in chunk {
+                    // 🚨 VALIDATION: Reject episodes with empty titles to prevent corruption
+                    let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmedTitle.isEmpty {
+                        os_log("🚫 VALIDATION REJECTED: Episode ID %@ has empty title - skipping insertion", log: self.log, type: .error, episode.id)
+                        rejectedCount += 1
+                        continue // Skip this corrupted episode
+                    }
+                    
                     parsedIds.insert(episode.id)
                     
                     if let existing = existingById[episode.id] {
@@ -554,7 +607,13 @@ class PodcastCoreDataManager {
             
             // Final save
             try backgroundContext.save()
-            os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted %d, updated %d, deleted %d (limit: %@)", log: self.log, type: .info, feedId, parsedIds.count, insertedCount, updatedCount, deletedCount + coreDataDuplicates.count, maxEpisodes?.description ?? "unlimited")
+            
+            // Log rejection summary if any episodes were rejected
+            if rejectedCount > 0 {
+                os_log("⛔ VALIDATION: Rejected %d episodes with empty titles during reconciliation", log: self.log, type: .error, rejectedCount)
+            }
+            
+            os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted %d, updated %d, deleted %d, rejected %d (limit: %@)", log: self.log, type: .info, feedId, parsedIds.count, insertedCount, updatedCount, deletedCount + coreDataDuplicates.count, rejectedCount, maxEpisodes?.description ?? "unlimited")
                     
                     continuation.resume()
                 } catch {
@@ -687,10 +746,26 @@ class PodcastCoreDataManager {
             }
             
             // Add new episodes efficiently
+            var addedCount = 0
+            var rejectedCount = 0
             for episode in trulyNewEpisodes {
+                // 🚨 VALIDATION: Reject episodes with empty titles to prevent corruption
+                let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmedTitle.isEmpty {
+                    os_log("🚫 QUICK RECONCILE REJECTED: Episode ID %@ has empty title - skipping insertion", log: self.log, type: .error, episode.id)
+                    rejectedCount += 1
+                    continue // Skip this corrupted episode
+                }
+                
                 let managedEpisode = PodcastModel(context: backgroundContext)
                 managedEpisode.update(from: episode)
                 managedEpisode.feedId = feedId
+                addedCount += 1
+            }
+            
+            // Log rejection summary if any episodes were rejected
+            if rejectedCount > 0 {
+                os_log("⛔ QUICK RECONCILE: Rejected %d episodes with empty titles", log: self.log, type: .error, rejectedCount)
             }
             
             // EPISODE LIMIT ENFORCEMENT: Remove excess episodes if limit is set
@@ -699,7 +774,7 @@ class PodcastCoreDataManager {
             }
             
             try backgroundContext.save()
-            os_log("⚡ Reconciled %d new episodes for feed %@ (limit: %@)", log: self.log, type: .info, trulyNewEpisodes.count, feedId, maxEpisodes?.description ?? "unlimited")
+            os_log("⚡ Reconciled %d new episodes for feed %@ (rejected: %d, limit: %@)", log: self.log, type: .info, addedCount, feedId, rejectedCount, maxEpisodes?.description ?? "unlimited")
         }
     }
     
@@ -795,6 +870,39 @@ class PodcastCoreDataManager {
                 
             } catch {
                 print("❌ CLEANUP ERROR: Failed to clean contaminated episodes: \(error)")
+            }
+        }
+    }
+    
+    /// Delete corrupted episodes with empty titles from Core Data
+    private func deleteCorruptedEpisodes(feedId: String, corruptedEpisodeIds: [String]) async {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        await backgroundContext.perform {
+            do {
+                os_log("🧽 CORRUPTION CLEANUP: Starting deletion of %d corrupted episodes with empty titles", log: self.log, type: .info, corruptedEpisodeIds.count)
+                
+                var deletedCount = 0
+                for episodeId in corruptedEpisodeIds {
+                    let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    request.predicate = NSPredicate(format: "id == %@ AND feedId == %@", episodeId, feedId)
+                    
+                    let results = try backgroundContext.fetch(request)
+                    for managedEpisode in results {
+                        os_log("🧽 CORRUPTION CLEANUP: Deleting corrupted episode with ID %@", log: self.log, type: .info, episodeId)
+                        backgroundContext.delete(managedEpisode)
+                        deletedCount += 1
+                    }
+                }
+                
+                // Save the deletions
+                if backgroundContext.hasChanges {
+                    try backgroundContext.save()
+                    os_log("✅ CORRUPTION CLEANUP: Successfully deleted %d corrupted episodes from Core Data", log: self.log, type: .info, deletedCount)
+                }
+                
+            } catch {
+                os_log("❌ CORRUPTION CLEANUP ERROR: Failed to delete corrupted episodes: %@", log: self.log, type: .error, error.localizedDescription)
             }
         }
     }

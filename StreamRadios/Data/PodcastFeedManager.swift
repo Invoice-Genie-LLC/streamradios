@@ -669,6 +669,13 @@ class PodcastFeedManager {
         for episode in episodes {
             guard let managedEpisode = existingEpisodesById[episode.id] else { continue }
             
+            // 🚨 VALIDATION: Don't update to an empty title
+            let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedTitle.isEmpty {
+                print("🚫 UPDATE REJECTED: Episode ID \(episode.id) has empty title - skipping update")
+                continue // Skip this corrupted episode update
+            }
+            
             // Preserve download data
             let preservedLocalFilePath = managedEpisode.localFilePath
             let preservedFileSize = managedEpisode.fileSize
@@ -759,6 +766,13 @@ class PodcastFeedManager {
                         let preservedLocalFilePath = existingEpisode.localFilePath
                         let preservedFileSize = existingEpisode.fileSize
                         
+                        // 🚨 VALIDATION: Don't update to an empty title
+                        let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmedTitle.isEmpty {
+                            print("🚫 UPDATE REJECTED: Episode ID \(episode.id) has empty title - skipping update")
+                            continue // Skip this corrupted episode update
+                        }
+                        
                         // CRITICAL CONTAMINATION PREVENTION: Validate feedId before update
                         guard let feedId = feed.id, !feedId.isEmpty else {
                             print("🚨 INVALID FEED ID during episode update: \(feed.id ?? "nil")")
@@ -785,6 +799,13 @@ class PodcastFeedManager {
                     } else {
                         // Create new episode
                         managedEpisode = PodcastModel(context: context)
+                        
+                        // 🚨 VALIDATION: Reject episodes with empty titles to prevent corruption
+                        let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmedTitle.isEmpty {
+                            print("🚫 FEED MANAGER REJECTED: Episode ID \(episode.id) has empty title - skipping creation")
+                            continue // Skip this corrupted episode
+                        }
                         
                         // CRITICAL CONTAMINATION PREVENTION: Validate feedId before creation
                         guard let feedId = feed.id, !feedId.isEmpty else {
@@ -1175,7 +1196,14 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
                 currentEpisode?.duration = trimmedContent
             case "item":
                 if let episode = currentEpisode?.build() {
-                    episodes.append(episode)
+                    // 🚨 VALIDATION: Reject episodes with empty titles at parsing stage
+                    let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmedTitle.isEmpty {
+                        print("🚫 RSS PARSER REJECTED: Episode ID \(episode.id) has empty title - skipping")
+                        // Don't append corrupted episode
+                    } else {
+                        episodes.append(episode)
+                    }
                     // Report episode parsing progress with more granular updates
                     let baseProgress = Double(bytesProcessed) / Double(totalDataSize)
                     let episodeProgress = min(0.9, baseProgress)
