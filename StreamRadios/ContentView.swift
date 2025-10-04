@@ -521,16 +521,20 @@ struct ContentView: View {
                         // Browse by Country section - now prominently at the top
                         VStack(spacing: 12) {
                             // Section header
-                            HStack {
+                            HStack(spacing: 6) {
                                 Image(systemName: "globe")
                                     .font(.headline)
                                     .foregroundColor(.blue)
+                                    .dynamicTypeSize(...DynamicTypeSize.large)
                                 
                                 Text("Browse by Country")
                                     .font(.headline)
                                     .foregroundColor(.adaptivePrimaryText)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .dynamicTypeSize(...DynamicTypeSize.large)
                                 
-                                Spacer()
+                                Spacer(minLength: 0)
                                 
                                 // Button Container with rounded background
                                 Group {

@@ -342,7 +342,7 @@ struct CountryPicker: View {
                     }) {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.white)
-                            .font(.system(size: 20, weight: .medium))
+                            .font(.system(size: 16, weight: .medium))
                             .frame(width: 32, height: 32)
                     }
                     .padding(.horizontal, 12)

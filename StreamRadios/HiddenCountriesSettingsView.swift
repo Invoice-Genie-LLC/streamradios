@@ -187,7 +187,7 @@ struct HiddenCountriesSettingsView: View {
                             }) {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundColor(.white)
-                                    .font(.system(size: 20, weight: .medium))
+                                    .font(.system(size: 16, weight: .medium))
                                     .frame(width: 32, height: 32)
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -208,7 +208,7 @@ struct HiddenCountriesSettingsView: View {
                             } label: {
                                 Image(systemName: "ellipsis.circle")
                                     .foregroundColor(.white)
-                                    .font(.system(size: 20, weight: .medium))
+                                    .font(.system(size: 16, weight: .medium))
                                     .frame(width: 32, height: 32)
                             }
                             .menuStyle(.borderlessButton)
