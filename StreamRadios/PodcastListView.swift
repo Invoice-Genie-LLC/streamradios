@@ -369,7 +369,7 @@ struct PodcastListView: View {
                            if isSearchPresented {
                                CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search episodes in saved podcasts")
                                    .padding(.horizontal, 16)
-                                   .padding(.top, 8)
+                                   .padding(.top, -10)
                                    .padding(.bottom, 12)
                                    .transition(.move(edge: .top).combined(with: .opacity))
                            }
@@ -1431,6 +1431,16 @@ struct CustomSearchBar: View {
             // Auto-focus when search bar appears
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isTextFieldFocused = true
+            }
+        }
+        .onChange(of: isPresented) { _, newValue in
+            // Auto-focus when search is presented
+            if newValue {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    isTextFieldFocused = true
+                }
+            } else {
+                isTextFieldFocused = false
             }
         }
     }

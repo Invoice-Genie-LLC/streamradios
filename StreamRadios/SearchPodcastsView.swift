@@ -44,6 +44,7 @@ struct SearchPodcastsView: View {
     @State private var addingStageText = ""
     @State private var showAlert = false
     @State private var alertMessage: String = ""
+    @FocusState private var isSearchFieldFocused: Bool
     
     var body: some View {
         NavigationView {
@@ -163,6 +164,16 @@ struct SearchPodcastsView: View {
                     await searchService.fetchPopularPodcasts()
                 }
             }
+            .onChange(of: isSearchPresented) { _, newValue in
+                // Auto-focus search field when search is presented
+                if newValue {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isSearchFieldFocused = true
+                    }
+                } else {
+                    isSearchFieldFocused = false
+                }
+            }
         }
         .background(Color.adaptiveBackground)
         .overlay(
@@ -226,6 +237,7 @@ struct SearchPodcastsView: View {
                     .foregroundColor(.adaptivePrimaryText)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
+                    .focused($isSearchFieldFocused)
                     .onChange(of: searchText) { _, newValue in
                         performSearch(query: newValue)
                     }
