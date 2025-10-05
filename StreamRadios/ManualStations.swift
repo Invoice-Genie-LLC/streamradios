@@ -173,7 +173,7 @@ struct ManualStationsData {
         "United States": [
             ManualStationInfo(
                 name: "Q104.1 Cleveland",
-                url: "https://prod-54-164-138-156.amperwave.net/audacy-wqalfmaac-hlsc.m3u8",
+                url: "https://prod-13-222-152-184.amperwave.net/audacy-wqalfmaac-hlsc.m3u8",
                 iconURL: nil
             ),
             ManualStationInfo(

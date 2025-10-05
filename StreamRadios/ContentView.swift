@@ -7,29 +7,24 @@ import SwiftUI
 import Combine
 import FlagKit
 
-extension UIApplication {
-    func endEditing() {
-        sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-}
-
 struct ContentView: View {
-    @StateObject private var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @EnvironmentObject var podcastPlayer: PodcastPlayer
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     @EnvironmentObject var permissionManager: PermissionManager
-    @State private var isAddStationViewPresented: Bool
-    @State private var isPlayerSheetPresented: Bool
+    @StateObject private var alertManager = AlertManager()
+    
+    @State private var selectedStationForEdit: RadioStation?
+    @FocusState private var isSearchFieldFocused: Bool
 
     @State private var isEditingMode: Bool
-    @State private var selectedStationForEdit: RadioStation?
+    @State private var isPlayerSheetPresented = false
     @State private var bitrateMessage: String
     @State private var showAlertForCountryBeforeAddingStation: Bool
     @State private var activeSheet: ActiveSheet?
     @State private var selectedTab: Tab
-    @EnvironmentObject var alertManager: AlertManager
     @EnvironmentObject var podcastViewModel: PodcastViewModel
-    @EnvironmentObject var subscriptionManager: SubscriptionManager
-    private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @StateObject private var dataSyncManager = DataSyncManager.shared
     @State private var selectedPodcast: PodcastFeed?
     @State private var showPodcastListView: Bool
@@ -55,12 +50,6 @@ struct ContentView: View {
         // The GlobalPlayerView will show the correct player based on last active player
         let savedTab: Tab = .radio
         
-        self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
-        // Remove podcastPlayer StateObject initialization
-        
-        self._isAddStationViewPresented = State(initialValue: false)
-        self._isPlayerSheetPresented = State(initialValue: false)
-
         self._isEditingMode = State(initialValue: false)
         self._selectedStationForEdit = State(initialValue: nil)
         self._bitrateMessage = State(initialValue: "Loading bitrate information...")
@@ -327,6 +316,18 @@ struct ContentView: View {
             // Do NOT clear iTunes artwork when navigating between views
             // iTunes artwork should only be cleared when actually stopping the radio player
             // This preserves the song artwork during view navigation while radio is playing
+        }
+        .onChange(of: isSearchPresented) { oldValue, newValue in
+            // Automatically focus search field when search is presented
+            if newValue {
+                // Small delay to ensure the view is rendered before focusing
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    isSearchFieldFocused = true
+                }
+            } else {
+                // Remove focus when search is dismissed
+                isSearchFieldFocused = false
+            }
         }
         // Removed tab state persistence - app always starts on radio tab
         .overlay(
@@ -629,6 +630,9 @@ struct ContentView: View {
                             }
                             .padding(.horizontal, 16)
                             
+                            // Search box for filtering stations - positioned above country picker
+                            searchBar
+                            
                             // Country picker - now more prominent
                             HStack {
                                 CountryPickerButton(
@@ -669,9 +673,6 @@ struct ContentView: View {
                         .cornerRadius(12)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 4)
-                        
-                        // Search box for filtering stations - moved above tabs
-                        searchBar
                         
                         // Radio syncing indicator - positioned above tabs
                         if selectedTab == .radio {
@@ -747,6 +748,7 @@ struct ContentView: View {
                 
                 if alertManager.showCustomAlert {
                     CustomAlertContainer()
+                        .environmentObject(alertManager)
                 }
             }
             .sheet(item: $activeSheet) { item in
@@ -905,6 +907,7 @@ struct ContentView: View {
                     .textFieldStyle(PlainTextFieldStyle())
                     .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
+                    .focused($isSearchFieldFocused)
                 
                 if !searchText.isEmpty {
                     Button(action: {
@@ -920,8 +923,13 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(Color.adaptiveSectionBackground)
             .cornerRadius(10)
-            .padding(.horizontal, 16)
-            .padding(.vertical, -8)
+            .padding(.vertical, 8)
+            .onAppear {
+                // Automatically focus the search field when it appears
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isSearchFieldFocused = true
+                }
+            }
         }
     }
     
