@@ -4622,9 +4622,14 @@ class PodcastViewModel: ObservableObject {
             
             // Update UI immediately with snapshot data (already sorted newest first)
             Task { @MainActor in
-                self.currentEpisodes = snapshot
-                self.selectedFeedId = feedId
-                self.updateFilter(tab: self.currentTab)
+                // CARPLAY FIX: Only update currentEpisodes if this is the selected feed
+                // Don't change selectedFeedId - that should only happen on user navigation
+                if self.selectedFeedId == feedId {
+                    self.currentEpisodes = snapshot
+                    self.updateFilter(tab: self.currentTab)
+                } else {
+                    print("⚠️ CARPLAY PROTECTION: Not updating currentEpisodes - feedId (\(feedId)) doesn't match selectedFeedId (\(self.selectedFeedId ?? "nil"))")
+                }
                 
                 // PERFORMANCE BOOST: Clear loading states immediately since we have data
                 self.isLoadingEpisodes = false

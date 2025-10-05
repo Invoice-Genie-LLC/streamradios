@@ -3658,10 +3658,10 @@ struct PodcastPlayerView: View {
         syncCurrentPlayingProgress()
         
         // CRITICAL FIX: Check if current episodes actually belong to this feed
-        // Also ensure the selectedFeedId matches to prevent showing wrong feed episodes
+        // CARPLAY FIX: Don't check selectedFeedId - it can change when CarPlay plays from different feed
+        // Only check if the episodes themselves belong to this feed
         let currentEpisodesForThisFeed = !viewModel.currentEpisodes.isEmpty &&
                                         viewModel.currentEpisodes.first?.feedId == feed.id &&
-                                        viewModel.selectedFeedId == feed.id &&
                                         viewModel.currentEpisodes.allSatisfy { $0.feedId == feed.id }
         
         print("🔄 FEED CHECK: feedId=\(feed.id), selectedFeedId=\(viewModel.selectedFeedId ?? "nil"), episodes=\(viewModel.currentEpisodes.count), firstEpisodeFeedId=\(viewModel.currentEpisodes.first?.feedId ?? "nil"), allMatch=\(viewModel.currentEpisodes.allSatisfy { $0.feedId == feed.id })")
@@ -3676,15 +3676,17 @@ struct PodcastPlayerView: View {
             viewModel.updateFilter(tab: selectedTab)
         }
         
-        // CRITICAL FIX: Force immediate selectedFeedId update to prevent UI lag
-        // This ensures the ViewModel knows which feed we're trying to display
-        print("🔄 PodcastListView: FORCE updating selectedFeedId from \(viewModel.selectedFeedId ?? "nil") to \(feed.id)")
-        viewModel.selectedFeedId = feed.id
+        // CRITICAL FIX: Determine if we're actually switching feeds
+        // This is a real feed switch ONLY if:
+        // 1. selectedFeedId is different from what we're displaying AND
+        // 2. The current episodes don't belong to this feed
+        // This prevents CarPlay playback changes from being treated as feed switches
+        let needsFeedSwitch = viewModel.selectedFeedId != feed.id && !currentEpisodesForThisFeed
         
-        // CRITICAL FIX: Immediately clear episodes to prevent showing stale data
-        // This ensures the UI never shows episodes from the wrong feed
-        if !currentEpisodesForThisFeed {
-            print("🔄 PodcastListView: FORCE clearing episodes to prevent stale display")
+        if needsFeedSwitch {
+            print("🔄 PodcastListView: Real feed switch detected - from \(viewModel.selectedFeedId ?? "nil") to \(feed.id)")
+            viewModel.selectedFeedId = feed.id
+            print("🔄 PodcastListView: Clearing episodes for real feed switch")
             viewModel.currentEpisodes.removeAll()
             // CRITICAL: Also clear loading state to prevent race conditions
             viewModel.operationInProgress = false
@@ -3692,7 +3694,16 @@ struct PodcastPlayerView: View {
             // CRITICAL: Clear pending task tracking to allow immediate reload
             let taskKey = "\(feed.id)-true"
             viewModel.pendingInitializationTasks.remove(taskKey)
-            print("🔄 PodcastListView: FORCE cleared loading state and pending tasks to allow fresh load")
+            print("🔄 PodcastListView: Cleared loading state and pending tasks for feed switch")
+        } else {
+            // Update selectedFeedId if needed, but don't clear episodes if they're already correct
+            if viewModel.selectedFeedId != feed.id {
+                print("🔄 PodcastListView: ⚠️ selectedFeedId mismatch (\(viewModel.selectedFeedId ?? "nil") vs \(feed.id)) but episodes are correct - updating selectedFeedId only")
+                viewModel.selectedFeedId = feed.id
+            } else {
+                print("🔄 PodcastListView: Already viewing feed \(feed.id) with correct episodes - no changes needed")
+            }
+            // CARPLAY FIX: Episodes belong to this feed, so keep them even if selectedFeedId was different
         }
         
         // CRITICAL PERFORMANCE: Skip ALL expensive operations when snapshots are available
