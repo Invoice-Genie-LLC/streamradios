@@ -135,6 +135,19 @@ class DataSyncManager: ObservableObject {
     private init() {
         setupProgressCalculation()
         
+        // 🔧 APP GROUP FIX: Check if Core Data is empty to detect TRUE fresh install
+        // App Group UserDefaults persist across app deletions, so we need to check Core Data instead
+        let coreDataIsEmpty = checkIfCoreDataIsEmpty()
+        if coreDataIsEmpty {
+            // TRUE fresh install - Core Data is empty, reset all flags
+            UserDefaults.standard.set(false, forKey: "HasLaunchedBefore")
+            UserDefaults.standard.set(false, forKey: "DataSyncCompleted")
+            UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
+            UserDefaults.standard.set(false, forKey: "HasPodcastFeedsSynced")
+            UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
+            UserDefaults.standard.synchronize()
+        }
+        
         // If this is not a fresh install, mark UI as ready immediately
         let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
         let hasSyncCompleted = UserDefaults.standard.bool(forKey: "DataSyncCompleted")
@@ -147,6 +160,35 @@ class DataSyncManager: ObservableObject {
         } else {
             print("🎯 DataSyncManager init: Set isFreshInstallUIReady=false (fresh install or sync not completed)")
         }
+    }
+    
+    // MARK: - Private Helper Methods
+    
+    /// Check if Core Data is empty to detect TRUE fresh install
+    /// App Group UserDefaults persist across app deletions, so we check Core Data instead
+    /// NOTE: We only check podcast feeds, not radio stations, because radio stations
+    /// are initialized early in app lifecycle BEFORE DataSyncManager.initeaa   () runs
+    private func checkIfCoreDataIsEmpty() -> Bool {
+        let context = CoreDataStack.shared.context
+        var isEmpty = false
+        
+        context.performAndWait {
+            do {
+                // Only check podcast feeds for fresh install detection
+                // Radio stations are initialized before DataSyncManager, so they're not reliable
+                let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                feedRequest.fetchLimit = 1
+                let feedCount = try context.count(for: feedRequest)
+                
+                // Core Data is empty if there are no podcast feeds
+                isEmpty = (feedCount == 0)
+            } catch {
+                print("❌ Error checking Core Data for fresh install: \(error)")
+                isEmpty = false // Assume not empty on error to be safe
+            }
+        }
+        
+        return isEmpty
     }
     
     // MARK: - Public Methods
@@ -186,12 +228,19 @@ class DataSyncManager: ObservableObject {
             }
             
             // Then: Sync Episode States (depends on feeds being loaded)
-            // SKIP episode state sync during fresh install - it's already done during RSS processing
+            // Check if episode states were already synced during RSS processing
             let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
             let hasPodcastFeedsSynced = UserDefaults.standard.bool(forKey: "HasPodcastFeedsSynced")
+            let hasEpisodeStatesSynced = UserDefaults.standard.bool(forKey: "HasEpisodeStatesSynced")
             
-            if isFreshInstall && hasPodcastFeedsSynced {
-                print("⚡ FRESH INSTALL: Skipping separate episode state sync - already completed during RSS processing")
+            if isFreshInstall && hasPodcastFeedsSynced && hasEpisodeStatesSynced {
+                print("⚡ FRESH INSTALL: Episode states already synced during RSS processing - marking as completed")
+                // CRITICAL FIX: Update episode states status to completed since it was already synced
+                await MainActor.run {
+                    episodeStatesStatus = .completed
+                    episodeStatesProgress = 1.0
+                    episodeStatesOperation = "✅ Episode states already synced during fresh install"
+                }
             } else {
                 await syncEpisodeStates()
             }
@@ -457,9 +506,10 @@ class DataSyncManager: ObservableObject {
             // Check if episode states were already synced during fresh install
             let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
             let hasPodcastFeedsSynced = UserDefaults.standard.bool(forKey: "HasPodcastFeedsSynced")
+            let hasEpisodeStatesSynced = UserDefaults.standard.bool(forKey: "HasEpisodeStatesSynced")
             
             let syncSuccess: Bool
-            if isFreshInstall && hasPodcastFeedsSynced {
+            if isFreshInstall && hasPodcastFeedsSynced && hasEpisodeStatesSynced {
                 // Episode states were already synced during fresh install RSS processing
                 print("⚡ PERFORMANCE: Skipping CloudKit episode sync - already completed during fresh install")
                 syncSuccess = true
@@ -1234,6 +1284,12 @@ class DataSyncManager: ObservableObject {
         
         // Mark sync as completed only after everything is truly ready
         UserDefaults.standard.set(true, forKey: "DataSyncCompleted")
+        
+        // CRITICAL FIX: Set HasLaunchedBefore ONLY after sync completes
+        // This ensures fresh install detection works correctly during the sync process
+        UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
+        print("✅ SYNC COMPLETE: Marked HasLaunchedBefore=true after successful sync")
+        
         UserDefaults.standard.synchronize()
         
         print("🎉 Fresh install data synchronization completed successfully!")
@@ -1607,10 +1663,16 @@ class DataSyncManager: ObservableObject {
                 episodeStatesStatus = .inProgress
                 episodeStatesOperation = "Fetching ALL episode states from CloudKit..."
                 episodeStatesProgress = 0.1
-                print("☁️ FRESH INSTALL: Fetching ALL episode states from CloudKit...")
+                
+                print("☁️ ========================================")
+                print("☁️ FRESH INSTALL: Starting CRITICAL episode state sync from CloudKit")
+                print("☁️ This will restore your favorites, play positions, and episode states")
+                print("☁️ ========================================")
                 
                 let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+                print("☁️ FRESH INSTALL: Calling syncEpisodeStatesFromCloudKit with isFreshInstall=\(isFreshInstall)")
                 let episodeStatesSyncSuccess = await podcastViewModel.syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+                print("☁️ FRESH INSTALL: Episode state sync completed with success=\(episodeStatesSyncSuccess)")
                 
                 if episodeStatesSyncSuccess {
                     podcastFeedsOperation = "All episode states synchronized"
@@ -1670,6 +1732,13 @@ class DataSyncManager: ObservableObject {
                 print("✅ Fresh install feed processing completed with \(podcastViewModel.podcastFeeds.count) feeds")
             } else {
                 print("📡 No feeds found in CloudKit - fresh install with empty podcast library")
+                
+                // Mark episode states as completed (no episodes to sync)
+                episodeStatesStatus = .completed
+                episodeStatesProgress = 1.0
+                episodeStatesOperation = "✅ No episodes to sync (empty library)"
+                UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+                
                 // Initialize artwork tracking with 0 feeds
                 startArtworkDownloadTracking(totalFeeds: 0)
                 UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
@@ -1677,6 +1746,13 @@ class DataSyncManager: ObservableObject {
             
         } catch {
             print("❌ Failed to initialize CloudKit feeds for fresh install: \(error)")
+            
+            // Mark episode states as completed with warning (sync failed)
+            episodeStatesStatus = .completed
+            episodeStatesProgress = 1.0
+            episodeStatesOperation = "⚠️ Episode sync skipped (feed sync failed)"
+            UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+            
             // Initialize artwork tracking with 0 feeds even on error
             startArtworkDownloadTracking(totalFeeds: 0)
             podcastFeedsOperation = "❌ Failed to sync podcast feeds from iCloud"

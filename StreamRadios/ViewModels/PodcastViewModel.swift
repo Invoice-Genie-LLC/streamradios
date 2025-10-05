@@ -6835,23 +6835,30 @@ class PodcastViewModel: ObservableObject {
     /// 
     /// To force a re-sync (for troubleshooting), call resetEpisodeStatesSyncFlag()
     func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async -> Bool {
-        // PERFORMANCE: Skip expensive CloudKit episode sync if we have snapshots for ANY feed
-        let hasAnySnapshot = await MainActor.run {
-            // Check if we have snapshots for any loaded feeds
-            for feed in self.podcastFeeds {
-                if self.getEpisodeSnapshot(for: feed.id) != nil {
-                    print("⚡ PERFORMANCE: Found snapshot for feed \(feed.title) - skipping CloudKit sync")
-                    return true
+        // CRITICAL FIX: During fresh install, ALWAYS sync from CloudKit even if snapshots exist
+        // Snapshots created during fresh install don't have CloudKit state data yet!
+        if !isFreshInstall {
+            // PERFORMANCE: Skip expensive CloudKit episode sync if we have snapshots for ANY feed
+            // This optimization only applies to non-fresh installs
+            let hasAnySnapshot = await MainActor.run {
+                // Check if we have snapshots for any loaded feeds
+                for feed in self.podcastFeeds {
+                    if self.getEpisodeSnapshot(for: feed.id) != nil {
+                        print("⚡ PERFORMANCE: Found snapshot for feed \(feed.title) - skipping CloudKit sync")
+                        return true
+                    }
                 }
+                return false
             }
-            return false
-        }
-        
-        // Skip CloudKit sync if we have snapshots (regardless of fresh install status)
-        // Snapshots already contain complete episode data with states
-        if hasAnySnapshot {
-            print("⚡ PERFORMANCE: Skipping CloudKit episode sync - using episode snapshots with complete state data")
-            return true
+            
+            // Skip CloudKit sync if we have snapshots (non-fresh install only)
+            // Snapshots already contain complete episode data with states
+            if hasAnySnapshot {
+                print("⚡ PERFORMANCE: Skipping CloudKit episode sync - using episode snapshots with complete state data")
+                return true
+            }
+        } else {
+            print("🆕 FRESH INSTALL: Forcing CloudKit episode state sync - snapshots don't have state data yet")
         }
         
         print("🔄 Syncing episode states from CloudKit (fresh install: \(isFreshInstall))")
@@ -6894,10 +6901,23 @@ class PodcastViewModel: ObservableObject {
                 if !coreDataUpdates.isEmpty {
                     do {
                         try await episodeManager.updateEpisodeStates(coreDataUpdates)
-                        print("💾 Saved \(coreDataUpdates.count) episode states to Core Data")
+                        
+                        // Count meaningful states for better logging
+                        let favoritesCount = coreDataUpdates.filter { $0.isFavorite ?? false }.count
+                        let progressCount = coreDataUpdates.filter { ($0.progress ?? 0) > 0 }.count
+                        let playedCount = coreDataUpdates.filter { $0.isPlayed ?? false }.count
+                        
+                        print("💾 ========================================")
+                        print("💾 EPISODE STATES SAVED: \(coreDataUpdates.count) total updates")
+                        print("💾   - Favorites: \(favoritesCount)")
+                        print("💾   - With Progress: \(progressCount)")
+                        print("💾   - Played: \(playedCount)")
+                        print("💾 ========================================")
                     } catch {
                         print("❌ Failed to save synced episode states to Core Data: \(error)")
                     }
+                } else {
+                    print("⚠️ No episode state updates received from CloudKit")
                 }
                 
                 // Update progress during UI refresh

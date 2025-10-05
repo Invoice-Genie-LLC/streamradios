@@ -704,12 +704,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     
     private func isFirstLaunch() -> Bool {
         let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-        if !hasLaunchedBefore {
-            UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
-            UserDefaults.standard.synchronize()
-            return true
-        }
-        return false
+        // CRITICAL FIX: Do NOT set HasLaunchedBefore here!
+        // This flag should ONLY be set by DataSyncManager AFTER fresh install sync completes
+        // Setting it here breaks the entire fresh install sync logic
+        return !hasLaunchedBefore
     }
     
     private func deleteLocalCoreDataStore() {

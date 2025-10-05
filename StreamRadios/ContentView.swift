@@ -271,6 +271,24 @@ struct ContentView: View {
             // SAFETY: Ensure TabView is visible on app appear
             ensureTabViewIsVisible()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .userIsScrolling)) { _ in
+            // CRITICAL: Hide TabView when user starts scrolling
+            guard PlaybackManager.shared.hasEverPlayedContent() else {
+                print("🏠 SCROLL: Ignoring scroll - user hasn't played content yet (fresh install protection)")
+                return
+            }
+            
+            print("🏠 SCROLL: User started scrolling - hiding TabView")
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                isScrolling = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .userStoppedScrolling)) { _ in
+            print("🏠 SCROLL: User stopped scrolling - showing TabView")
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                isScrolling = false
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ForceTabViewVisible"))) { _ in
             print("🏠 CONTENT VIEW: Received ForceTabViewVisible notification")
             
@@ -954,13 +972,20 @@ struct ContentView: View {
     
     /// Ensure TabView is visible - called on app appear and when needed
     private func ensureTabViewIsVisible() {
-        // Only reset if we're in a problematic state (both hidden and not scrolling)
-        if isFooterMenuHidden && !isScrolling {
-            print("🏠 SAFETY: Detected TabView hidden without scrolling - forcing visible")
+        // CRITICAL FIX: ALWAYS ensure TabView is visible when this is called
+        // Don't check state conditions - just force it visible
+        print("🏠 SAFETY: Ensuring TabView is visible - isFooterMenuHidden: \(isFooterMenuHidden), isScrolling: \(isScrolling)")
+        
+        // Only update if needed to avoid unnecessary animations
+        if isFooterMenuHidden || isScrolling {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 isFooterMenuHidden = false
+                isScrolling = false
             }
             updateTabBarVisibility()
+            print("🏠 SAFETY: TabView forced visible")
+        } else {
+            print("🏠 SAFETY: TabView already visible - no action needed")
         }
     }
     

@@ -168,7 +168,8 @@ struct RadioStreamApp: App {
             } else if let error = error {
                 print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
             }
-            UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
+            // CRITICAL FIX: Do NOT set HasLaunchedBefore here!
+            // This flag should ONLY be set by DataSyncManager AFTER fresh install sync completes
         }
     }
 }
