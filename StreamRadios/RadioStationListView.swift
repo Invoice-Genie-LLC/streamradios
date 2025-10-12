@@ -313,28 +313,34 @@ struct RadioStationListView: View {
                             .frame(width: 28, height: 28)
                     }
                     
-                    // Sort button - Only show in Favorites and All tabs
-                    if selectedSubTab == .favorites || selectedSubTab == .all {
-                        Button(action: {
-                            print("🔄 Sort button tapped in \(selectedSubTab == .favorites ? "Favorites" : "All") tab")
-                            // Show alert for Favorites tab to warn about modifying order
-                            if selectedSubTab == .favorites {
-                                print("⚠️ Showing favorites sort confirmation alert")
-                                alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
-                                    print("✅ User confirmed favorites sort change")
-                                    viewModel.sortFavoritesAlphabetically()
-                                }
-                            } else {
-                                // All tab - no alert needed
-                                print("✅ Sorting All tab immediately (no alert)")
-                                viewModel.sortStationsAlphabetically()
+                    // Sort button - Show in all tabs (Recent, Favorites, and All)
+                    Button(action: {
+                        print("🔄 Sort button tapped in \(selectedSubTab.title) tab")
+                        
+                        switch selectedSubTab {
+                        case .recent:
+                            // Recent tab - sort alphabetically
+                            print("✅ Sorting Recent tab alphabetically")
+                            viewModel.sortRecentStationsAlphabetically()
+                            
+                        case .favorites:
+                            // Favorites tab - show alert to warn about modifying order
+                            print("⚠️ Showing favorites sort confirmation alert")
+                            alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                                print("✅ User confirmed favorites sort change")
+                                viewModel.sortFavoritesAlphabetically()
                             }
-                        }) {
-                            Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                .foregroundColor(.white)
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(width: 28, height: 28)
+                            
+                        case .all:
+                            // All tab - sort immediately without alert
+                            print("✅ Sorting All tab alphabetically")
+                            viewModel.sortStationsAlphabetically()
                         }
+                    }) {
+                        Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                            .foregroundColor(.white)
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(width: 28, height: 28)
                     }
                     
                     // Add station button - Shows in all tabs

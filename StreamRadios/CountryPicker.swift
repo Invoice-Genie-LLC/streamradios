@@ -332,21 +332,37 @@ struct CountryPicker: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isSearchPresented.toggle()
-                            if !isSearchPresented {
-                                searchText = ""
-                            }
+                    HStack(spacing: 8) {
+                        // Sort button
+                        Button(action: {
+                            // Toggle sort direction in RadioStationViewModel
+                            RadioStationViewModel.shared.sortStationsAlphabetically()
+                        }) {
+                            Image(systemName: RadioStationViewModel.shared.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                .foregroundColor(.white)
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: 32, height: 32)
                         }
-                    }) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.white)
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 32, height: 32)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                        
+                        // Search button
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                isSearchPresented.toggle()
+                                if !isSearchPresented {
+                                    searchText = ""
+                                }
+                            }
+                        }) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.white)
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: 32, height: 32)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
                 }
             }
         }

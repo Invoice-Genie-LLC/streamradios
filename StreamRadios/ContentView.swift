@@ -571,19 +571,20 @@ struct ContentView: View {
                                                 .frame(width: 32, height: 32)
                                         }
                                         
-                                        // Sort button - Always reserve space, but only functional in Favorites and All tabs
+                                        // Sort button - Shows in all tabs (Recent, Favorites, and All)
                                         Button(action: {
-                                            // Only functional in Favorites and All tabs
-                                            if viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all {
-                                                // Show alert for Favorites tab to warn about modifying order
-                                                if viewModel.selectedSubTab == .favorites {
-                                                    alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
-                                                        viewModel.sortFavoritesAlphabetically()
-                                                    }
-                                                } else {
-                                                    // All tab - no alert needed
-                                                    viewModel.sortStationsAlphabetically()
+                                            switch viewModel.selectedSubTab {
+                                            case .recent:
+                                                // Recent tab - sort alphabetically
+                                                viewModel.sortRecentStationsAlphabetically()
+                                            case .favorites:
+                                                // Favorites tab - show alert to warn about modifying order
+                                                alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                                                    viewModel.sortFavoritesAlphabetically()
                                                 }
+                                            case .all:
+                                                // All tab - sort immediately without alert
+                                                viewModel.sortStationsAlphabetically()
                                             }
                                         }) {
                                             Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
@@ -591,8 +592,6 @@ struct ContentView: View {
                                                 .font(.system(size: 20, weight: .medium))
                                                 .frame(width: 32, height: 32)
                                         }
-                                        .opacity(viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all ? 1.0 : 0.0)
-                                        .disabled(viewModel.selectedSubTab == .recent)
                                         
                                         // Add station button - Shows in all tabs
                                         Button(action: {

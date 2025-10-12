@@ -2660,9 +2660,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func recentStations() -> [RadioStation] {
-        let recentStations = stations.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
-        // No need to save to CoreData - this method only filters and sorts, doesn't modify data
-        return recentStations
+        let recentStations = stations.filter { $0.lastPlayed != nil }
+        
+        // Sort based on current sort direction
+        // When isAscendingSort is true (A-Z), show oldest played first (most recent at bottom)
+        // When isAscendingSort is false (Z-A), show most recent played first (most recent at top)
+        if isAscendingSort {
+            // Ascending: oldest first, most recent last
+            return recentStations.sorted { $0.lastPlayed ?? Date.distantPast < $1.lastPlayed ?? Date.distantPast }
+        } else {
+            // Descending: most recent first, oldest last
+            return recentStations.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
+        }
     }
     
     func favoriteStations() -> [RadioStation] {
@@ -3128,6 +3137,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         print("📡 📝 Sorted \(favorites.count) favorites alphabetically: \(isAscendingSort ? "A-Z" : "Z-A")")
+    }
+    
+    /// Sort recent stations by recency (toggles between oldest first and most recent first)
+    func sortRecentStationsAlphabetically() {
+        // Toggle sort direction
+        isAscendingSort.toggle()
+        
+        // Save the sort direction to UserDefaults
+        UserDefaults.standard.set(isAscendingSort, forKey: "RadioStationSortAscending")
+        
+        print("📡 📝 Toggled recent stations sort direction to: \(isAscendingSort ? "Oldest First (Most Recent at Bottom)" : "Most Recent First (Most Recent at Top)")")
     }
     
     /// Load sorting preferences from UserDefaults
