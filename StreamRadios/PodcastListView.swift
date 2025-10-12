@@ -1721,7 +1721,7 @@ struct PodcastRowView: View {
                 }
             }
         }
-      //  .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
@@ -1733,7 +1733,7 @@ struct PodcastRowView: View {
                         .stroke(isPlaying ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
                 )
         )
-        .padding(.trailing, 8)
+        .padding(.trailing, -5)
         .contentShape(Rectangle())
         .onTapGesture {
             onTap()

@@ -160,7 +160,7 @@ struct PodcastPlayerSheetView: View {
                                 selectedTab = 1
                             }
                         }) {
-                            Text("Details")
+                            Text("Notes")
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(selectedTab == 1 ? selectedTextColor : unselectedTextColor)
                                 .padding(.horizontal, 10)
