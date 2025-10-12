@@ -2979,11 +2979,21 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     /// - When user puts the app in the background
     /// - When user force closes the app
     private func saveProgressToCloudKit(for episode: PodcastEpisode, progress: Double, reason: String) {
-        os_log("💾 Saving episode progress to CloudKit due to: %@ - Episode: %@, Progress: %.2f", 
+        os_log("☁️ Saving episode progress to CloudKit due to: %@ - Episode: %@, Progress: %.2f", 
                log: log, type: .info, reason, episode.title, progress)
         
         Task.detached(priority: .userInitiated) { [self] in
+            // CRITICAL: Sync to CloudKit immediately when episode is paused or switched
+            await PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+                episodeId: episode.id,
+                progress: progress
+            )
+            
+            // Also update episode state for UI consistency
             await self.viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: progress >= 0.99)
+            
+            os_log("✅ CloudKit sync completed for episode: %@ at %.2f%%", 
+                   log: self.log, type: .info, episode.title, progress * 100)
         }
     }
     
