@@ -145,7 +145,7 @@ class DataSyncManager: ObservableObject {
             UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
             UserDefaults.standard.set(false, forKey: "HasPodcastFeedsSynced")
             UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
-            UserDefaults.standard.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
         }
         
         // If this is not a fresh install, mark UI as ready immediately
@@ -267,7 +267,7 @@ class DataSyncManager: ObservableObject {
         UserDefaults.standard.set(false, forKey: "HasLaunchedBefore")
         UserDefaults.standard.set(false, forKey: "DataSyncCompleted")
         UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
-        UserDefaults.standard.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         startFreshInstallSync()
     }
     
@@ -1290,7 +1290,7 @@ class DataSyncManager: ObservableObject {
         UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
         print("✅ SYNC COMPLETE: Marked HasLaunchedBefore=true after successful sync")
         
-        UserDefaults.standard.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         
         print("🎉 Fresh install data synchronization completed successfully!")
         print("📊 Final state: Podcast feeds: \(podcastViewModel.podcastFeeds.count), Radio stations: \(radioStationViewModel.stations.count)")

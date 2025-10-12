@@ -690,15 +690,14 @@ struct PodcastListView: View {
                     .frame(height: 0.5)
             }
             
-            ScrollViewReader { proxy in
-                List {
-                    if viewModel.podcastFeeds.isEmpty {
-                        Text("No podcast feeds available")
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .italic()
-                            .padding()
-                    }
-                    ForEach(getFilteredFeedOrder(), id: \.self) { feedId in
+            Group {
+                if viewModel.podcastFeeds.isEmpty {
+                    // Beautiful empty state
+                    emptyStateView
+                } else {
+                    ScrollViewReader { proxy in
+                        List {
+                            ForEach(getFilteredFeedOrder(), id: \.self) { feedId in
                     if let feed = getFeedById(feedId) {
                         PodcastRowView(
                             feed: feed,
@@ -884,7 +883,9 @@ struct PodcastListView: View {
                         }
                     }
                 }
-            }
+                    } // End of ScrollViewReader
+                } // End of else
+            } // End of Group
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 100)  // Add extra space at the bottom
             }
@@ -1070,6 +1071,134 @@ struct PodcastListView: View {
         // Set auto-focus if we received a podcast ID
         if let podcastId = podcastId {
             newlyAddedPodcastId = podcastId
+        }
+    }
+    
+    // MARK: - Empty State View
+    
+    private var emptyStateView: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer()
+                    .frame(height: 30)
+                
+                // Animated icon
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.1))
+                        .frame(width: 140, height: 140)
+                    
+                    Image(systemName: "waveform.circle.fill")
+                        .font(.system(size: 70))
+                        .foregroundColor(.blue)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .padding(.bottom, 32)
+                
+                // Headline
+                Text("Start Your Podcast Journey")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.adaptivePrimaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 12)
+                
+                // Description
+                Text("Discover and subscribe to your favorite podcasts. Stay updated with the latest episodes and never miss a beat.")
+                    .font(.system(size: 16))
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 40)
+                
+                // Primary action button
+                Button(action: {
+                    showingSearchPodcasts = true
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text("Browse Podcasts")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.blue, Color.blue.opacity(0.8)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(14)
+                    .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 16)
+                
+                // Secondary action button
+                Button(action: {
+                    showingAddPodcast = true
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text("Add by RSS URL")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .foregroundColor(.blue)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(14)
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
+                
+                // Feature highlights
+                VStack(spacing: 20) {
+                    featureRow(
+                        icon: "cloud.fill",
+                        title: "Cloud Sync",
+                        description: "Your subscriptions sync across all your devices"
+                    )
+                    
+                    featureRow(
+                        icon: "arrow.down.circle.fill",
+                        title: "Offline Listening",
+                        description: "Download episodes and listen anywhere"
+                    )
+                }
+                .padding(.horizontal, 40)
+                
+                Spacer()
+                    .frame(height: 60)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color.adaptiveBackground)
+    }
+    
+    private func featureRow(icon: String, title: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundColor(.blue)
+                .frame(width: 40)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.adaptivePrimaryText)
+                
+                Text(description)
+                    .font(.system(size: 14))
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            
+            Spacer()
         }
     }
     

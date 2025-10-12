@@ -51,8 +51,8 @@ class RadioStationCloudKitManager: ObservableObject {
     private func setupInstantSync() {
         os_log("📡 RADIO SYNC: Setting up instant sync for radio stations", log: log, type: .info)
         
-        // Enable sync across devices for the ubiquitous store
-        ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - NSUbiquitousKeyValueStore syncs automatically
+        // Removed to fix Swift Concurrency warning
         
         // Listen for changes from other devices
         NotificationCenter.default.addObserver(
@@ -299,7 +299,7 @@ class RadioStationCloudKitManager: ObservableObject {
                 forKey: InstantSyncKeys.stationDeleted
             )
             
-            self.ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             os_log("📡 🚨 RADIO CRITICAL: Posted deletion sync notification for station: %@", log: self.log, type: .info, recordID.recordName)
         }
     }
@@ -858,7 +858,7 @@ class RadioStationCloudKitManager: ObservableObject {
                 forKey: InstantSyncKeys.bulkStationUpdated
             )
             
-            self.ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             os_log("📡 🚨 RADIO Posted bulk sync notification for %d stations", log: log, type: .info, stationIds.count)
         }
     }
@@ -1516,7 +1516,7 @@ class RadioStationCloudKitManager: ObservableObject {
                 forKey: InstantSyncKeys.stationUpdated
             )
             
-            self.ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             os_log("📡 🚨 RADIO CRITICAL: Posted station sync notification for: %@", log: self.log, type: .info, station.name)
         }
     }
@@ -1537,7 +1537,7 @@ class RadioStationCloudKitManager: ObservableObject {
                 forKey: InstantSyncKeys.stationDeleted
             )
             
-            self.ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             os_log("📡 🚨 RADIO CRITICAL: Posted deletion sync notification for station: %@", log: self.log, type: .info, stationId)
         }
     }
@@ -1560,7 +1560,7 @@ class RadioStationCloudKitManager: ObservableObject {
                 forKey: "instant_stations_bulk_deleted"
             )
             
-            self.ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             os_log("📡 🚨 RADIO BULK DELETION: Posted bulk deletion sync notification for %d stations", log: self.log, type: .info, stationIds.count)
         }
     }
@@ -1581,7 +1581,7 @@ class RadioStationCloudKitManager: ObservableObject {
                 forKey: InstantSyncKeys.orderChanged
             )
             
-            self.ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             os_log("📡 ✅ RADIO ORDER: Posted order sync notification (action: %@)", log: self.log, type: .info, action)
         }
     }
@@ -1609,7 +1609,7 @@ class RadioStationCloudKitManager: ObservableObject {
         
         await MainActor.run {
             self.ubiquitousStore.set(syncData, forKey: InstantSyncKeys.favoriteChanged)
-            self.ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             os_log("📡 🚨 RADIO CRITICAL: Posted favorite sync notification for station: %@", log: self.log, type: .info, stationId)
         }
     }

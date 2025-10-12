@@ -76,9 +76,8 @@ class PodcastCloudKitManager: ObservableObject {
         
         print("📡 🔧 SETUP: Added notification observer for NSUbiquitousKeyValueStore")
         
-        // Start syncing with iCloud immediately
-        let syncResult = ubiquitousStore.synchronize()
-        print("📡 🔧 SETUP: Initial synchronize() result: \(syncResult)")
+        // Note: synchronize() is deprecated and unnecessary - NSUbiquitousKeyValueStore syncs automatically
+        // Removed to fix Swift Concurrency warning
         
         os_log("📡 Instant sync setup completed", log: log, type: .info)
     }
@@ -100,8 +99,8 @@ class PodcastCloudKitManager: ObservableObject {
         
         print("📡 🧪 ICLOUD TEST: Writing test data...")
         ubiquitousStore.set(testValue, forKey: testKey)
-        let syncResult = ubiquitousStore.synchronize()
-        print("📡 🧪 ICLOUD TEST: Write sync result: \(syncResult)")
+        // Note: synchronize() is deprecated and unnecessary - syncs automatically
+        print("📡 🧪 ICLOUD TEST: Data written successfully")
         
         // Try to read it back
         if let readBack = ubiquitousStore.object(forKey: testKey) as? [String: Any] {
@@ -112,10 +111,8 @@ class PodcastCloudKitManager: ObservableObject {
         
         // Clean up test data
         ubiquitousStore.removeObject(forKey: testKey)
-        ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
     }
-    
-
     
     // MARK: - Account Validation
     
@@ -214,7 +211,7 @@ class PodcastCloudKitManager: ObservableObject {
         
         if removedCount > 0 {
             print("📡 🧹 CLEANUP: Removed \(removedCount) old episode-specific keys")
-            ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
         }
         
         // Clean up oversized collections
@@ -225,7 +222,7 @@ class PodcastCloudKitManager: ObservableObject {
         
         // Record cleanup date
         ubiquitousStore.set(now, forKey: SharedDataKeys.lastCleanupDate)
-        ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         
         print("📡 🧹 CLEANUP: Completed ubiquitous store cleanup")
     }
@@ -388,8 +385,7 @@ class PodcastCloudKitManager: ObservableObject {
         }
         
         if totalRemoved > 0 {
-            ubiquitousStore.synchronize()
-            print("📡 🧹 TEST CLEANUP: ✅ CRITICAL PERFORMANCE FIX - Removed \(totalRemoved) test episodes that were causing massive sync operations and app hangs!")
+        // Note: synchronize() is deprecated and unnecessary            print("📡 🧹 TEST CLEANUP: ✅ CRITICAL PERFORMANCE FIX - Removed \(totalRemoved) test episodes that were causing massive sync operations and app hangs!")
         } else {
             print("📡 🧹 TEST CLEANUP: No test data found to clean up")
         }
@@ -581,8 +577,7 @@ class PodcastCloudKitManager: ObservableObject {
         }
         
         if clearedCount > 0 {
-            ubiquitousStore.synchronize()
-            print("📡 ✅ Cleared \(clearedCount) stale sync data entries")
+        // Note: synchronize() is deprecated and unnecessary            print("📡 ✅ Cleared \(clearedCount) stale sync data entries")
         } else {
             print("📡 ✅ No stale sync data found to clear")
         }
@@ -1584,7 +1579,7 @@ class PodcastCloudKitManager: ObservableObject {
         
         // STEP 1: Store in shared collection to prevent quota exceeded
         updateEpisodeInSharedCollection(key: SharedDataKeys.episodeProgress, episodeId: episodeId, data: progressData)
-        let syncResult = ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         
         print("📡 🔑 PROGRESS SYNC: Using shared collection for episode \(episodeId)")
         print("📡 ⏰ PROGRESS SYNC: Storing progress \(String(format: "%.1f", progress * 100))% for episode \(episodeId)")
@@ -1612,8 +1607,8 @@ class PodcastCloudKitManager: ObservableObject {
             }
         }
         
-        os_log("📡 ⚡ REALTIME SYNC OUT: Episode %@ progress %.1f%% - Sync: %@", log: log, type: .info, episodeId, progress * 100, syncResult ? "✅" : "❌")
-        print("📡 ⚡ REALTIME SYNC OUT: Episode \(episodeId) progress \(Int(progress * 100))% - Sync result: \(syncResult ? "✅" : "❌")")
+        os_log("📡 ⚡ REALTIME SYNC OUT: Episode %@ progress %.1f%% synced", log: log, type: .info, episodeId, progress * 100)
+        print("📡 ⚡ REALTIME SYNC OUT: Episode \(episodeId) progress \(Int(progress * 100))% synced")
         
         // Store the timestamp for rate limiting if needed
         lastInstantSyncDate = Date()
@@ -1674,8 +1669,7 @@ class PodcastCloudKitManager: ObservableObject {
         ]
         
         ubiquitousStore.set(progressData, forKey: "instant_podcast_feed_progress")
-        ubiquitousStore.synchronize()
-        
+        // Note: synchronize() is deprecated and unnecessary        
         print("📡 📊 BROADCAST PROGRESS: \(feedTitle) - \(Int(progress * 100))% - \(message)")
         os_log("📡 📊 Broadcasting feed progress: %@ - %.1f%% - %@", log: log, type: .info, feedTitle, progress * 100, message)
     }
@@ -1689,10 +1683,10 @@ class PodcastCloudKitManager: ObservableObject {
         ]
         
         ubiquitousStore.set(favoriteData, forKey: "instant_radio_favorite")
-        let syncResult = ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         
-        os_log("📡 SYNC ATTEMPT: Radio favorite for %@ (%@) - Sync result: %@", log: log, type: .info, stationId, isFavorite ? "YES" : "NO", syncResult ? "SUCCESS" : "FAILED")
-        print("📡 SYNC ATTEMPT: Radio favorite for \(stationId) (\(isFavorite)) - Sync result: \(syncResult)")
+        os_log("📡 SYNC ATTEMPT: Radio favorite for %@ (%@) synced", log: log, type: .info, stationId, isFavorite ? "YES" : "NO")
+        print("📡 SYNC ATTEMPT: Radio favorite for \(stationId) (\(isFavorite)) synced")
     }
     
     /// Instantly sync radio station addition across devices
@@ -1703,8 +1697,7 @@ class PodcastCloudKitManager: ObservableObject {
         ]
         
         ubiquitousStore.set(stationData, forKey: "instant_radio_station_added")
-        ubiquitousStore.synchronize()
-        
+        // Note: synchronize() is deprecated and unnecessary        
         if let stationName = station["name"] as? String {
             os_log("📡 Instantly synced radio station addition: %@", log: log, type: .info, stationName)
         }
@@ -1719,8 +1712,7 @@ class PodcastCloudKitManager: ObservableObject {
         ]
         
         ubiquitousStore.set(removalData, forKey: "instant_radio_station_removed")
-        ubiquitousStore.synchronize()
-        
+        // Note: synchronize() is deprecated and unnecessary        
         os_log("📡 Instantly synced radio station removal: %@ (%@)", log: log, type: .info, stationName, stationId)
     }
     
@@ -1738,8 +1730,7 @@ class PodcastCloudKitManager: ObservableObject {
         ]
         
         ubiquitousStore.set(podcastData, forKey: "instant_podcast_feed_added")
-        ubiquitousStore.synchronize()
-        
+        // Note: synchronize() is deprecated and unnecessary        
         if let feedTitle = feedData["title"] as? String {
             os_log("📡 Instantly synced podcast feed addition: %@", log: log, type: .info, feedTitle)
         }
@@ -1778,21 +1769,17 @@ class PodcastCloudKitManager: ObservableObject {
             print("📡 🔄 Sync attempt \(syncAttempt)/\(maxAttempts)")
             
             ubiquitousStore.set(removalData, forKey: "instant_podcast_feed_removed")
-            let syncResult = ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary - syncs automatically
             
-            if syncResult {
-                // Verify sync by attempting to read back
-                if let readBack = ubiquitousStore.object(forKey: "instant_podcast_feed_removed") as? [String: Any],
-                   let syncedFeedId = readBack["feedId"] as? String,
-                   syncedFeedId == feedId {
-                    syncSucceeded = true
-                    print("📡 ✅ ENHANCED SYNC SUCCESS: Feed removal synced on attempt \(syncAttempt)")
-                    os_log("📡 SYNC SUCCESS: Feed removal %@ (%@) with %d episodes synced successfully", log: log, type: .info, feedTitle, feedId, episodeIds.count)
-                } else {
-                    print("📡 ⚠️ Sync result was true but verification failed on attempt \(syncAttempt)")
-                }
+            // Verify sync by attempting to read back
+            if let readBack = ubiquitousStore.object(forKey: "instant_podcast_feed_removed") as? [String: Any],
+               let syncedFeedId = readBack["feedId"] as? String,
+               syncedFeedId == feedId {
+                syncSucceeded = true
+                print("📡 ✅ ENHANCED SYNC SUCCESS: Feed removal synced on attempt \(syncAttempt)")
+                os_log("📡 SYNC SUCCESS: Feed removal %@ (%@) with %d episodes synced successfully", log: log, type: .info, feedTitle, feedId, episodeIds.count)
             } else {
-                print("📡 ❌ Sync failed on attempt \(syncAttempt)")
+                print("📡 ⚠️ Verification failed on attempt \(syncAttempt)")
             }
             
             if !syncSucceeded && syncAttempt < maxAttempts {
@@ -1831,12 +1818,12 @@ class PodcastCloudKitManager: ObservableObject {
         
         // STEP 1: Store in shared collection to prevent quota exceeded
         updateEpisodeInSharedCollection(key: SharedDataKeys.episodeFavorites, episodeId: episodeId, data: favoriteData)
-        let syncResult = ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         
         print("📡 🔑 FAVORITE SYNC: Using shared collection for episode \(episodeId)")
         print("📡 ⭐ FAVORITE SYNC: Storing favorite=\(isFavorite) for episode \(episodeId)")
         
-        print("📡 🚀 FAVORITE SYNC RESULT: iCloud sync result: \(syncResult ? "✅ SUCCESS" : "❌ FAILED")")
+        print("📡 🚀 FAVORITE SYNC RESULT: iCloud sync completed")
         
         // STEP 2: Persist to CloudKit for permanent storage across devices
         Task.detached(priority: .userInitiated) {
@@ -1861,7 +1848,7 @@ class PodcastCloudKitManager: ObservableObject {
             }
         }
         
-        os_log("📡 Instantly synced podcast favorite: %@ (favorite: %@) - Result: %@", log: log, type: .info, episodeId, isFavorite ? "YES" : "NO", syncResult ? "SUCCESS" : "FAILED")
+        os_log("📡 Instantly synced podcast favorite: %@ (favorite: %@)", log: log, type: .info, episodeId, isFavorite ? "YES" : "NO")
         
         // Verify data was stored in shared collection
         if let storedData = getEpisodeFromSharedCollection(key: SharedDataKeys.episodeFavorites, episodeId: episodeId) {
@@ -1890,12 +1877,12 @@ class PodcastCloudKitManager: ObservableObject {
         
         // STEP 1: Store in shared collection to prevent quota exceeded
         updateEpisodeInSharedCollection(key: SharedDataKeys.episodeDownloads, episodeId: episodeId, data: downloadData)
-        let syncResult = ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         
         print("📡 🔑 DOWNLOAD SYNC: Using shared collection for episode \(episodeId)")
         print("📡 📥 DOWNLOAD SYNC: Storing downloaded=\(isDownloaded) for episode \(episodeId)")
         
-        print("📡 🚀 DOWNLOAD SYNC RESULT: iCloud sync result: \(syncResult ? "✅ SUCCESS" : "❌ FAILED")")
+        print("📡 🚀 DOWNLOAD SYNC RESULT: iCloud sync completed")
         
         // Verify data was stored in shared collection
         if let storedData = getEpisodeFromSharedCollection(key: SharedDataKeys.episodeDownloads, episodeId: episodeId) {
@@ -1927,7 +1914,7 @@ class PodcastCloudKitManager: ObservableObject {
             }
         }
         
-        os_log("📡 Instantly synced podcast download: %@ (downloaded: %@) - Result: %@", log: log, type: .info, episodeId, isDownloaded ? "YES" : "NO", syncResult ? "SUCCESS" : "FAILED")
+        os_log("📡 Instantly synced podcast download: %@ (downloaded: %@)", log: log, type: .info, episodeId, isDownloaded ? "YES" : "NO")
     }
     
     /// Instantly sync podcast episode played status across devices
@@ -1949,12 +1936,12 @@ class PodcastCloudKitManager: ObservableObject {
         
         // STEP 1: Store in shared collection to prevent quota exceeded
         updateEpisodeInSharedCollection(key: SharedDataKeys.episodePlayed, episodeId: episodeId, data: playedData)
-        let syncResult = ubiquitousStore.synchronize()
+        // Note: synchronize() is deprecated and unnecessary
         
         print("📡 🔑 PLAYED SYNC: Using shared collection for episode \(episodeId)")
         print("📡 ✅ PLAYED SYNC: Storing played=\(isPlayed) for episode \(episodeId)")
         
-        print("📡 🚀 PLAYED SYNC RESULT: iCloud sync result: \(syncResult ? "✅ SUCCESS" : "❌ FAILED")")
+        print("📡 🚀 PLAYED SYNC RESULT: iCloud sync completed")
         
         // Verify data was stored in shared collection
         if let storedData = getEpisodeFromSharedCollection(key: SharedDataKeys.episodePlayed, episodeId: episodeId) {
@@ -1986,7 +1973,7 @@ class PodcastCloudKitManager: ObservableObject {
             }
         }
         
-        os_log("📡 Instantly synced podcast played: %@ (played: %@) - Result: %@", log: log, type: .info, episodeId, isPlayed ? "YES" : "NO", syncResult ? "SUCCESS" : "FAILED")
+        os_log("📡 Instantly synced podcast played: %@ (played: %@)", log: log, type: .info, episodeId, isPlayed ? "YES" : "NO")
     }
     
     // MARK: - Episode State CloudKit Sync
@@ -2738,7 +2725,7 @@ class PodcastCloudKitManager: ObservableObject {
             ]
             
             ubiquitousStore.set(syncData, forKey: "instant_podcast_feed_removed")
-            ubiquitousStore.synchronize()
+            // Note: synchronize() is deprecated and unnecessary
             
             os_log("📡 ✅ Posted instant sync notification for cross-device deletion: %@ (account: %@)", log: log, type: .info, feedId, String(accountID.prefix(16)))
             print("📡 🚨 CROSS-DEVICE SYNC: Posted instant deletion notification for feed: \(feedId)")

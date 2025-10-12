@@ -96,8 +96,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Request that global player be suppressed on next launch
         UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
         
-        // Force synchronize UserDefaults to ensure data persistence
-        UserDefaults.standard.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
+        // Removed to fix Swift Concurrency warning
         
         // Final crash log save
         DebugLogger.logInfo("App termination completed successfully", category: "AppLifecycle")
@@ -122,8 +122,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             print("🔧 AppDelegate: Radio is playing - not suppressing player on next launch")
         }
         
-        // Force synchronize to persist data
-        UserDefaults.standard.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
+        // Removed to fix Swift Concurrency warning
     }
 
         func updatePodcastStateAndSave() {
@@ -229,8 +229,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
             }
             
-            // 3. Force immediate UserDefaults synchronization
-            UserDefaults.standard.synchronize()
+            // 3. Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
+            // Removed to fix Swift Concurrency warning
             
             // 4. Also call the enhanced method for additional safety (but don't wait for it)
             performEnhancedProgressSave(reason: reason)
@@ -466,8 +466,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
          
          // REMOVED: This is now handled by the universal save method above
         
-        // Force synchronize to ensure data persistence
-        UserDefaults.standard.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
+        // Removed to fix Swift Concurrency warning
     }
     
     lazy var persistentContainer: NSPersistentContainer = {

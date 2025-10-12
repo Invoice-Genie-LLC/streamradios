@@ -651,8 +651,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Ensure progress is saved when app is force closed or goes to background
             handleAppWillTerminate()
             
-            // Additional safety: Force save to UserDefaults
-            UserDefaults.standard.synchronize()
+            // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
+            // Removed to fix Swift Concurrency warning
         }
     }
     

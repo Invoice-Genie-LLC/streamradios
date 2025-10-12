@@ -152,7 +152,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
                 appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
                 appGroupDefaults.set("SceneDidBecomeActive", forKey: "CarPlaySyncSource")
-                appGroupDefaults.synchronize()
+                // Note: synchronize() is deprecated and unnecessary
                 print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when main app became active")
             }
             
@@ -194,7 +194,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
                     appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
                     appGroupDefaults.set("SceneWillEnterForeground", forKey: "CarPlaySyncSource")
-                    appGroupDefaults.synchronize()
+                    // Note: synchronize() is deprecated and unnecessary
                     print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when app entered foreground")
                 }
                 
@@ -247,7 +247,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
         }
         
-        // Force synchronize UserDefaults
-        UserDefaults.standard.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
+        // Removed to fix Swift Concurrency warning
     }
 }
