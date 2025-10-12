@@ -3197,11 +3197,8 @@ struct PodcastPlayerView: View {
                     
                     print("INSTANT BACK: Navigation completed immediately")
                     
-                    // DEFERRED: Handle cleanup operations in background without blocking UI
-                    Task.detached(priority: .background) {
-                        await podcastPlayer.handleNavigationAway()
-                        print("BACKGROUND: Cleanup completed after instant navigation")
-                    }
+                    // NOTE: Cleanup is handled automatically by onChange(of: selectedPodcast) and onDisappear
+                    // No need to call handleNavigationAway here as it can cause delays
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.title2)
@@ -3215,6 +3212,18 @@ struct PodcastPlayerView: View {
             // Clean up timers to prevent memory leaks
             scrollDebounceTimer?.invalidate()
             scrollDebounceTimer = nil
+            
+            // Save progress for currently playing/paused episode before leaving
+            if let currentEpisode = podcastPlayer.currentEpisode,
+               currentEpisode.feedId == feed.id,
+               podcastPlayer.currentTime > 0 {
+                // Save progress immediately without blocking navigation
+                Task.detached(priority: .background) {
+                    await MainActor.run {
+                        self.podcastPlayer.saveProgressIfNeeded()
+                    }
+                }
+            }
             
             // Reset view state for fresh appearance next time
             viewDidAppear = false
