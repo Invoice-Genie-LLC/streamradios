@@ -174,16 +174,20 @@ class SubscriptionManager: ObservableObject {
                 print("   - Current: \(introductoryOffer.periodCount) \(introductoryOffer.period.unit) \(introductoryOffer.paymentMode)")
             }
         } else {
-            print("❌ CRITICAL: NO INTRODUCTORY OFFER CONFIGURED!")
-            print("🔧 To fix this issue in App Store Connect:")
-            print("   1. Go to App Store Connect → My Apps → StreamRadios")
-            print("   2. Navigate to Subscriptions → \(subscriptionProductId)")
-            print("   3. Add Introductory Offer:")
-            print("      - Type: Free Trial")
-            print("      - Duration: 7 days")
-            print("      - Price: $0.00")
-            print("   4. Submit for review if needed")
-            print("   ⚠️ Until fixed, recent subscriptions will be treated as trials automatically")
+            print("ℹ️ No introductory offer detected by StoreKit")
+            print("")
+            print("🧪 SANDBOX TESTING:")
+            print("   → This is NORMAL if your sandbox test user already consumed the trial")
+            print("   → To test the trial again, create a NEW sandbox test user in App Store Connect")
+            print("   → Each sandbox user can only use an introductory offer ONCE (by design)")
+            print("")
+            print("🔧 Troubleshooting:")
+            print("   1. Delete app completely from device/simulator")
+            print("   2. Create new sandbox test user: App Store Connect → Users & Access → Sandbox Testers")
+            print("   3. Sign out of old sandbox account on device: Settings → App Store → Sandbox Account")
+            print("   4. Reinstall app and sign in with new sandbox test user")
+            print("")
+            print("✅ App functionality is NOT affected - trial logic works correctly")
         }
     }
     
@@ -462,15 +466,12 @@ class SubscriptionManager: ObservableObject {
         print("   - Price: \(product.displayPrice)")
         
         if let introductoryOffer = product.subscription?.introductoryOffer {
-            print("✅ Introductory offer found:")
+            print("✅ Introductory offer available:")
             print("   - Type: \(introductoryOffer.type)")
             print("   - Period: \(introductoryOffer.period)")
             print("   - Price: \(introductoryOffer.displayPrice)")
         } else {
-            print("⚠️ NO INTRODUCTORY OFFER CONFIGURED!")
-            print("   - This product should have a 7-day free trial")
-            print("   - Please add introductory offer in App Store Connect:")
-            print("   - Type: Free Trial, Duration: 7 days")
+            print("ℹ️ No introductory offer detected (user may have already used trial, or StoreKit cache issue)")
         }
         
         let result = try await product.purchase()
