@@ -3189,22 +3189,36 @@ struct PodcastPlayerView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: {
-                    print("INSTANT BACK: User tapped back button")
-                    
-                    // INSTANT NAVIGATION: Clear loading state and navigate immediately
-                    podcastPlayer.loadingEpisodeId = nil
-                    selectedPodcast = nil // Trigger instant navigation
-                    
-                    print("INSTANT BACK: Navigation completed immediately")
-                    
-                    // NOTE: Cleanup is handled automatically by onChange(of: selectedPodcast) and onDisappear
-                    // No need to call handleNavigationAway here as it can cause delays
+                    // CRITICAL: Execute navigation IMMEDIATELY on main thread with highest priority
+                    // This ensures nothing can block or delay the back navigation
+                    Task { @MainActor in
+                        print("🔙 INSTANT BACK: User tapped back button - FORCING IMMEDIATE NAVIGATION")
+                        
+                        // CRITICAL: Cancel ALL ongoing operations immediately
+                        viewModel.operationInProgress = false
+                        viewModel.isLoadingEpisodes = false
+                        podcastPlayer.loadingEpisodeId = nil
+                        
+                        // CRITICAL: Set selectedPodcast to nil immediately - triggers navigation
+                        selectedPodcast = nil
+                        
+                        print("🔙 INSTANT BACK: Navigation completed - selectedPodcast set to nil")
+                    }
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.title2)
                         .foregroundColor(.blue)
+                        .padding(8) // Increase tappable area
                 }
                 .buttonStyle(PlainButtonStyle())
+                .simultaneousGesture(TapGesture().onEnded { _ in
+                    // EMERGENCY FALLBACK: If button action doesn't fire, this gesture will
+                    Task { @MainActor in
+                        selectedPodcast = nil
+                    }
+                })
+                .allowsHitTesting(true) // Ensure button is always tappable
+                .zIndex(1000) // Ensure button is above all other content
             }
         }
                 .onAppear(perform: handleOnAppear)

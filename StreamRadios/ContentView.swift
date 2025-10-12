@@ -44,6 +44,7 @@ struct ContentView: View {
     // State for home button and footer menu visibility
     @State private var isFooterMenuHidden = false // Start with menu visible
     @State private var isScrolling = false
+    @State private var homeButtonExplicitlyShowingTabView = false // Track when home button forces TabView visible
 
     init() {
         // Always start on radio tab - player loading is independent of tab selection
@@ -281,6 +282,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ForceTabViewVisible"))) { _ in
             print("🏠 CONTENT VIEW: Received ForceTabViewVisible notification")
             
+            // CRITICAL: Set flag to prevent shouldHideFooterMenu from overriding
+            homeButtonExplicitlyShowingTabView = true
+            
             // CRITICAL: Force TabView to be visible regardless of current state
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 isFooterMenuHidden = false
@@ -291,6 +295,11 @@ struct ContentView: View {
             updateTabBarVisibility()
             
             print("🏠 CONTENT VIEW: Forced TabView visible - isFooterMenuHidden: \(isFooterMenuHidden), isScrolling: \(isScrolling)")
+            
+            // Reset the flag after a short delay to allow normal behavior to resume
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                homeButtonExplicitlyShowingTabView = false
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             print("🏠 APP STATE: App became active - ensuring TabView is visible")
@@ -305,6 +314,12 @@ struct ContentView: View {
             updateTabBarVisibility()
         }
         .onChange(of: shouldHideFooterMenu) { _, newValue in
+            // CRITICAL: Don't override if home button explicitly requested TabView to be visible
+            guard !homeButtonExplicitlyShowingTabView else {
+                print("🏠 ContentView: Ignoring shouldHideFooterMenu change - home button explicitly showing TabView")
+                return
+            }
+            
             // CRITICAL: Automatically update isFooterMenuHidden based on shouldHideFooterMenu logic
             // This ensures TabView hides when scrolling after first-time playback
             if newValue != isFooterMenuHidden {
