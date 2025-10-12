@@ -4243,6 +4243,30 @@ class PodcastViewModel: ObservableObject {
                 print("⚡ Using cached episodes - displaying immediately while checking for new episodes")
             }
             
+            // CRITICAL FIX: Update currentEpisodes immediately with feed episodes to prevent empty list
+            // This ensures episodes display right away, even before RSS refresh completes
+            await MainActor.run {
+                if self.selectedFeedId == feedId && self.currentEpisodes.isEmpty {
+                    // Apply current filter to the feed episodes
+                    let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+                    let filteredEpisodes: [PodcastEpisode]
+                    
+                    switch filter {
+                    case .all:
+                        filteredEpisodes = feed.episodes
+                    case .favorites:
+                        filteredEpisodes = feed.episodes.filter { $0.state.isFavorite }
+                    case .downloads:
+                        filteredEpisodes = feed.episodes.filter { $0.state.isDownloaded }
+                    }
+                    
+                    self.currentEpisodes = filteredEpisodes
+                    self.isLoadingEpisodes = false
+                    self.operationInProgress = false
+                    print("✅ INSTANT DISPLAY: Showing \(filteredEpisodes.count) episodes immediately from feed object")
+                }
+            }
+            
             // CRITICAL PERFORMANCE: Skip expensive individual state updates if we have a snapshot
             let currentHasSnapshot = getEpisodeSnapshot(for: feedId) != nil
             let episodesWithUpdatedStates: [PodcastEpisode]
