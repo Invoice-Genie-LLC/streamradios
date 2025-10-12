@@ -6002,15 +6002,21 @@ class PodcastViewModel: ObservableObject {
                     feedDeletionProgress = 0.85
                 }
                 
-                // First, explicitly clear all episode state data for this feed
-                await clearEpisodeStatesFromCoreData(episodeIds)
-                
-                // Then delete the feed and episode entities
+                // Delete the feed and all episode entities from Core Data
+                // This will handle both the feed record and all associated episodes
                 try await deleteFeedFromCoreData(feed)
                 
                 // PERSISTENT CACHE: Clear all cached data for deleted feed
                 await episodeManager.clearPersistentCacheForFeed(feed.id)
                 print("🧽 DELETION: Cleared persistent cache for deleted feed \(feed.title)")
+                
+                // Clear tab filter cache and snapshots for deleted feed
+                await MainActor.run {
+                    self.clearTabFilterCache(for: feed.id)
+                    self.feedIsolationManager.clearEpisodesForFeed(feed.id)
+                    self.snapshotTimestamps.removeValue(forKey: feed.id)
+                    print("🧽 DELETION: Cleared tab filter cache and snapshots for deleted feed")
+                }
                 
                 await MainActor.run {
                     feedDeletionMessage = "Database cleanup complete"
@@ -8238,10 +8244,10 @@ class PodcastViewModel: ObservableObject {
     // MARK: - Delete Feed with CloudKit Integration
     
     private func deleteFeedFromCoreData(_ feed: PodcastFeed) async throws {
-        print("💾 Starting safe deletion from Core Data for feed: \(feed.title)")
+        print("💾 Starting comprehensive deletion from Core Data for feed: \(feed.title)")
         
-        // Use main context with proper transaction handling to avoid merge conflicts
-        let context = CoreDataStack.shared.persistentContainer.viewContext
+        // Use background context to avoid blocking UI and prevent merge conflicts
+        let context = CoreDataStack.shared.persistentContainer.newBackgroundContext()
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -8253,39 +8259,38 @@ class PodcastViewModel: ObservableObject {
                     let episodeCount = try context.count(for: episodeCountRequest)
                     print("💾 Found \(episodeCount) episodes to delete for feed: \(feed.title)")
                     
-                    // Step 2: Fetch and delete episodes in batches to avoid memory issues
-                    var totalDeleted = 0
-                    let batchSize = 500
+                    // Step 2: Delete ALL episodes for this feed using batch delete for better performance
+                    // This is more efficient than fetching and deleting individually
+                    let episodeBatchDeleteRequest = NSBatchDeleteRequest(
+                        fetchRequest: {
+                            let request: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
+                            request.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                            return request
+                        }()
+                    )
                     
-                    while true {
-                        let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                        episodeFetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                        episodeFetchRequest.fetchLimit = batchSize
-                        
-                        let episodes = try context.fetch(episodeFetchRequest)
-                        if episodes.isEmpty {
-                            break
-                        }
-                        
-                        // Delete this batch of episodes
-                        for episode in episodes {
-                            // Clear any relationships first
-                            episode.feed = nil
-                            context.delete(episode)
-                        }
-                        
-                        totalDeleted += episodes.count
-                        
-                        // Save periodically to prevent memory buildup
-                        if totalDeleted % (batchSize * 2) == 0 {
-                            try context.save()
-                            print("💾 Intermediate save: deleted \(totalDeleted) episodes so far")
-                        }
+                    // Configure batch delete to return object IDs for proper notification
+                    episodeBatchDeleteRequest.resultType = .resultTypeObjectIDs
+                    
+                    // Execute batch delete
+                    let batchDeleteResult = try context.execute(episodeBatchDeleteRequest) as? NSBatchDeleteResult
+                    let deletedObjectIDs = batchDeleteResult?.result as? [NSManagedObjectID] ?? []
+                    
+                    print("💾 Batch deleted \(deletedObjectIDs.count) episodes from Core Data")
+                    
+                    // Step 3: Merge changes to other contexts to keep them in sync
+                    let changes = [NSDeletedObjectsKey: deletedObjectIDs]
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context])
+                    
+                    // Also merge to view context on main thread
+                    DispatchQueue.main.async {
+                        NSManagedObjectContext.mergeChanges(
+                            fromRemoteContextSave: changes,
+                            into: [CoreDataStack.shared.persistentContainer.viewContext]
+                        )
                     }
                     
-                    print("💾 Deleted \(totalDeleted) episodes from Core Data")
-                    
-                    // Step 3: Now delete the feed record
+                    // Step 4: Now delete the feed record
                     let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                     feedFetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
                     
@@ -8297,22 +8302,65 @@ class PodcastViewModel: ObservableObject {
                     }
                     print("💾 Deleted \(feedResults.count) feed records from Core Data")
                     
-                    // Step 4: Final save
+                    // Step 5: Save all changes
                     try context.save()
-                    print("💾 ✅ Successfully completed safe deletion for feed: \(feed.title)")
+                    
+                    // Step 6: Verify deletion was successful
+                    let verifyEpisodesRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    verifyEpisodesRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                    let remainingEpisodes = try context.count(for: verifyEpisodesRequest)
+                    
+                    let verifyFeedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    verifyFeedRequest.predicate = NSPredicate(format: "id == %@", feed.id)
+                    let remainingFeeds = try context.count(for: verifyFeedRequest)
+                    
+                    if remainingEpisodes > 0 || remainingFeeds > 0 {
+                        print("💾 ⚠️ WARNING: Deletion incomplete - \(remainingEpisodes) episodes and \(remainingFeeds) feeds still exist!")
+                        throw NSError(domain: "PodcastDeletion", code: 1, userInfo: [
+                            NSLocalizedDescriptionKey: "Failed to completely delete feed. \(remainingEpisodes) episodes and \(remainingFeeds) feeds remain."
+                        ])
+                    }
+                    
+                    print("💾 ✅ Successfully completed comprehensive deletion for feed: \(feed.title)")
+                    print("💾 ✅ Verified: 0 episodes and 0 feeds remain in Core Data")
                     continuation.resume()
                     
                 } catch {
                     print("💾 ❌ Error in Core Data deletion: \(error.localizedDescription)")
                     
-                    // Attempt recovery by rolling back and trying a simpler approach
+                    // Attempt recovery by rolling back and trying a fallback approach
                     context.rollback()
                     
                     do {
-                        // Try one more time with a fresh context state
+                        // Fallback: Try manual deletion with fresh context state
                         context.refreshAllObjects()
                         
-                        // Simple deletion approach - just delete what we can find
+                        // Delete episodes manually in batches
+                        var totalDeleted = 0
+                        let batchSize = 500
+                        
+                        while true {
+                            let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                            episodeFetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                            episodeFetchRequest.fetchLimit = batchSize
+                            
+                            let episodes = try context.fetch(episodeFetchRequest)
+                            if episodes.isEmpty {
+                                break
+                            }
+                            
+                            for episode in episodes {
+                                episode.feed = nil
+                                context.delete(episode)
+                            }
+                            
+                            totalDeleted += episodes.count
+                            try context.save()
+                        }
+                        
+                        print("💾 Fallback: Deleted \(totalDeleted) episodes manually")
+                        
+                        // Delete feed records
                         let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                         feedFetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
                         
@@ -8322,10 +8370,10 @@ class PodcastViewModel: ObservableObject {
                         }
                         
                         try context.save()
-                        print("💾 ✅ Recovery successful - completed deletion")
+                        print("💾 ✅ Fallback deletion successful")
                         continuation.resume()
                     } catch {
-                        print("💾 ❌ Recovery also failed: \(error)")
+                        print("💾 ❌ Fallback deletion also failed: \(error)")
                         continuation.resume(throwing: error)
                     }
                 }
