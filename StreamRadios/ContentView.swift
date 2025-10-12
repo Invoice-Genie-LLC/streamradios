@@ -555,10 +555,66 @@ struct ContentView: View {
                                 
                                 Spacer(minLength: 0)
                                 
-                                // Button Container with rounded background
-                                Group {
+                                // Button Container with rounded background - Fixed width for consistency
+                                ZStack {
+                                    // Always render button container to maintain consistent width
+                                    HStack(spacing: 8) {
+                                        // Search toggle button - Shows in all tabs
+                                        Button(action: {
+                                            withAnimation(.easeInOut(duration: 0.3)) {
+                                                isSearchPresented = true
+                                            }
+                                        }) {
+                                            Image(systemName: "magnifyingglass")
+                                                .foregroundColor(.white)
+                                                .font(.system(size: 20, weight: .medium))
+                                                .frame(width: 32, height: 32)
+                                        }
+                                        
+                                        // Sort button - Always reserve space, but only functional in Favorites and All tabs
+                                        Button(action: {
+                                            // Only functional in Favorites and All tabs
+                                            if viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all {
+                                                // Show alert for Favorites tab to warn about modifying order
+                                                if viewModel.selectedSubTab == .favorites {
+                                                    alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                                                        viewModel.sortFavoritesAlphabetically()
+                                                    }
+                                                } else {
+                                                    // All tab - no alert needed
+                                                    viewModel.sortStationsAlphabetically()
+                                                }
+                                            }
+                                        }) {
+                                            Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                                .foregroundColor(.white)
+                                                .font(.system(size: 20, weight: .medium))
+                                                .frame(width: 32, height: 32)
+                                        }
+                                        .opacity(viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all ? 1.0 : 0.0)
+                                        .disabled(viewModel.selectedSubTab == .recent)
+                                        
+                                        // Add station button - Shows in all tabs
+                                        Button(action: {
+                                            if viewModel.selectedCountry == "Select Country" {
+                                                alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                                            } else {
+                                                activeSheet = .addStation
+                                            }
+                                        }) {
+                                            Image(systemName: "plus")
+                                                .foregroundColor(.white)
+                                                .font(.system(size: 20, weight: .medium))
+                                                .frame(width: 32, height: 32)
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .opacity(isSearchPresented ? 0.0 : 1.0)
+                                    .disabled(isSearchPresented)
+                                    
+                                    // Cancel button overlay when search is active
                                     if isSearchPresented {
-                                        // Only Cancel button when search is active
                                         Button("Cancel") {
                                             withAnimation(.easeInOut(duration: 0.3)) {
                                                 isSearchPresented = false
@@ -567,56 +623,6 @@ struct ContentView: View {
                                             }
                                         }
                                         .foregroundColor(.blue)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                    } else {
-                                        HStack(spacing: 8) {
-                                            // Search toggle button - Shows in all tabs
-                                            Button(action: {
-                                                withAnimation(.easeInOut(duration: 0.3)) {
-                                                    isSearchPresented = true
-                                                }
-                                            }) {
-                                                Image(systemName: "magnifyingglass")
-                                                    .foregroundColor(.white)
-                                                    .font(.system(size: 20, weight: .medium))
-                                                    .frame(width: 32, height: 32)
-                                            }
-                                            
-                                            // Sort button - Only show in Favorites and All tabs
-                                            if viewModel.selectedSubTab == .favorites || viewModel.selectedSubTab == .all {
-                                                Button(action: {
-                                                    // Show alert for Favorites tab to warn about modifying order
-                                                    if viewModel.selectedSubTab == .favorites {
-                                                        alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
-                                                            viewModel.sortFavoritesAlphabetically()
-                                                        }
-                                                    } else {
-                                                        // All tab - no alert needed
-                                                        viewModel.sortStationsAlphabetically()
-                                                    }
-                                                }) {
-                                                    Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                                        .foregroundColor(.white)
-                                                        .font(.system(size: 20, weight: .medium))
-                                                        .frame(width: 32, height: 32)
-                                                }
-                                            }
-                                            
-                                            // Add station button - Shows in all tabs
-                                            Button(action: {
-                                                if viewModel.selectedCountry == "Select Country" {
-                                                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                                                } else {
-                                                    activeSheet = .addStation
-                                                }
-                                            }) {
-                                                Image(systemName: "plus")
-                                                    .foregroundColor(.white)
-                                                    .font(.system(size: 20, weight: .medium))
-                                                    .frame(width: 32, height: 32)
-                                            }
-                                        }
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
                                     }

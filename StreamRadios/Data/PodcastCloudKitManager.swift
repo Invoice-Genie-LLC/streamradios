@@ -55,7 +55,11 @@ class PodcastCloudKitManager: ObservableObject {
         self.privateDatabase = container.privateCloudDatabase
         setupInstantSync()
         setupCloudKitSubscriptions()
-        performUbiquitousStoreCleanup()
+        
+        // Perform cleanup asynchronously to avoid blocking app startup
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) {
+            self.performUbiquitousStoreCleanup()
+        }
     }
     
     // MARK: - Instant Sync Setup
@@ -144,26 +148,7 @@ class PodcastCloudKitManager: ObservableObject {
         // Check if sync data has account ID (new feature)
         if let syncAccountID = syncData["icloud_account_id"] as? String {
             let isValid = syncAccountID == currentAccountID
-            if !isValid {
-                print("📡 ❌ ACCOUNT VALIDATION: Cross-account sync detected - ignoring data from different account")
-                print("📡 🆔 Current account: \(currentAccountID.prefix(16))...")
-                print("📡 🆔 Sync account: \(syncAccountID.prefix(16))...")
-                
-                // Additional debugging: Check if it's potentially the same account with different tokens
-                if let currentToken = FileManager.default.ubiquityIdentityToken {
-                    print("📡 🔍 DEBUG: Current ubiquity token available: \(type(of: currentToken))")
-                    print("📡 🔍 DEBUG: Full current account ID length: \(currentAccountID.count)")
-                    print("📡 🔍 DEBUG: Full sync account ID length: \(syncAccountID.count)")
-                }
-                
-                // For debugging: Allow admin override (remove in production)
-                if let allowCrossAccount = syncData["allow_cross_account"] as? Bool, allowCrossAccount {
-                    print("📡 ⚠️ ADMIN OVERRIDE: Allowing cross-account sync due to debug flag")
-                    return true
-                }
-            } else {
-                print("📡 ✅ ACCOUNT VALIDATION: Same account confirmed")
-            }
+            // Silently reject cross-account data without logging spam
             return isValid
         }
         
@@ -182,14 +167,21 @@ class PodcastCloudKitManager: ObservableObject {
         // CRITICAL: Force cleanup if test data exists (performance fix)
         let hasTestData = checkForTestDataPollution()
         
-        // Only cleanup if it's been more than cleanup interval since last cleanup, UNLESS we have test data
-        guard hasTestData || lastCleanup == 0 || (now - lastCleanup) > cleanupInterval else {
+        // CRITICAL: Force cleanup if cross-account data exists (fixes spam errors)
+        let hasCrossAccountData = checkForCrossAccountData()
+        
+        // Only cleanup if it's been more than cleanup interval since last cleanup, UNLESS we have issues
+        guard hasTestData || hasCrossAccountData || lastCleanup == 0 || (now - lastCleanup) > cleanupInterval else {
             print("📡 🧹 CLEANUP: Skipping cleanup - last cleanup was recent")
             return
         }
         
         if hasTestData {
             print("📡 🧹 CLEANUP: ⚠️ FORCING CLEANUP - Test data pollution detected causing performance issues!")
+        }
+        
+        if hasCrossAccountData {
+            print("📡 🧹 CLEANUP: ⚠️ FORCING CLEANUP - Cross-account data detected causing sync errors!")
         }
         
         print("📡 🧹 CLEANUP: Starting ubiquitous store cleanup to prevent quota exceeded")
@@ -235,30 +227,91 @@ class PodcastCloudKitManager: ObservableObject {
         cleanupCollection(key: SharedDataKeys.episodePlayed, maxEntries: maxEntriesPerCollection)
     }
     
-    /// Clean up a specific collection by removing oldest entries
+    /// Clean up a specific collection by removing oldest entries AND cross-account data
     private func cleanupCollection(key: String, maxEntries: Int) {
         guard let collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] else {
             return
         }
         
-        if collection.count <= maxEntries {
+        guard let currentAccountID = getCurrentiCloudAccountID() else {
+            print("📡 🧹 CLEANUP: No iCloud account - skipping \(key) cleanup")
             return
         }
         
-        print("📡 🧹 CLEANUP: Collection \(key) has \(collection.count) entries, trimming to \(maxEntries)")
+        var crossAccountCount = 0
+        var cleanedCollection: [String: [String: Any]] = [:]
         
-        // Sort by timestamp and keep only the most recent entries
-        let sortedEntries = collection.sorted { entry1, entry2 in
-            let timestamp1 = (entry1.value["timestamp"] as? Double) ?? 0
-            let timestamp2 = (entry2.value["timestamp"] as? Double) ?? 0
-            return timestamp1 > timestamp2
+        // CRITICAL: Remove all episodes from other iCloud accounts
+        for (episodeId, episodeData) in collection {
+            if let syncAccountID = episodeData["icloud_account_id"] as? String {
+                if syncAccountID == currentAccountID {
+                    // Keep this episode - it belongs to current account
+                    cleanedCollection[episodeId] = episodeData
+                } else {
+                    // Remove cross-account episode
+                    crossAccountCount += 1
+                }
+            } else {
+                // No account ID - keep for backward compatibility but mark for future cleanup
+                cleanedCollection[episodeId] = episodeData
+            }
         }
         
-        let trimmedArray = Array(sortedEntries.prefix(maxEntries))
-        let trimmedCollection = Dictionary(trimmedArray, uniquingKeysWith: { _, second in second })
-        ubiquitousStore.set(trimmedCollection, forKey: key)
+        if crossAccountCount > 0 {
+            print("📡 🧹 CLEANUP: Removed \(crossAccountCount) cross-account episodes from \(key)")
+        }
         
-        print("📡 🧹 CLEANUP: Trimmed \(key) from \(collection.count) to \(trimmedCollection.count) entries")
+        // Now trim by size if still too large
+        if cleanedCollection.count > maxEntries {
+            print("📡 🧹 CLEANUP: Collection \(key) has \(cleanedCollection.count) entries, trimming to \(maxEntries)")
+            
+            // Sort by timestamp and keep only the most recent entries
+            let sortedEntries = cleanedCollection.sorted { entry1, entry2 in
+                let timestamp1 = (entry1.value["timestamp"] as? Double) ?? 0
+                let timestamp2 = (entry2.value["timestamp"] as? Double) ?? 0
+                return timestamp1 > timestamp2
+            }
+            
+            let trimmedArray = Array(sortedEntries.prefix(maxEntries))
+            cleanedCollection = Dictionary(trimmedArray, uniquingKeysWith: { _, second in second })
+            
+            print("📡 🧹 CLEANUP: Trimmed \(key) from \(collection.count) to \(cleanedCollection.count) entries")
+        }
+        
+        // Save cleaned collection back
+        if crossAccountCount > 0 || cleanedCollection.count != collection.count {
+            ubiquitousStore.set(cleanedCollection, forKey: key)
+            print("📡 🧹 CLEANUP: Updated \(key) - removed \(collection.count - cleanedCollection.count) total entries")
+        }
+    }
+    
+    /// Check if cross-account data exists that would cause sync errors
+    private func checkForCrossAccountData() -> Bool {
+        guard let currentAccountID = getCurrentiCloudAccountID() else {
+            return false
+        }
+        
+        let collectionsToCheck = [
+            SharedDataKeys.episodeProgress,
+            SharedDataKeys.episodeFavorites,
+            SharedDataKeys.episodeDownloads,
+            SharedDataKeys.episodePlayed
+        ]
+        
+        for key in collectionsToCheck {
+            if let data = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] {
+                for (_, episodeData) in data {
+                    if let syncAccountID = episodeData["icloud_account_id"] as? String {
+                        if syncAccountID != currentAccountID {
+                            // Found cross-account data
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+        
+        return false
     }
     
     /// Check if test data pollution exists that would cause performance issues
@@ -982,19 +1035,20 @@ class PodcastCloudKitManager: ObservableObject {
     /// Handle sync for shared collections
     private func handleSharedCollectionSync(key: String, dataType: String) {
         guard let collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] else {
-            print("📡 ❌ SHARED SYNC: No data found for collection \(key)")
             return
         }
         
-        print("📡 📊 SHARED SYNC: Processing \(collection.count) episodes in \(dataType) collection")
+        var processedCount = 0
+        var skippedCount = 0
         
         // Process each episode in the collection
         for (episodeId, episodeData) in collection {
             // Validate iCloud account to prevent cross-account contamination
             if !validateSyncAccount(syncData: episodeData) {
-                print("📡 ❌ SHARED SYNC REJECTED: Invalid iCloud account for episode \(episodeId)")
+                skippedCount += 1
                 continue
             }
+            processedCount += 1
             
             switch dataType {
             case "progress":
@@ -1014,8 +1068,13 @@ class PodcastCloudKitManager: ObservableObject {
                     processPlayedData(episodeData, expectedEpisodeId: episodeId)
                 }
             default:
-                print("📡 ⚠️ SHARED SYNC: Unknown data type \(dataType)")
+                break
             }
+        }
+        
+        // Only log summary if there's something meaningful to report
+        if processedCount > 0 || skippedCount > 5 {
+            print("📡 📊 SYNC SUMMARY: Processed \(processedCount) \(dataType) updates, skipped \(skippedCount) cross-account items")
         }
     }
     
@@ -1023,32 +1082,25 @@ class PodcastCloudKitManager: ObservableObject {
     private func processProgressDataFromSharedCollection(_ episodeData: [String: Any], expectedEpisodeId: String) {
         guard let progress = episodeData["progress"] as? Double,
               let timestamp = episodeData["timestamp"] as? Double else {
-            print("📡 ❌ SHARED PROGRESS: Invalid progress data for episode \(expectedEpisodeId)")
             return
         }
         
-        print("📡 ✅ SHARED PROGRESS: Found data for episode \(expectedEpisodeId) - progress: \(String(format: "%.1f", progress * 100))%")
         self.processProgressSync(episodeId: expectedEpisodeId, progress: progress, timestamp: timestamp)
     }
     
     // New unique-key handler for progress sync
     private func handleInstantPodcastProgressSync(for episodeId: String, uniqueKey: String) {
-        print("📡 🔄 PROGRESS SYNC ATTEMPT: Reading from unique key '\(uniqueKey)'")
-        
         guard let progressData = ubiquitousStore.object(forKey: uniqueKey) as? [String: Any],
               let progress = progressData["progress"] as? Double,
               let timestamp = progressData["timestamp"] as? Double else {
-            print("📡 ❌ PROGRESS SYNC FAILED: No valid data found for key '\(uniqueKey)'")
             return
         }
         
         // Validate account to prevent cross-account contamination
         if !validateSyncAccount(syncData: progressData) {
-            print("📡 ❌ PROGRESS SYNC BLOCKED: Cross-account sync validation failed")
             return
         }
         
-        print("📡 ✅ PROGRESS SYNC SUCCESS: Found data for episode \(episodeId) - progress: \(String(format: "%.1f", progress * 100))%")
         self.processProgressSync(episodeId: episodeId, progress: progress, timestamp: timestamp)
     }
     
@@ -1061,20 +1113,14 @@ class PodcastCloudKitManager: ObservableObject {
             return
         }
         
-        print("📡 🔄 LEGACY PROGRESS SYNC: Processing old format for episode \(episodeId)")
         self.processProgressSync(episodeId: episodeId, progress: progress, timestamp: timestamp)
     }
     
     // Common progress processing logic
     private func processProgressSync(episodeId: String, progress: Double, timestamp: Double) {
-        
-        // Note: Account validation already done in calling method
-        print("📡 🔄 PROCESSING PROGRESS SYNC: Episode \(episodeId) progress \(String(format: "%.1f", progress * 100))%")
-        
         // Check if this is a newer update than what we have locally
         let currentTime = Date().timeIntervalSince1970
         if currentTime - timestamp > 30 { // Ignore updates older than 30 seconds
-            print("📡 ⏰ REJECTING SYNC: Progress update too old (\(Int(currentTime - timestamp))s)")
             return
         }
         
@@ -1083,28 +1129,19 @@ class PodcastCloudKitManager: ObservableObject {
         
         // HIGHEST PROGRESS SYNC: Compare CloudKit vs local and propagate highest to all devices
         if progress < currentProgress {
-            print("🔍 📊 HIGHEST PROGRESS: Local higher (\(String(format: "%.4f", currentProgress))) > CloudKit (\(String(format: "%.4f", progress)) - propagating local to all devices")
-            
             // Propagate the higher local progress back to CloudKit for all devices
             Task.detached(priority: .userInitiated) {
                 await self.syncPodcastProgressInstantly(episodeId: episodeId, progress: currentProgress)
             }
             return
-        } else if progress > currentProgress {
-            print("🔍 📊 HIGHEST PROGRESS: CloudKit higher (\(String(format: "%.4f", progress))) > Local (\(String(format: "%.4f", currentProgress)) - applying CloudKit")
-        } else {
-            print("🔍 📊 HIGHEST PROGRESS: Values equal (\(String(format: "%.4f", progress))")
         }
         
         let progressDiff = abs(progress - currentProgress)
         
         // Only update if there's a meaningful difference (> 1% or significant time change)
         if progressDiff < 0.01 && currentProgress > 0 {
-            print("📡 📊 SYNC SKIP: Progress difference too small (\(Int(progressDiff * 100))%)")
             return
         }
-        
-        print("📡 🔄 PROCESSING REALTIME SYNC: Episode \(episodeId) progress \(Int(progress * 100))% (from other device)")
         
         // Update local episode state immediately SILENTLY (this will trigger UI updates but not CloudKit sync)
         EpisodeStateManager.shared.setProgressSilently(for: episodeId, progress: progress)
