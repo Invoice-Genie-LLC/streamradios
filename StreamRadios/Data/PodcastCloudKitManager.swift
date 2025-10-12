@@ -483,21 +483,49 @@ class PodcastCloudKitManager: ObservableObject {
         var collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] ?? [:]
         collection.removeValue(forKey: episodeId)
         ubiquitousStore.set(collection, forKey: key)
+        
+        // CRITICAL: Synchronize to ensure deletion is persisted to iCloud immediately
+        ubiquitousStore.synchronize()
     }
     
     /// Remove multiple episodes from all shared collections (for feed deletion)
     func removeEpisodesFromSharedCollections(episodeIds: [String]) {
-        print("📡 🧹 Removing \(episodeIds.count) episodes from CloudKit shared collections")
+        print("📡 🧹 FEED DELETION: Removing \(episodeIds.count) episodes from CloudKit shared collections")
+        
+        // OPTIMIZED: Load all collections once, modify them, then save once
+        var progressCollection = ubiquitousStore.object(forKey: SharedDataKeys.episodeProgress) as? [String: [String: Any]] ?? [:]
+        var favoritesCollection = ubiquitousStore.object(forKey: SharedDataKeys.episodeFavorites) as? [String: [String: Any]] ?? [:]
+        var downloadsCollection = ubiquitousStore.object(forKey: SharedDataKeys.episodeDownloads) as? [String: [String: Any]] ?? [:]
+        var playedCollection = ubiquitousStore.object(forKey: SharedDataKeys.episodePlayed) as? [String: [String: Any]] ?? [:]
+        
+        print("📡 🧹 BEFORE DELETION: Progress=\(progressCollection.count), Favorites=\(favoritesCollection.count), Downloads=\(downloadsCollection.count), Played=\(playedCollection.count)")
+        
+        // Remove all episodes from all collections
+        var removedFromProgress = 0
+        var removedFromFavorites = 0
+        var removedFromDownloads = 0
+        var removedFromPlayed = 0
         
         for episodeId in episodeIds {
-            // Remove from all shared collections
-            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodeProgress, episodeId: episodeId)
-            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodeFavorites, episodeId: episodeId)
-            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodeDownloads, episodeId: episodeId)
-            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodePlayed, episodeId: episodeId)
+            if progressCollection.removeValue(forKey: episodeId) != nil { removedFromProgress += 1 }
+            if favoritesCollection.removeValue(forKey: episodeId) != nil { removedFromFavorites += 1 }
+            if downloadsCollection.removeValue(forKey: episodeId) != nil { removedFromDownloads += 1 }
+            if playedCollection.removeValue(forKey: episodeId) != nil { removedFromPlayed += 1 }
         }
         
-        print("📡 ✅ Removed \(episodeIds.count) episodes from CloudKit shared collections")
+        print("📡 🧹 REMOVED: Progress=\(removedFromProgress), Favorites=\(removedFromFavorites), Downloads=\(removedFromDownloads), Played=\(removedFromPlayed)")
+        
+        // Save all collections at once
+        ubiquitousStore.set(progressCollection, forKey: SharedDataKeys.episodeProgress)
+        ubiquitousStore.set(favoritesCollection, forKey: SharedDataKeys.episodeFavorites)
+        ubiquitousStore.set(downloadsCollection, forKey: SharedDataKeys.episodeDownloads)
+        ubiquitousStore.set(playedCollection, forKey: SharedDataKeys.episodePlayed)
+        
+        // CRITICAL: Synchronize once at the end to persist all deletions to iCloud
+        let syncSuccess = ubiquitousStore.synchronize()
+        
+        print("📡 🧹 AFTER DELETION: Progress=\(progressCollection.count), Favorites=\(favoritesCollection.count), Downloads=\(downloadsCollection.count), Played=\(playedCollection.count)")
+        print("📡 ✅ FEED DELETION: Removed \(episodeIds.count) episodes from CloudKit shared collections (sync: \(syncSuccess ? "SUCCESS" : "FAILED"))")
     }
     
     /// Delete episode states from CloudKit database for specific episodes (batch operation)

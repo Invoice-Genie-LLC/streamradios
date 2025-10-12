@@ -6006,6 +6006,9 @@ class PodcastViewModel: ObservableObject {
                 // This will handle both the feed record and all associated episodes
                 try await deleteFeedFromCoreData(feed)
                 
+                // CRITICAL: Verify and clean up any orphaned episode records
+                await verifyAndCleanupOrphanedEpisodes(feedId: feed.id, episodeIds: episodeIds)
+                
                 // PERSISTENT CACHE: Clear all cached data for deleted feed
                 await episodeManager.clearPersistentCacheForFeed(feed.id)
                 print("🧽 DELETION: Cleared persistent cache for deleted feed \(feed.title)")
@@ -10885,6 +10888,53 @@ extension PodcastViewModel {
     private func markFeedAsFinished(_ feedId: String) {
         feedProcessingQueue.sync(flags: .barrier) {
             feedsBeingProcessed.remove(feedId)
+        }
+    }
+    
+    /// Verify and clean up any orphaned episode records after feed deletion
+    private func verifyAndCleanupOrphanedEpisodes(feedId: String, episodeIds: [String]) async {
+        print("🧹 CLEANUP: Verifying episode deletion for feed: \(feedId)")
+        
+        let context = CoreDataStack.shared.persistentContainer.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        
+        await context.perform {
+            do {
+                // Check for any remaining episodes with this feedId
+                let feedIdRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                feedIdRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+                let remainingByFeedId = try context.fetch(feedIdRequest)
+                
+                if !remainingByFeedId.isEmpty {
+                    print("🧹 CLEANUP: Found \(remainingByFeedId.count) orphaned episodes by feedId - deleting")
+                    for episode in remainingByFeedId {
+                        context.delete(episode)
+                    }
+                }
+                
+                // Check for any remaining episodes by episode IDs
+                let episodeIdRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeIdRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
+                let remainingByEpisodeId = try context.fetch(episodeIdRequest)
+                
+                if !remainingByEpisodeId.isEmpty {
+                    print("🧹 CLEANUP: Found \(remainingByEpisodeId.count) orphaned episodes by episodeId - deleting")
+                    for episode in remainingByEpisodeId {
+                        context.delete(episode)
+                    }
+                }
+                
+                // Save if we deleted anything
+                if context.hasChanges {
+                    try context.save()
+                    print("🧹 ✅ CLEANUP: Removed \(remainingByFeedId.count + remainingByEpisodeId.count) orphaned episode records")
+                } else {
+                    print("🧹 ✅ CLEANUP: No orphaned episodes found - deletion was complete")
+                }
+                
+            } catch {
+                print("🧹 ❌ CLEANUP: Failed to verify episode deletion: \(error.localizedDescription)")
+            }
         }
     }
 
