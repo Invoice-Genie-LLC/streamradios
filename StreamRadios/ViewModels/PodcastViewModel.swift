@@ -5927,17 +5927,141 @@ class PodcastViewModel: ObservableObject {
                     feedDeletionProgress = 0.1
                 }
                 
-                // Step 2: Clear episode states from EpisodeStateManager (BATCH OPTIMIZED)
+                // Step 1.5: CRITICAL - Stop and clear player FIRST (without saving progress) if playing episode from deleted feed
+                await MainActor.run {
+                    feedDeletionMessage = "Checking active player..."
+                    feedDeletionProgress = 0.12
+                    
+                    let podcastPlayer = PodcastPlayer.shared
+                    if let currentEpisode = podcastPlayer.currentEpisode {
+                        // Check if the currently playing episode belongs to the feed being deleted
+                        if currentEpisode.feedId == feed.id {
+                            print("🎵 PLAYER CLEAR: Currently playing episode '\(currentEpisode.title)' belongs to feed being deleted")
+                            print("🎵 PLAYER CLEAR: Stopping playback WITHOUT saving progress to prevent re-creating state data")
+                            
+                            // CRITICAL: Stop player WITHOUT saving progress
+                            // This prevents the player from re-creating episode state data after we clear it
+                            if let player = podcastPlayer.player {
+                                player.pause()
+                            }
+                            podcastPlayer.isPlaying = false
+                            podcastPlayer.userWantsToPlay = false
+                            podcastPlayer.wasManuallyPaused = false
+                            
+                            // Clear the current episode BEFORE clearing states
+                            podcastPlayer.currentEpisode = nil
+                            
+                            // Post notification to update UI
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PodcastPlayerCleared"),
+                                object: nil,
+                                userInfo: ["reason": "feed_being_deleted", "feedId": feed.id]
+                            )
+                            
+                            print("🎵 PLAYER CLEAR: ✅ Player stopped and cleared WITHOUT saving progress")
+                        } else {
+                            print("🎵 PLAYER CHECK: Currently playing episode belongs to different feed - no action needed")
+                        }
+                    } else {
+                        print("🎵 PLAYER CHECK: No episode currently playing - no action needed")
+                    }
+                }
+                
+                // Step 2: Clear episode states COMPREHENSIVELY from ALL sources
                 await MainActor.run {
                     feedDeletionMessage = "Clearing episode progress and states..."
                     feedDeletionProgress = 0.2
                 }
                 
-                // Use batch deletion for much better performance
+                // 2a. Clear from EpisodeStateManager (in-memory dictionaries + UserDefaults)
+                print("🧹 FEED DELETION: Clearing from EpisodeStateManager (in-memory + UserDefaults)...")
                 EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
+                print("🧹 FEED DELETION: ✅ Cleared \(episodeIds.count) episodes from EpisodeStateManager")
+                
+                // 2a2. Clear from ViewModel's local episodeProgress dictionary IMMEDIATELY
+                await MainActor.run {
+                    print("🧹 FEED DELETION: Clearing from ViewModel episodeProgress dictionary...")
+                    for episodeId in episodeIds {
+                        self.episodeProgress.removeValue(forKey: episodeId)
+                    }
+                    print("🧹 FEED DELETION: ✅ Cleared \(episodeIds.count) episodes from ViewModel episodeProgress")
+                }
+                
+                // 2b. Clear episode state data from Core Data BEFORE episodes are deleted
+                await MainActor.run {
+                    feedDeletionMessage = "Clearing Core Data episode states (progress, played, etc)..."
+                    feedDeletionProgress = 0.3
+                }
+                
+                print("🧹 FEED DELETION: Clearing progress and states from Core Data records...")
+                await clearEpisodeStatesFromCoreData(episodeIds)
+                print("🧹 FEED DELETION: ✅ Cleared episode states from Core Data for \(episodeIds.count) episodes")
+                
+                // 2b2. CRITICAL: Force IMMEDIATE synchronous save to Core Data to persist changes
+                await MainActor.run {
+                    do {
+                        let context = CoreDataStack.shared.persistentContainer.viewContext
+                        
+                        // Force immediate save if there are changes
+                        if context.hasChanges {
+                            try context.save()
+                            print("🧹 💾 IMMEDIATE SAVE: Forced main context save to persist cleared states")
+                        }
+                        
+                        // Force persistent store to flush to disk immediately
+                        try context.persistentStoreCoordinator?.performAndWait {
+                            // This ensures changes are written to disk immediately
+                            print("🧹 💾 IMMEDIATE SAVE: Flushed changes to persistent store")
+                        }
+                        
+                    } catch {
+                        print("🧹 ❌ Error forcing immediate Core Data save: \(error)")
+                    }
+                }
+                
+                // 2c. IMMEDIATE verification - Force context refresh and verify clearing
+                await MainActor.run {
+                    do {
+                        let context = CoreDataStack.shared.persistentContainer.viewContext
+                        
+                        // CRITICAL: Refresh context to ensure we see latest data
+                        context.refreshAllObjects()
+                        print("🧹 🔄 VERIFICATION: Refreshed main context to see latest data")
+                        
+                        // Verify ALL episode states are cleared
+                        let verifyRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        verifyRequest.predicate = NSPredicate(format: "id IN %@ AND (progress > 0 OR isPlayed == YES OR isFavorite == YES OR isDownloaded == YES)", episodeIds)
+                        let episodesWithStates = try context.count(for: verifyRequest)
+                        
+                        if episodesWithStates > 0 {
+                            print("🧹 ⚠️ WARNING: \(episodesWithStates) episodes still have state data after clearing!")
+                            
+                            // Force clear them again if they still have states
+                            print("🧹 🔄 FORCING SECOND CLEAR: Attempting to clear remaining states...")
+                            
+                            let fetchForClear: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                            fetchForClear.predicate = NSPredicate(format: "id IN %@", episodeIds)
+                            let episodes = try context.fetch(fetchForClear)
+                            
+                            for episode in episodes {
+                                episode.progress = 0.0
+                                episode.isPlayed = false
+                                episode.isFavorite = false
+                                episode.isDownloaded = false
+                            }
+                            
+                            try context.save()
+                            print("🧹 ✅ SECOND CLEAR: Force-cleared \(episodes.count) episodes and saved")
+                        } else {
+                            print("🧹 ✅ VERIFIED: All episode states successfully cleared from Core Data")
+                        }
+                    } catch {
+                        print("🧹 ❌ Error verifying/clearing progress: \(error)")
+                    }
+                }
                 
                 await MainActor.run {
-                    feedDeletionMessage = "✅ Cleared \(totalEpisodes) episode states (batch)"
+                    feedDeletionMessage = "✅ Cleared \(totalEpisodes) episode states from all sources"
                     feedDeletionProgress = 0.4
                 }
                 
@@ -5996,7 +6120,7 @@ class PodcastViewModel: ObservableObject {
                     }
                 }
                 
-                // Step 5: Delete from Core Data
+                // Step 5: Delete from Core Data with comprehensive cleanup
                 await MainActor.run {
                     feedDeletionMessage = "Deleting from local database..."
                     feedDeletionProgress = 0.85
@@ -6005,6 +6129,54 @@ class PodcastViewModel: ObservableObject {
                 // Delete the feed and all episode entities from Core Data
                 // This will handle both the feed record and all associated episodes
                 try await deleteFeedFromCoreData(feed)
+                
+                // CRITICAL: Comprehensive Core Data context refresh (same as Settings -> Delete Podcast Data)
+                await MainActor.run {
+                    feedDeletionMessage = "Refreshing Core Data contexts..."
+                    feedDeletionProgress = 0.87
+                    
+                    print("🔄 FEED DELETION: Starting comprehensive context refresh...")
+                    let mainContext = CoreDataStack.shared.persistentContainer.viewContext
+                    
+                    // Reset the main context to clear all cached objects
+                    mainContext.reset()
+                    print("🔄 FEED DELETION: Main context reset completed")
+                    
+                    // Refresh all objects in the context (in case any are still cached)
+                    mainContext.refreshAllObjects()
+                    print("🔄 FEED DELETION: All objects refreshed")
+                    
+                    // Also refresh any background contexts
+                    CoreDataStack.shared.persistentContainer.performBackgroundTask { backgroundContext in
+                        backgroundContext.reset()
+                        print("🔄 FEED DELETION: Background context reset completed")
+                    }
+                }
+                
+                // CRITICAL: Verify deletion was successful after context refresh
+                await MainActor.run {
+                    do {
+                        let mainContext = CoreDataStack.shared.persistentContainer.viewContext
+                        
+                        // Check for remaining episodes
+                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                        let remainingEpisodes = try mainContext.count(for: episodeRequest)
+                        
+                        // Check for remaining feed
+                        let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                        feedRequest.predicate = NSPredicate(format: "id == %@", feed.id)
+                        let remainingFeeds = try mainContext.count(for: feedRequest)
+                        
+                        if remainingEpisodes > 0 || remainingFeeds > 0 {
+                            print("❌ FEED DELETION ERROR: Data still exists after deletion! Episodes: \(remainingEpisodes), Feeds: \(remainingFeeds)")
+                        } else {
+                            print("✅ FEED DELETION SUCCESS: All data successfully deleted and contexts refreshed")
+                        }
+                    } catch {
+                        print("❌ FEED DELETION: Error verifying deletion: \(error)")
+                    }
+                }
                 
                 // CRITICAL: Verify and clean up any orphaned episode records
                 await verifyAndCleanupOrphanedEpisodes(feedId: feed.id, episodeIds: episodeIds)
@@ -6043,13 +6215,122 @@ class PodcastViewModel: ObservableObject {
                         selectedFeedId = nil
                     }
                     
-                    // Clear local episode progress tracking
-                    for episodeId in episodeIds {
-                        episodeProgress.removeValue(forKey: episodeId)
+                    // NOTE: episodeProgress already cleared in Step 2a2
+                    // Verify it's still clear (should be empty for these episodes)
+                    let remainingProgress = episodeIds.filter { episodeProgress[$0] != nil }
+                    if !remainingProgress.isEmpty {
+                        print("🧹 ⚠️ WARNING: Found \(remainingProgress.count) episodes still in episodeProgress after clearing!")
+                        // Force clear them again
+                        for episodeId in remainingProgress {
+                            episodeProgress.removeValue(forKey: episodeId)
+                        }
+                    } else {
+                        print("🧹 ✅ VERIFIED: All episodes cleared from ViewModel episodeProgress")
                     }
                     
                     // Trigger UI update
                     throttledUIUpdate()
+                    
+                    // CRITICAL: Force immediate UI refresh to show cleared states without app restart
+                    print("🔄 IMMEDIATE REFRESH: Forcing UI update to reflect cleared episode states...")
+                    objectWillChange.send()
+                }
+                
+                // Step 6.5: Force reload ALL remaining feeds to ensure UI shows cleared states
+                await MainActor.run {
+                    feedDeletionMessage = "Refreshing remaining feeds..."
+                    feedDeletionProgress = 0.96
+                }
+                
+                // Step 6.5a: CRITICAL - Double-verify EpisodeStateManager in-memory cache is cleared
+                await MainActor.run {
+                    print("🔄 IMMEDIATE REFRESH: Double-checking EpisodeStateManager in-memory cache...")
+                    
+                    // Force clear from EpisodeStateManager again to ensure in-memory dictionaries are empty
+                    EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
+                    
+                    // Verify by checking a few episodes
+                    var stillHasData = false
+                    for episodeId in episodeIds.prefix(5) {
+                        let progress = EpisodeStateManager.shared.getProgress(for: episodeId)
+                        if progress > 0 {
+                            print("🔄 ⚠️ WARNING: Episode \(episodeId) still has progress \(progress) in EpisodeStateManager!")
+                            stillHasData = true
+                        }
+                    }
+                    
+                    if !stillHasData {
+                        print("🔄 ✅ VERIFIED: EpisodeStateManager in-memory cache is clear")
+                    } else {
+                        print("🔄 ⚠️ WARNING: Some episodes still have data in EpisodeStateManager - forcing third clear")
+                        // Force clear one more time
+                        EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
+                    }
+                }
+                
+                // Step 6.5b: Force reload feeds and episodes from Core Data
+                print("🔄 IMMEDIATE REFRESH: Reloading all feeds from Core Data to reflect cleared states...")
+                await MainActor.run {
+                    loadFeedsFromCoreData()
+                }
+                print("🔄 IMMEDIATE REFRESH: ✅ Feeds reloaded - UI should now show cleared states")
+                
+                // Step 6.5b2: FINAL Core Data verification after feed reload
+                await MainActor.run {
+                    print("🔄 FINAL CORE DATA CHECK: Verifying episode states are cleared in Core Data...")
+                    
+                    do {
+                        let context = CoreDataStack.shared.persistentContainer.viewContext
+                        
+                        // Final check for any remaining episode states
+                        let finalVerifyRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        finalVerifyRequest.predicate = NSPredicate(format: "id IN %@ AND (progress > 0 OR isPlayed == YES OR isFavorite == YES OR isDownloaded == YES)", episodeIds)
+                        let remainingStates = try context.count(for: finalVerifyRequest)
+                        
+                        if remainingStates > 0 {
+                            print("🔄 ⚠️ CRITICAL WARNING: \(remainingStates) episodes STILL have state data in Core Data after all clearing!")
+                            print("🔄 ⚠️ This indicates a Core Data persistence issue that needs investigation")
+                        } else {
+                            print("🔄 ✅ FINAL VERIFICATION: Core Data is completely clear - NO episode states remain")
+                        }
+                        
+                    } catch {
+                        print("🔄 ❌ Error in final Core Data verification: \(error)")
+                    }
+                }
+                
+                // Step 6.5c: Force immediate update with multiple UI refresh mechanisms
+                await MainActor.run {
+                    print("🔄 IMMEDIATE REFRESH: Broadcasting state changes to all views...")
+                    
+                    // Clear ViewModel's episodeProgress one more time for safety
+                    for episodeId in episodeIds {
+                        self.episodeProgress.removeValue(forKey: episodeId)
+                    }
+                    
+                    // Post notification to update any open episode views
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeStatesCleared"),
+                        object: nil,
+                        userInfo: ["episodeIds": episodeIds, "feedId": feed.id]
+                    )
+                    print("🔄 IMMEDIATE REFRESH: Posted EpisodeStatesCleared notification to update all views")
+                    
+                    // CRITICAL: Post general episode update notification
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeProgressChanged"),
+                        object: nil
+                    )
+                    print("🔄 IMMEDIATE REFRESH: Posted EpisodeProgressChanged notification for full refresh")
+                    
+                    // Force immediate UI update with objectWillChange
+                    objectWillChange.send()
+                    print("🔄 IMMEDIATE REFRESH: Sent objectWillChange to trigger SwiftUI re-render")
+                    
+                    // Trigger throttled update to ensure all UI components refresh
+                    throttledUIUpdate()
+                    
+                    print("🔄 IMMEDIATE REFRESH: ✅ All refresh mechanisms triggered")
                 }
                 
                 // Step 7: Sync deletion to other devices (if CloudKit succeeded)
@@ -6060,6 +6341,35 @@ class PodcastViewModel: ObservableObject {
                             feedTitle: feed.title,
                             episodeIds: episodeIds
                         )
+                    }
+                }
+                
+                // Step 7.5: FINAL COMPREHENSIVE VERIFICATION - Check all progress sources are cleared
+                await MainActor.run {
+                    feedDeletionMessage = "Final verification of progress clearing..."
+                    feedDeletionProgress = 0.98
+                    
+                    print("🔍 FINAL VERIFICATION: Checking all progress sources for \(episodeIds.count) episodes...")
+                    
+                    // Check 1: ViewModel episodeProgress
+                    let viewModelProgress = episodeIds.filter { episodeProgress[$0] != nil }
+                    print("🔍   ViewModel episodeProgress: \(viewModelProgress.count) episodes still have progress")
+                    
+                    // Check 2: EpisodeStateManager
+                    var managerProgress = 0
+                    for episodeId in episodeIds {
+                        if EpisodeStateManager.shared.getProgress(for: episodeId) > 0 {
+                            managerProgress += 1
+                        }
+                    }
+                    print("🔍   EpisodeStateManager: \(managerProgress) episodes still have progress")
+                    
+                    // Final summary
+                    let totalRemaining = viewModelProgress.count + managerProgress
+                    if totalRemaining > 0 {
+                        print("🔍 ⚠️ FINAL VERIFICATION: \(totalRemaining) episodes still have progress data!")
+                    } else {
+                        print("🔍 ✅ FINAL VERIFICATION: All progress successfully cleared from all sources!")
                     }
                 }
                 
@@ -10294,9 +10604,19 @@ extension PodcastViewModel {
                         // Save batch immediately to ensure data is persisted
                         if episodes.count > 0 {
                             try context.save()
+                            
+                            // CRITICAL: Merge changes to main context to ensure isPlayed state is cleared
+                            let objectIDs = episodes.map { $0.objectID }
+                            DispatchQueue.main.async {
+                                NSManagedObjectContext.mergeChanges(
+                                    fromRemoteContextSave: [NSUpdatedObjectsKey: objectIDs],
+                                    into: [CoreDataStack.shared.persistentContainer.viewContext]
+                                )
+                            }
+                            
                             // Log only every 10th batch to reduce logging volume
                             if (i/batchSize + 1) % 10 == 0 {
-                                print("💾 💾 Saved batch \(i/batchSize + 1) - cleared \(episodes.count) episodes")
+                                print("💾 💾 Saved batch \(i/batchSize + 1) - cleared \(episodes.count) episodes (merged to main context)")
                             }
                         }
                     }
@@ -10328,6 +10648,19 @@ extension PodcastViewModel {
                     context.rollback()
                     continuation.resume()
                 }
+            }
+        }
+        
+        // CRITICAL: Save main context after all merges complete to persist isPlayed state clearing
+        await MainActor.run {
+            do {
+                let mainContext = CoreDataStack.shared.persistentContainer.viewContext
+                if mainContext.hasChanges {
+                    try mainContext.save()
+                    print("💾 ✅ CRITICAL: Saved main context after episode state clearing - isPlayed state persisted")
+                }
+            } catch {
+                print("💾 ❌ Error saving main context after episode state clearing: \(error)")
             }
         }
     }
