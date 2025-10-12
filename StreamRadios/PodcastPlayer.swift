@@ -206,7 +206,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     
                     do {
                         // Reactivate audio session
-                        PlaybackManager.shared.setActivePlayer(.podcast)
+                        PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
                         
                         // Resume playback only if user wants it and it wasn't manually paused
                         if self.userWantsToPlay && !self.wasManuallyPaused {
@@ -697,7 +697,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     guard let self = self else { return }
                     
                     // CRITICAL: Set podcast as active player FIRST to maintain UI visibility
-                    PlaybackManager.shared.setActivePlayer(.podcast)
+                    PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
                     print("🚗 CarPlay Disconnect: Set podcast as active player immediately")
                     
                     // Aggressively maintain audio session for seamless transition
@@ -737,7 +737,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         // Ensure PlaybackManager still has podcast as active player
                         if PlaybackManager.shared.activePlayer != .podcast && self.currentEpisode != nil {
                             print("🔄 CarPlay Disconnect BACKUP (\(delay)s): Restoring podcast as active player")
-                            PlaybackManager.shared.setActivePlayer(.podcast)
+                            PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
                         }
                         
                         // Resume playback if it was playing and got stopped
@@ -1205,9 +1205,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     restorePodcastPlayerUIImmediately()
                     
                     // Set as active player during app startup restoration
+                    // Don't activate audio session during restoration - will activate when playback starts
                     if currentActivePlayer == .none {
                         print("🚀 Podcast: Setting podcast as active player (startup restoration)")
-                        PlaybackManager.shared.setActivePlayer(.podcast)
+                        PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: false)
                     } else {
                         print("🚀 Podcast: Podcast already active player - no need to set again")
                     }

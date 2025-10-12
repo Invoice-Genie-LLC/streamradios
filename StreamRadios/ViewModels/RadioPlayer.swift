@@ -891,8 +891,7 @@ class RadioPlayer: NSObject, ObservableObject {
     
     private func configureAudioSession() {
         // Audio session is now managed centrally by PlaybackManager
-        // This method is kept for backward compatibility but delegates to PlaybackManager
-        PlaybackManager.shared.activateAudioSessionForPlayer(.radio)
+        // Don't activate during initialization - will activate when playback starts
         print("✅ RadioPlayer: Audio session management delegated to PlaybackManager")
     }
     

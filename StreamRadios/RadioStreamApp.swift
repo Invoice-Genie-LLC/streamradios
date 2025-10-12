@@ -76,9 +76,8 @@ struct RadioStreamApp: App {
     private func setupApp() {
         print("🎯 SETUP APP: Starting setupApp() method")
         
-        // AUDIO SESSION FIX: Configure audio session category immediately during app launch
-        // This prevents the system from defaulting to AVAudioSessionCategorySoloAmbient
-        configureAudioSessionForApp()
+        // Audio session configuration is handled by PlaybackManager to prevent conflicts
+        // This ensures centralized management and proper retry logic
         
         // Set up the remote command center
         radioPlayer.setupRemoteCommandCenter()
@@ -128,23 +127,6 @@ struct RadioStreamApp: App {
         // Initialize subscription system - this will load products and check subscription status
         Task {
             await subscriptionManager.initialize()
-        }
-    }
-    
-    /// Configure audio session category immediately during app launch to prevent SoloAmbient default
-    private func configureAudioSessionForApp() {
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            
-            // Set category to .playback immediately to prevent SoloAmbient default
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-            
-            print("✅ SETUP APP: Audio session category set to .playback during app launch")
-            
-        } catch {
-            print("❌ SETUP APP: Failed to configure audio session category during launch: \(error)")
         }
     }
 
