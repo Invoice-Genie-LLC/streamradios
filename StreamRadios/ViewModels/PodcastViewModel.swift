@@ -537,27 +537,23 @@ class PodcastViewModel: ObservableObject {
         get {
             // Use isolation manager for guaranteed clean episodes
             guard let feedId = selectedFeedId else { 
-                print("🔍 EPISODE GETTER: selectedFeedId is nil, returning empty")
                 return [] 
             }
             
-            // Removed debug print for performance - this is called frequently
+            // ⚡ PERFORMANCE: No logging in hot path - this is called frequently
             
             // Block cache access during feed transitions
             if _feedTransitionInProgress {
                 // Check if this is a delayed call and we should clear the flag
                 if let selectedId = selectedFeedId, selectedId == feedId {
-                    print("🔧 EPISODE GETTER: Transition flag still set but feed matches - clearing immediately")
                     _feedTransitionInProgress = false
                 } else {
-                    print("🚨 EPISODE GETTER: Transition in progress, returning empty for feed \(feedId)")
                     return []
                 }
             }
             
             // Clear cache if it's for a different feed
             if let cacheFeedId = _episodeCacheFeedId, cacheFeedId != feedId {
-                print("🚨 EPISODE GETTER: Cache mismatch - cached=\(cacheFeedId), requested=\(feedId), clearing and returning empty")
                 _episodeCache = nil
                 _episodeCacheFeedId = nil
                 return []
@@ -577,7 +573,6 @@ class PodcastViewModel: ObservableObject {
                 // Double-verify cache integrity before returning
                 let cleanCached = cached.filter { $0.feedId == feedId }
                 if cleanCached.count != cached.count {
-                    print("🚨 EPISODE GETTER: Cache contaminated, clearing and reloading")
                     _episodeCache = nil
                     _episodeCacheFeedId = nil
                     // Fall through to reload
@@ -589,25 +584,13 @@ class PodcastViewModel: ObservableObject {
             // Ensure feed is registered before getting episodes
             if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
                 feedIsolationManager.registerFeed(feedId: feedId, feedUrl: feed.url)
-            } else {
-                print("🚨 EPISODE GETTER: Feed \(feedId) not found in podcastFeeds! Available feeds: \(podcastFeeds.map { $0.id })")
             }
             
             // Get episodes from isolation manager
             let isolatedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
-            print("📊 EPISODE SOURCE: Got \(isolatedEpisodes.count) episodes from isolation manager for feed \(feedId)")
-            
-            // Log first few episode titles to check formatting
-            if !isolatedEpisodes.isEmpty {
-                print("📋 EPISODE TITLES (first 3):")
-                for (index, episode) in isolatedEpisodes.prefix(3).enumerated() {
-                    print("   [\(index)] ID: \(episode.id.prefix(8))... Title: \(episode.title)")
-                }
-            }
             
             // 🛡️ SMART EMPTY STATE HANDLING: Check for available snapshot before returning empty
             if isolatedEpisodes.isEmpty {
-                print("🔍 EPISODE GETTER: No episodes in isolation manager, checking snapshots...")
                 // Try to get episodes from snapshot if available
                 if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
                     // Register snapshot episodes with isolation manager for future safety
@@ -618,8 +601,6 @@ class PodcastViewModel: ObservableObject {
                     _episodeCache = snapshotEpisodes
                     _episodeCacheFeedId = feedId
                     return snapshotEpisodes
-                } else {
-                    print("🚨 EPISODE GETTER: No episodes in isolation manager AND no snapshots for feed \(feedId) - returning empty")
                 }
                 // Cache empty result
                 _episodeCache = []
@@ -637,11 +618,6 @@ class PodcastViewModel: ObservableObject {
             // 🚨 CRITICAL: Remove episodes with empty titles (corrupted data)
             let nonEmptyEpisodes = validatedEpisodes.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             if nonEmptyEpisodes.count != validatedEpisodes.count {
-                let emptyCount = validatedEpisodes.count - nonEmptyEpisodes.count
-                print("🚨 EMPTY TITLES: Found \(emptyCount) episodes with empty titles - removing them")
-                for episode in validatedEpisodes where episode.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    print("🚨 EMPTY TITLE: Episode ID \(episode.id.prefix(12))... has empty title - REMOVING")
-                }
                 // Update isolation manager with cleaned episodes
                 feedIsolationManager.replaceEpisodesForFeed(nonEmptyEpisodes, feedId: feedId)
             }
@@ -651,11 +627,8 @@ class PodcastViewModel: ObservableObject {
             
             // 🚨 CRITICAL DEDUPLICATION: Remove any duplicate episode IDs before displaying
             var seenIds = Set<String>()
-            var duplicateCount = 0
             let deduplicatedEpisodes = nonEmptyEpisodes.filter { episode in
                 if seenIds.contains(episode.id) {
-                    duplicateCount += 1
-                    print("🚨 DEDUP GETTER [\(duplicateCount)]: Removing duplicate episode ID \(episode.id.prefix(8))... - \(episode.title)")
                     return false
                 }
                 seenIds.insert(episode.id)
@@ -663,7 +636,6 @@ class PodcastViewModel: ObservableObject {
             }
             
             if deduplicatedEpisodes.count != nonEmptyEpisodes.count {
-                print("🚨 DEDUP GETTER: Removed \(nonEmptyEpisodes.count - deduplicatedEpisodes.count) duplicate episodes")
                 // Update isolation manager with deduplicated list
                 feedIsolationManager.replaceEpisodesForFeed(deduplicatedEpisodes, feedId: feedId)
             }

@@ -180,6 +180,9 @@ class EpisodeStateManager: ObservableObject {
     // Readiness indicator to help avoid cold-start races
     private(set) var isReady: Bool = false
     
+    // ⚡ FRESH INSTALL FLAG: Prevent saves during initial sync
+    private var isInitialFreshInstallSync: Bool = false
+    
     private init() {
         // Try to use app group UserDefaults, fallback to standard if not available
         if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
@@ -566,6 +569,20 @@ class EpisodeStateManager: ObservableObject {
     }
     
     // MARK: - Public Methods
+    
+    /// ⚡ Enable fresh install mode to prevent saves during initial sync
+    func enableFreshInstallMode() {
+        isInitialFreshInstallSync = true
+        print("⚡ FRESH INSTALL MODE: Enabled - Core Data saves suspended until RSS completes")
+    }
+    
+    /// ⚡ Disable fresh install mode after RSS parsing completes
+    func disableFreshInstallMode() {
+        isInitialFreshInstallSync = false
+        print("⚡ FRESH INSTALL MODE: Disabled - Core Data saves resumed")
+        // Trigger save now that episodes exist
+        saveToCoreData()
+    }
     
     private func loadSavedStates() {
         // CRITICAL FIX: Load from Core Data instead of UserDefaults
@@ -964,7 +981,13 @@ class EpisodeStateManager: ObservableObject {
     
     /// Save episode states to Core Data instead of UserDefaults
     /// Thread-safe: Uses background context to prevent concurrent access issues
+    /// ⚡ OPTIMIZED: Batch fetch and validate episode IDs before attempting saves
     private func saveToCoreData(silentMode: Bool = false) {
+        // ⚡ CRITICAL: Skip saves during initial fresh install sync
+        if isInitialFreshInstallSync {
+            return  // Silently skip without logging - states will be synced after RSS completes
+        }
+        
         let context = CoreDataStack.shared.newBackgroundContext()
         
         // Use a background queue to avoid blocking the main thread
@@ -972,21 +995,59 @@ class EpisodeStateManager: ObservableObject {
             var savedCount = 0
             var errorCount = 0
             
+            // ⚡ OPTIMIZATION: Check if ANY episodes exist in Core Data first
+            let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            episodeCountRequest.fetchLimit = 1
+            
+            do {
+                let count = try context.count(for: episodeCountRequest)
+                if count == 0 {
+                    return  // Silently skip - no episodes yet
+                }
+            } catch {
+                print("⚠️ Failed to check episode count: \(error)")
+            }
+            
             // Get all episodes that have state changes
             let episodesToUpdate = Set(self.episodeStates.keys)
                 .union(Set(self.episodeProgress.keys))
                 .union(Set(self.episodeFavorites.keys))
                 .union(Set(self.episodeDownloads.keys))
             
-            print("💾 CORE DATA SAVE: Attempting to update \(episodesToUpdate.count) episodes")
+            // ⚡ OPTIMIZATION 1: Filter out obviously invalid episode IDs
+            let validEpisodeIds = episodesToUpdate.filter { episodeId in
+                // Filter out corrupted/invalid IDs
+                let id = episodeId.lowercased()
+                return !id.hasPrefix("iso_feed") &&
+                       !id.hasPrefix("https://") &&
+                       !id.hasPrefix("http://") &&
+                       !id.hasPrefix("gid://") &&
+                       !id.hasPrefix("det_") &&
+                       episodeId.count > 5 && // Too short to be valid
+                       episodeId.count < 200  // Too long to be valid
+            }
             
-            for episodeId in episodesToUpdate {
-                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
-                fetchRequest.fetchLimit = 1
+            if validEpisodeIds.count < episodesToUpdate.count {
+                let invalidCount = episodesToUpdate.count - validEpisodeIds.count
+                print("🧹 CORE DATA OPTIMIZATION: Filtered out \(invalidCount) invalid episode IDs")
+            }
+            
+            print("💾 CORE DATA SAVE: Attempting to update \(validEpisodeIds.count) valid episodes")
+            
+            // ⚡ OPTIMIZATION 2: Batch fetch all episodes at once instead of individual queries
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id IN %@", Array(validEpisodeIds))
+            
+            do {
+                let existingEpisodes = try context.fetch(fetchRequest)
+                print("⚡ BATCH FETCH: Found \(existingEpisodes.count) existing episodes in Core Data")
                 
-                do {
-                    if let episode = try context.fetch(fetchRequest).first {
+                // Create a dictionary for O(1) lookup
+                let episodeDict = Dictionary(uniqueKeysWithValues: existingEpisodes.map { ($0.id ?? "", $0) })
+                
+                // ⚡ OPTIMIZATION 3: Only update episodes that exist in Core Data
+                for episodeId in validEpisodeIds {
+                    if let episode = episodeDict[episodeId] {
                         var hasChanges = false
                         
                         // Update progress
@@ -1041,16 +1102,13 @@ class EpisodeStateManager: ObservableObject {
                         
                         if hasChanges {
                             savedCount += 1
-                            
                         }
-                    } else {
-                        print("⚠️ CORE DATA SAVE: Episode not found in Core Data: \(episodeId.prefix(8))")
-                        errorCount += 1
                     }
-                } catch {
-                    print("❌ EpisodeStateManager: Failed to fetch episode \(episodeId): \(error)")
-                    errorCount += 1
+                    // ⚡ OPTIMIZATION: No logging for episodes not found - they may not be loaded yet
                 }
+            } catch {
+                print("❌ EpisodeStateManager: Batch fetch failed: \(error)")
+                errorCount += 1
             }
             
             // Save context if we made changes
@@ -1074,9 +1132,61 @@ class EpisodeStateManager: ObservableObject {
     
     // MARK: - Data Cleanup Methods
     
+    /// ⚡ OPTIMIZATION: Clean up invalid episode IDs from memory
+    private func cleanupInvalidEpisodeIds() {
+        var removedCount = 0
+        
+        // Helper to check if an episode ID is valid
+        func isValidEpisodeId(_ episodeId: String) -> Bool {
+            let id = episodeId.lowercased()
+            return !id.hasPrefix("iso_feed") &&
+                   !id.hasPrefix("https://") &&
+                   !id.hasPrefix("http://") &&
+                   !id.hasPrefix("gid://") &&
+                   !id.hasPrefix("det_") &&
+                   episodeId.count > 5 &&
+                   episodeId.count < 200
+        }
+        
+        // Clean episode states
+        let invalidStates = episodeStates.keys.filter { !isValidEpisodeId($0) }
+        for id in invalidStates {
+            episodeStates.removeValue(forKey: id)
+            removedCount += 1
+        }
+        
+        // Clean episode progress
+        let invalidProgress = episodeProgress.keys.filter { !isValidEpisodeId($0) }
+        for id in invalidProgress {
+            episodeProgress.removeValue(forKey: id)
+            removedCount += 1
+        }
+        
+        // Clean episode favorites
+        let invalidFavorites = episodeFavorites.keys.filter { !isValidEpisodeId($0) }
+        for id in invalidFavorites {
+            episodeFavorites.removeValue(forKey: id)
+            removedCount += 1
+        }
+        
+        // Clean episode downloads
+        let invalidDownloads = episodeDownloads.keys.filter { !isValidEpisodeId($0) }
+        for id in invalidDownloads {
+            episodeDownloads.removeValue(forKey: id)
+            removedCount += 1
+        }
+        
+        if removedCount > 0 {
+            print("🧹 CLEANUP: Removed \(removedCount) invalid episode IDs from memory")
+        }
+    }
+    
     /// Emergency cleanup before any save operations
     private func emergencyCleanupIfNeeded() {
         let emergencyLimit = 3_000 // Much stricter limit for emergency situations
+        
+        // ⚡ OPTIMIZATION: Always clean invalid IDs first
+        cleanupInvalidEpisodeIds()
         
         if episodeStates.count > emergencyLimit {
             print("🚨 EpisodeStateManager: Emergency cleanup - episode states (\(episodeStates.count) > \(emergencyLimit))")

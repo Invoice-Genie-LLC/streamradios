@@ -2514,38 +2514,65 @@ class PodcastCloudKitManager: ObservableObject {
     
     // MARK: - Podcast Feed CloudKit Sync
     
-    /// Sync from CloudKit to local storage - fetch all podcast feeds
+    /// Sync from CloudKit to local storage - fetch all podcast feeds with batching
     func syncFromCloudKit() async throws -> [PodcastFeed] {
         os_log("🔄 Starting CloudKit sync for podcast feeds", log: log, type: .info)
+        print("🔄 CLOUDKIT: Starting CloudKit sync for podcast feeds (batched)")
+        
+        var allFeeds: [PodcastFeed] = []
+        var cursor: CKQueryOperation.Cursor? = nil
+        var batchCount = 0
         
         let query = CKQuery(recordType: RecordType.podcastFeed, predicate: NSPredicate(value: true))
         query.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
         
-        do {
-            let (matchResults, _) = try await privateDatabase.records(matching: query)
-            var feeds: [PodcastFeed] = []
+        repeat {
+            batchCount += 1
+            print("🔄 CLOUDKIT: Fetching batch \(batchCount)...")
             
-            for (recordID, recordResult) in matchResults {
-                switch recordResult {
-                case .success(let record):
-                    if let feed = try? await parsePodcastFeedRecord(record) {
-                        feeds.append(feed)
-                        os_log("✅ Parsed feed: %@", log: log, type: .debug, feed.title)
-                    } else {
-                        os_log("⚠️ Failed to parse feed record: %@", log: log, type: .default, recordID.recordName)
+            do {
+                let (matchResults, nextCursor) = cursor == nil 
+                    ? try await privateDatabase.records(matching: query, resultsLimit: 50)  // Batch size: 50 records
+                    : try await privateDatabase.records(continuingMatchFrom: cursor!)
+                
+                print("✅ CLOUDKIT: Batch \(batchCount) completed, got \(matchResults.count) results")
+                
+                var batchFeeds: [PodcastFeed] = []
+                var processedCount = 0
+                
+                // Process records in this batch
+                for (recordID, recordResult) in matchResults {
+                    processedCount += 1
+                    
+                    switch recordResult {
+                    case .success(let record):
+                        if let feed = try? await parsePodcastFeedRecord(record) {
+                            batchFeeds.append(feed)
+                            os_log("✅ Parsed feed: %@", log: log, type: .debug, feed.title)
+                        } else {
+                            os_log("⚠️ Failed to parse feed record: %@", log: log, type: .default, recordID.recordName)
+                        }
+                    case .failure(let error):
+                        os_log("❌ Failed to fetch record %@: %@", log: log, type: .error, recordID.recordName, error.localizedDescription)
                     }
-                case .failure(let error):
-                    os_log("❌ Failed to fetch record %@: %@", log: log, type: .error, recordID.recordName, error.localizedDescription)
                 }
+                
+                allFeeds.append(contentsOf: batchFeeds)
+                print("🔄 CLOUDKIT: Batch \(batchCount): Parsed \(batchFeeds.count) feeds (total: \(allFeeds.count))")
+                
+                cursor = nextCursor
+                
+            } catch {
+                print("❌ CLOUDKIT: Batch \(batchCount) failed: \(error.localizedDescription)")
+                os_log("❌ CloudKit sync failed on batch %d: %@", log: log, type: .error, batchCount, error.localizedDescription)
+                throw error
             }
             
-            os_log("🌟 Successfully synced %d podcast feeds from CloudKit", log: log, type: .info, feeds.count)
-            return feeds
-            
-        } catch {
-            os_log("❌ CloudKit sync failed: %@", log: log, type: .error, error.localizedDescription)
-            throw error
-        }
+        } while cursor != nil
+        
+        print("🌟 CLOUDKIT: Successfully synced \(allFeeds.count) podcast feeds in \(batchCount) batch(es)")
+        os_log("🌟 Successfully synced %d podcast feeds from CloudKit in %d batches", log: log, type: .info, allFeeds.count, batchCount)
+        return allFeeds
     }
     
     /// Parse a CloudKit record into a PodcastFeed
