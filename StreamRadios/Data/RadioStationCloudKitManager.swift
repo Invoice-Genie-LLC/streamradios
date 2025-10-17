@@ -66,6 +66,12 @@ class RadioStationCloudKitManager: ObservableObject {
     }
     
     @objc private func ubiquitousKeyValueStoreDidChange(_ notification: Notification) {
+        // CRITICAL: Defer processing during fresh install sync to prevent race conditions
+        if DataSyncManager.shared.isFreshInstallSyncInProgress {
+            print("🚨 RADIO DEFERRED: Fresh install sync in progress - deferring CloudKit notification processing")
+            return
+        }
+        
         guard let userInfo = notification.userInfo,
               let keys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] else {
             os_log("📡 RADIO SYNC RECEIVE FAILED: No keys in notification", log: log, type: .error)

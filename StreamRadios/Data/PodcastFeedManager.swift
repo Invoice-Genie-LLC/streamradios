@@ -85,7 +85,13 @@ class PodcastFeedManager {
     }
     
     /// Add new feed with background processing and episode parsing
-    func addFeed(from url: URL, customTitle: String? = nil, forceRefresh: Bool = false, enableProgressReporting: Bool = true) async throws -> PodcastFeed {
+    /// - Parameters:
+    ///   - url: The feed URL
+    ///   - customTitle: Optional custom title override
+    ///   - forceRefresh: Force refresh even if feed exists
+    ///   - enableProgressReporting: Enable progress reporting to DataSyncManager
+    ///   - existingFeedId: Optional existing feed ID (for fresh install to preserve CloudKit ID)
+    func addFeed(from url: URL, customTitle: String? = nil, forceRefresh: Bool = false, enableProgressReporting: Bool = true, existingFeedId: String? = nil) async throws -> PodcastFeed {
         os_log("🆕 Adding new feed from: %@", log: log, type: .info, url.absoluteString)
         
         // Parse RSS feed in background with robust error handling and retry mechanism - use detached task to prevent main thread blocking
@@ -99,7 +105,7 @@ class PodcastFeedManager {
                             DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
                         }
                     } : nil
-                    let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: progressCallback)
+                    let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: progressCallback, existingFeedId: existingFeedId)
                     let result = try await parser.parseComplete()
                     continuation.resume(returning: result)
                 } catch {
@@ -982,6 +988,7 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     private let parser: XMLParser
     private let feedUrl: String
     private let totalDataSize: Int
+    private let existingFeedId: String?
     
     // Feed-level properties
     private var feedTitle: String?
@@ -1000,11 +1007,12 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     private var progressCallback: ((Double, String) -> Void)?
     private var lastReportedProgress: Double?
     
-    init(data: Data, feedUrl: String, progressCallback: ((Double, String) -> Void)? = nil) {
+    init(data: Data, feedUrl: String, progressCallback: ((Double, String) -> Void)? = nil, existingFeedId: String? = nil) {
         self.parser = XMLParser(data: data)
         self.feedUrl = feedUrl
         self.totalDataSize = data.count
         self.progressCallback = progressCallback
+        self.existingFeedId = existingFeedId
         super.init()
         self.parser.delegate = self
     }
@@ -1090,8 +1098,13 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
             throw FeedError.missingRequiredData
         }
         
-        // CRITICAL: Use deterministic feedId that matches episode feedId generation
-        let feedId = generateFeedIdFromUrl(feedUrl)
+        // CRITICAL: Use existing feedId if provided (for fresh install), otherwise generate deterministic one
+        let feedId = existingFeedId ?? generateFeedIdFromUrl(feedUrl)
+        if let existing = existingFeedId {
+            print("📡 RSS PARSER: Using existing feedId from CloudKit: \(existing)")
+        } else {
+            print("📡 RSS PARSER: Generated new feedId from URL: \(feedId)")
+        }
         
         let feed = PodcastFeed(
             id: feedId,
@@ -1124,7 +1137,7 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
         switch elementName {
         case "item":
             isParsingItem = true
-            currentEpisode = EpisodeBuilder(feedUrl: feedUrl)
+            currentEpisode = EpisodeBuilder(feedUrl: feedUrl, existingFeedId: existingFeedId)
         case "enclosure":
             if isParsingItem, let url = attributeDict["url"] {
                 currentEpisode?.audioUrl = url
@@ -1253,9 +1266,11 @@ private class EpisodeBuilder {
     var chapters: [PodcastChapter] = []
     var chaptersJSONURL: String?
     let feedUrl: String
+    let existingFeedId: String?
     
-    init(feedUrl: String) {
+    init(feedUrl: String, existingFeedId: String? = nil) {
         self.feedUrl = feedUrl
+        self.existingFeedId = existingFeedId
     }
     
     func build() -> PodcastEpisode? {
@@ -1305,8 +1320,13 @@ private class EpisodeBuilder {
         }
         
 
-        // ENHANCED CONTAMINATION PREVENTION: Generate feedId from feedUrl for proper episode-to-feed mapping
-        let feedId = generateFeedIdFromUrl(feedUrl)
+        // ENHANCED CONTAMINATION PREVENTION: Use existing feedId if provided, otherwise generate from feedUrl
+        let feedId = existingFeedId ?? generateFeedIdFromUrl(feedUrl)
+        if let existing = existingFeedId {
+            // Fresh install: Using CloudKit feed ID
+        } else {
+            // New feed: Generated from URL
+        }
         
         // ADDITIONAL VALIDATION: Ensure episode ID is properly isolated to this feed
         let validatedEpisodeId: String

@@ -145,6 +145,12 @@ class RealtimeSyncManager: ObservableObject {
     }
     
     @objc private func ubiquitousKeyValueStoreDidChange(_ notification: Notification) {
+        // CRITICAL: Defer processing during fresh install sync to prevent race conditions
+        if DataSyncManager.shared.isFreshInstallSyncInProgress {
+            os_log("🚨 REALTIME DEFERRED: Fresh install sync in progress - deferring notification processing", log: log, type: .info)
+            return
+        }
+        
         guard let userInfo = notification.userInfo,
               let keys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] else {
             return

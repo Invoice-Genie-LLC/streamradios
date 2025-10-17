@@ -948,6 +948,13 @@ class PodcastCloudKitManager: ObservableObject {
         print("📡 🔔 NOTIFICATION TRIGGERED: ubiquitousKeyValueStoreDidChange called!")
         print("📡 🔔 NOTIFICATION INFO: \(notification)")
         
+        // CRITICAL: Defer processing during fresh install sync to prevent race conditions
+        if DataSyncManager.shared.isFreshInstallSyncInProgress {
+            print("🚨 DEFERRED: Fresh install sync in progress - deferring CloudKit notification processing")
+            print("🚨 DEFERRED: Notification will be re-triggered after sync completes via natural iCloud sync")
+            return
+        }
+        
         guard let userInfo = notification.userInfo else {
             print("📡 ❌ NOTIFICATION: No userInfo in notification")
             return

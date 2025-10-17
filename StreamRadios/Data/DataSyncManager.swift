@@ -132,6 +132,9 @@ class DataSyncManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let syncQueue = DispatchQueue(label: "com.streamradios.sync", qos: .userInitiated)
     
+    // CRITICAL: Flag to defer CloudKit notifications during fresh install sync
+    @Published var isFreshInstallSyncInProgress = false
+    
     private init() {
         setupProgressCalculation()
         
@@ -197,6 +200,10 @@ class DataSyncManager: ObservableObject {
     /// ⚡ OPTIMIZED: Ensures proper order - CloudKit fetch -> Core Data save -> Episode state sync
     func startFreshInstallSync() {
         guard !isSyncing else { return }
+        
+        // CRITICAL: Set flag to defer CloudKit notifications during sync
+        isFreshInstallSyncInProgress = true
+        print("🚨 FRESH INSTALL SYNC: Deferring CloudKit notifications until sync completes")
         
         Task { @MainActor in
             isSyncing = true
@@ -332,10 +339,14 @@ class DataSyncManager: ObservableObject {
                 }
             }
             
+            // CRITICAL: Create station snapshots for all countries after loading
+            print("📸 Creating station snapshots for all countries...")
+            await createStationSnapshotsForAllCountries()
+            
             radioStationsStatus = .completed
             radioStationsProgress = 1.0
-            radioStationsOperation = "✅ \(radioStationsCurrentCount) radio stations loaded"
-            print("✅ Radio stations sync completed")
+            radioStationsOperation = "✅ \(radioStationsCurrentCount) radio stations loaded with snapshots"
+            print("✅ Radio stations sync completed with snapshots")
             
         } catch {
             radioStationsStatus = .failed
@@ -1191,6 +1202,9 @@ class DataSyncManager: ObservableObject {
         // CRITICAL: Final verification that episode snapshots are available
         await verifyEpisodeSnapshotsAreReady(podcastViewModel)
         
+        // CRITICAL: Final verification that station snapshots are available
+        await verifyStationSnapshotsAreReady(radioStationViewModel)
+        
         currentOperation = "Synchronization completed!"
         
         // CRITICAL: Force Core Data save and reload before any verification
@@ -1266,6 +1280,10 @@ class DataSyncManager: ObservableObject {
         print("✅ SYNC COMPLETE: Marked HasLaunchedBefore=true after successful sync")
         
         // Note: synchronize() is deprecated and unnecessary
+        
+        // CRITICAL: Clear flag to allow CloudKit notifications now that sync is complete
+        isFreshInstallSyncInProgress = false
+        print("✅ FRESH INSTALL SYNC: Re-enabled CloudKit notification processing")
         
         print("🎉 Fresh install data synchronization completed successfully!")
         print("📊 Final state: Podcast feeds: \(podcastViewModel.podcastFeeds.count), Radio stations: \(radioStationViewModel.stations.count)")
@@ -1848,6 +1866,44 @@ class DataSyncManager: ObservableObject {
         }
     }
     
+    /// Verify that station snapshots are ready for immediate use
+    @MainActor
+    private func verifyStationSnapshotsAreReady(_ radioStationViewModel: RadioStationViewModel) async {
+        print("🔍 FINAL VERIFICATION: Checking station snapshot availability...")
+        
+        let countriesWithStations = Dictionary(grouping: radioStationViewModel.stations) { $0.country }
+            .filter { !$0.key.isEmpty && $0.key != "Unknown Region" && $0.key != "Select Country" }
+        
+        var countriesWithSnapshots = 0
+        var totalSnapshotStations = 0
+        
+        for (country, stations) in countriesWithStations {
+            if let snapshot = radioStationViewModel.getStationSnapshot(for: country) {
+                countriesWithSnapshots += 1
+                totalSnapshotStations += snapshot.count
+                print("✅ Snapshot verified for country '\(country)': \(snapshot.count) stations")
+            } else {
+                print("⚠️ Missing snapshot for country '\(country)' with \(stations.count) stations")
+                
+                // Create missing snapshot
+                radioStationViewModel.updateStationSnapshot(for: country, stations: stations)
+                countriesWithSnapshots += 1
+                totalSnapshotStations += stations.count
+                print("🔧 Created missing snapshot for country '\(country)' with \(stations.count) stations")
+            }
+        }
+        
+        let snapshotCoverage = countriesWithStations.count > 0 ? (Double(countriesWithSnapshots) / Double(countriesWithStations.count)) * 100 : 100
+        print("📊 STATION SNAPSHOT COVERAGE: \(countriesWithSnapshots)/\(countriesWithStations.count) countries (\(Int(snapshotCoverage))%) with \(totalSnapshotStations) total stations")
+        
+        if countriesWithSnapshots == countriesWithStations.count {
+            print("✅ All countries have station snapshots - ready for instant access")
+            stationSnapshotsReady = true
+        } else {
+            print("⚠️ Some countries missing snapshots - this may affect performance")
+        }
+    }
+    
     /// Verify that episode snapshots are ready for immediate use
     @MainActor
     private func verifyEpisodeSnapshotsAreReady(_ podcastViewModel: PodcastViewModel) async {
@@ -2183,31 +2239,58 @@ class DataSyncManager: ObservableObject {
             }
         }
         
+        // CRITICAL FIX: Load episodes from Core Data into memory BEFORE creating snapshots
+        print("📡 CRITICAL FIX: Loading episodes from Core Data for all feeds before snapshot creation...")
+        var feedsWithLoadedEpisodes: [(PodcastFeed, [PodcastEpisode])] = []
+        
+        let feeds = await MainActor.run { podcastViewModel.podcastFeeds }
+        
+        // Load episodes for all feeds using TaskGroup for proper awaiting
+        await withTaskGroup(of: (PodcastFeed, [PodcastEpisode]).self) { group in
+            for feed in feeds {
+                group.addTask {
+                    let episodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feed.id)
+                    if !episodes.isEmpty {
+                        print("📡 Loaded \(episodes.count) episodes from Core Data for feed: \(feed.title)")
+                    }
+                    return (feed, episodes)
+                }
+            }
+            
+            // Collect all results
+            for await (feed, episodes) in group {
+                if !episodes.isEmpty {
+                    feedsWithLoadedEpisodes.append((feed, episodes))
+                }
+            }
+        }
+        
+        print("📡 Loaded episodes for \(feedsWithLoadedEpisodes.count) feeds from Core Data")
+        
         await MainActor.run { [weak self] in
             guard let self = self else { return }
             
             let feedCount = podcastViewModel.podcastFeeds.count
-            let feedsWithEpisodes = podcastViewModel.podcastFeeds.filter { !$0.episodes.isEmpty }
             
-            print("📸 Creating episode snapshots for \(feedCount) feeds (\(feedsWithEpisodes.count) have episodes)...")
+            print("📸 Creating episode snapshots for \(feedCount) feeds (\(feedsWithLoadedEpisodes.count) have episodes)...")
             
             // Update snapshot tracking
-            self.totalFeedsRequiringSnapshots = feedsWithEpisodes.count
+            self.totalFeedsRequiringSnapshots = feedsWithLoadedEpisodes.count
             self.feedsWithSnapshots = 0
             self.episodeSnapshotsReady = false
             
             var processedFeeds = 0
             
-            for feed in podcastViewModel.podcastFeeds {
-                if !feed.episodes.isEmpty {
+            for (feed, episodes) in feedsWithLoadedEpisodes {
+                if !episodes.isEmpty {
                     // 🛡️ CONTAMINATION PREVENTION: Validate all episodes belong to this feed before processing
-                    let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
-                    if validEpisodes.count != feed.episodes.count {
-                        let contaminatedCount = feed.episodes.count - validEpisodes.count
+                    let validEpisodes = episodes.filter { $0.feedId == feed.id }
+                    if validEpisodes.count != episodes.count {
+                        let contaminatedCount = episodes.count - validEpisodes.count
                         print("🚨 SNAPSHOT CONTAMINATION: Feed '\(feed.title)' has \(contaminatedCount) contaminated episodes - filtering them out")
                         
                         // Log contaminated episodes for debugging
-                        let contaminatedEpisodes = feed.episodes.filter { $0.feedId != feed.id }
+                        let contaminatedEpisodes = episodes.filter { $0.feedId != feed.id }
                         for episode in contaminatedEpisodes.prefix(3) {
                             print("🚨 CONTAMINATED: Episode '\(episode.title)' has feedId '\(episode.feedId)' but is in feed '\(feed.id)'")
                         }
@@ -2247,12 +2330,10 @@ class DataSyncManager: ObservableObject {
                     podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: episodesWithCurrentStates)
                     self.feedsWithSnapshots += 1
                     print("📸 Created snapshot for '\(feed.title)' with \(validEpisodes.count) validated episodes with current states (\(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots))")
-                } else {
-                    print("📸 Skipped snapshot for '\(feed.title)' - no episodes loaded")
                 }
                 
                 processedFeeds += 1
-                let progress = 0.6 + (Double(processedFeeds) / Double(feedCount)) * 0.3 // 60% to 90%
+                let progress = 0.6 + (Double(processedFeeds) / Double(feedsWithLoadedEpisodes.count)) * 0.3 // 60% to 90%
                 self.episodeStatesProgress = progress
                 self.episodeStatesOperation = "Created snapshots for \(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots) feeds with episodes..."
             }
@@ -2261,6 +2342,43 @@ class DataSyncManager: ObservableObject {
             self.episodeSnapshotsReady = (self.feedsWithSnapshots == self.totalFeedsRequiringSnapshots)
             print("📸 SNAPSHOT READINESS: \(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots) snapshots created - Ready: \(self.episodeSnapshotsReady)")
         }
+    }
+    
+    /// Create station snapshots for all countries for instant access
+    @MainActor
+    private func createStationSnapshotsForAllCountries() async {
+        let radioViewModel = RadioStationViewModel.shared
+        
+        print("📸 Creating station snapshots for all countries...")
+        
+        // Group stations by country
+        let countriesWithStations = Dictionary(grouping: radioViewModel.stations) { $0.country }
+            .filter { !$0.key.isEmpty && $0.key != "Unknown Region" && $0.key != "Select Country" }
+        
+        print("📸 Found \(countriesWithStations.count) countries with stations")
+        
+        // Update snapshot tracking
+        totalCountriesRequiringSnapshots = countriesWithStations.count
+        countriesWithSnapshots = 0
+        stationSnapshotsReady = false
+        
+        var snapshotsCreated = 0
+        var totalStations = 0
+        
+        for (country, stations) in countriesWithStations {
+            // Create snapshot for this country
+            radioViewModel.updateStationSnapshot(for: country, stations: stations)
+            countriesWithSnapshots += 1
+            snapshotsCreated += 1
+            totalStations += stations.count
+            print("📸 Created station snapshot for '\(country)' with \(stations.count) stations (\(snapshotsCreated)/\(countriesWithStations.count))")
+        }
+        
+        // Mark snapshots as ready
+        stationSnapshotsReady = (countriesWithSnapshots == totalCountriesRequiringSnapshots)
+        
+        print("📸 STATION SNAPSHOT SUMMARY: \(snapshotsCreated) snapshots created with \(totalStations) total stations")
+        print("📸 STATION SNAPSHOT READINESS: \(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots) countries have snapshots - Ready: \(stationSnapshotsReady)")
     }
     
     /// Verify that episode data is available and snapshots are created

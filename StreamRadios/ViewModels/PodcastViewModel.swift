@@ -7470,8 +7470,9 @@ class PodcastViewModel: ObservableObject {
                             }
                             
                             let feedManager = PodcastFeedManager()
-                            let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false)
-                            print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+                            // CRITICAL: Pass CloudKit feed ID to preserve it during RSS parsing
+                            let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false, existingFeedId: feed.id)
+                            print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title) (using CloudKit feedId: \(feed.id))")
                             
                         } catch {
                             print("❌ Failed to process feed \(feed.title): \(error)")
@@ -7581,6 +7582,43 @@ class PodcastViewModel: ObservableObject {
         // Verify feeds are actually saved to Core Data
         let savedFeedCount = await countExistingFeeds()
         print("🔍 VERIFICATION: Found \(savedFeedCount) feeds in Core Data after fresh install processing")
+        
+        // CRITICAL: Load episodes from Core Data into memory for snapshot creation
+        print("📡 CRITICAL: Loading episodes into memory for all feeds to enable snapshot creation...")
+        
+        // Load episodes synchronously for each feed using TaskGroup for proper awaiting
+        let feedCount = await MainActor.run { self.podcastFeeds.count }
+        
+        if feedCount > 0 {
+            await withTaskGroup(of: (Int, [PodcastEpisode]).self) { group in
+                // Create tasks for each feed
+                for index in 0..<feedCount {
+                    let feedId = await MainActor.run { self.podcastFeeds[index].id }
+                    let feedTitle = await MainActor.run { self.podcastFeeds[index].title }
+                    
+                    group.addTask {
+                        let episodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                        print("📡 Loaded \(episodes.count) episodes from Core Data for feed: \(feedTitle)")
+                        return (index, episodes)
+                    }
+                }
+                
+                // Collect all results and update feeds
+                for await (index, episodes) in group {
+                    await MainActor.run {
+                        if index < self.podcastFeeds.count {
+                            self.podcastFeeds[index].episodes = episodes
+                        }
+                    }
+                }
+            }
+        }
+        
+        await MainActor.run {
+            let totalEpisodes = self.podcastFeeds.reduce(0) { $0 + $1.episodes.count }
+            let feedsWithEpisodes = self.podcastFeeds.filter { !$0.episodes.isEmpty }.count
+            print("✅ EPISODE LOADING COMPLETE: \(totalEpisodes) total episodes loaded into memory across \(feedsWithEpisodes)/\(self.podcastFeeds.count) feeds")
+        }
         
         // CRITICAL: Trigger UI refresh after fresh install processing
         print("🔄 Triggered UI refresh after fresh install RSS processing")
