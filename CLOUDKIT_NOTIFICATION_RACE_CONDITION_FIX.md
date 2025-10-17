@@ -1,6 +1,6 @@
-# Episode Contamination Fix - Complete Solution
+# Fresh Install Sync Fix - Complete Solution
 
-## Two Critical Issues Identified
+## Three Critical Issues Identified
 
 ### Issue 1: CloudKit Notification Race Condition
 
@@ -46,6 +46,34 @@ When processing CloudKit feeds during fresh install, the RSS parser generates **
 (repeated thousands of times)
 ```
 
+### Issue 3: CloudKit Sync Completely Skipped During Fresh Install
+
+The most critical issue: **CloudKit podcast feed sync is intentionally disabled** during fresh install, causing:
+
+1. Fresh install starts
+2. Code checks if CloudKit sync should happen
+3. **Intentionally skips CloudKit sync** with message "consistently hangs"
+4. Marks sync as "completed" with 0 feeds
+5. Result: **No podcasts loaded at all!**
+
+**Symptoms in Logs:**
+```
+⚡ FRESH INSTALL: Skipping CloudKit sync (consistently hangs)
+⚡ FRESH INSTALL: User will add podcasts manually via UI
+✅ FRESH INSTALL: Sync completed immediately - ready for manual podcast addition
+✅ Podcast feeds sync completed - 0 feeds in 0s
+```
+
+Then throughout the logs:
+```
+📡 No podcast feeds found in CoreData.
+🎯 CORE DATA LOAD: Fetch completed - found 0 FeedModel objects in Core Data
+⚠️ WARNING: UI update verification failed - no feeds found after 15 attempts
+📊 Final state: Podcast feeds: 0, Radio stations: 553
+```
+
+**This is the PRIMARY issue** - without this fix, the other two fixes don't matter because no feeds are fetched at all!
+
 ## Root Cause
 
 ### Root Cause 1: CloudKit Notifications
@@ -76,6 +104,29 @@ The RSS parser always generated a new feed ID from the URL hash, even when proce
 6. **Mismatch detected!** Episodes rejected
 
 The RSS parser had no way to know it should use the existing CloudKit feed ID.
+
+### Root Cause 3: Intentional CloudKit Skip
+
+Someone added code to **intentionally skip CloudKit sync** during fresh install:
+
+```swift
+// ⚡ CRITICAL OPTIMIZATION: Skip CloudKit entirely for fresh installs
+// CloudKit database queries are consistently hanging/timing out on fresh installs
+let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+
+if isFreshInstall {
+    print("⚡ FRESH INSTALL: Skipping CloudKit sync (consistently hangs)")
+    print("⚡ FRESH INSTALL: User will add podcasts manually via UI")
+    
+    // Mark as completed with 0 feeds
+    podcastFeedsStatus = .completed
+    return
+}
+```
+
+**Why this was added:** CloudKit queries were timing out or hanging during fresh install, so someone disabled it entirely.
+
+**Why this is wrong:** This means users get **NO podcasts at all** after fresh install! They have to manually add all podcasts back.
 
 ## Solution Implemented
 
@@ -224,41 +275,89 @@ let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil,
 print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title) (using CloudKit feedId: \(feed.id))")
 ```
 
+### Solution 3: Re-Enable CloudKit Sync for Fresh Install
+
+#### Remove the Skip Logic
+
+**File:** `DataSyncManager.swift` - `initializeCloudKitFeedsForFreshInstall()`
+
+**BEFORE (Broken):**
+```swift
+// ⚡ CRITICAL OPTIMIZATION: Skip CloudKit entirely for fresh installs
+// CloudKit database queries are consistently hanging/timing out on fresh installs
+let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+
+if isFreshInstall {
+    print("⚡ FRESH INSTALL: Skipping CloudKit sync (consistently hangs)")
+    print("⚡ FRESH INSTALL: User will add podcasts manually via UI")
+    
+    // Mark as completed with 0 feeds
+    podcastFeedsStatus = .completed
+    podcastFeedsOperation = "Ready to add podcasts"
+    podcastFeedsProgress = 1.0
+    return // EXIT EARLY - NO FEEDS LOADED!
+}
+```
+
+**AFTER (Fixed):**
+```swift
+// Fetch podcast feeds from CloudKit for all install types
+let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+print("🔄 \(isFreshInstall ? "FRESH INSTALL" : "NON-FRESH INSTALL"): Fetching podcast feeds from CloudKit...")
+podcastFeedsOperation = "Fetching feeds from iCloud..."
+podcastFeedsProgress = 0.2
+
+// Continue with normal CloudKit fetch...
+let cloudKitFeeds: [PodcastFeed]
+do {
+    cloudKitFeeds = try await syncFromCloudKitWithRetry()
+    print("✅ Successfully fetched \(cloudKitFeeds.count) feeds from CloudKit")
+    // ... process feeds normally
+}
+```
+
+**Result:** Fresh install now fetches podcast feeds from CloudKit like it should!
+
 ## How It Works
 
-### Fresh Install Sync Flow (After Both Fixes)
+### Fresh Install Sync Flow (After All Three Fixes)
 
 1. **App Launches**
    - Fresh install detected
    - `isFreshInstallSyncInProgress = true`
 
-2. **CloudKit Notifications Fire**
+2. **CloudKit Podcast Feeds Fetched** ✅ **FIX 3**
+   - CloudKit fetch **NOT skipped** anymore
+   - Feeds fetched from CloudKit successfully
+   - Ready to process with RSS parsing
+
+3. **CloudKit Notifications Fire** ✅ **FIX 1**
    - NSUbiquitousKeyValueStore notifications received
    - All three managers check `isFreshInstallSyncInProgress`
    - **Notifications are DEFERRED** (early return)
    - No episode state processing happens yet
 
-3. **RSS Parsing Proceeds Cleanly**
+4. **RSS Parsing Proceeds Cleanly** ✅ **FIX 2**
    - Feed A parsed with **CloudKit feed ID preserved** → Episodes saved with correct `feedId=cloudkit_feed_A`
    - Feed B parsed with **CloudKit feed ID preserved** → Episodes saved with correct `feedId=cloudkit_feed_B`
    - **No feedId mismatch** because CloudKit IDs are preserved
    - **No contamination** because notifications are deferred
 
-4. **Episode States Sync**
+5. **Episode States Sync**
    - Explicit episode state sync happens
    - States applied from CloudKit in controlled manner
    - States already in EpisodeStateManager from deferred notifications
 
-5. **Snapshots Created**
+6. **Snapshots Created**
    - Episodes loaded from Core Data with correct feedIds
    - States applied from EpisodeStateManager
    - Snapshots created successfully
 
-6. **Fresh Install Sync Completes**
+7. **Fresh Install Sync Completes**
    - `isFreshInstallSyncInProgress = false`
    - CloudKit notifications re-enabled
 
-7. **Future Notifications Process Normally**
+8. **Future Notifications Process Normally**
    - New notifications process immediately
    - No race condition because RSS parsing is complete
 
@@ -370,6 +469,13 @@ Result:
 6. **PodcastViewModel.swift**
    - `loadFreshInstallPodcastData()` passes CloudKit feed ID to `addFeed()`
    - Preserves CloudKit feed IDs during fresh install RSS parsing
+
+### Solution 3: Re-Enable CloudKit Sync
+
+7. **DataSyncManager.swift**
+   - Removed intentional CloudKit skip logic from `initializeCloudKitFeedsForFreshInstall()`
+   - Fresh install now fetches podcast feeds from CloudKit like it should
+   - Removed early return that was preventing feed fetch
 
 ## Build Status
 

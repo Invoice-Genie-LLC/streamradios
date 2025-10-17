@@ -1733,35 +1733,9 @@ class DataSyncManager: ObservableObject {
     private func initializeCloudKitFeedsForFreshInstall(_ podcastViewModel: PodcastViewModel) async {
         print("🚀 Initializing CloudKit feeds for fresh install...")
         
-        // ⚡ CRITICAL OPTIMIZATION: Skip CloudKit entirely for fresh installs
-        // CloudKit database queries are consistently hanging/timing out on fresh installs
+        // Fetch podcast feeds from CloudKit for all install types
         let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-        
-        if isFreshInstall {
-            print("⚡ FRESH INSTALL: Skipping CloudKit sync (consistently hangs)")
-            print("⚡ FRESH INSTALL: User will add podcasts manually via UI")
-            
-            // CRITICAL: Mark podcast feeds as completed
-            podcastFeedsStatus = .completed
-            podcastFeedsOperation = "Ready to add podcasts"
-            podcastFeedsProgress = 1.0
-            podcastFeedsCurrentCount = 0
-            podcastFeedsTotalCount = 0
-            
-            episodeStatesStatus = .completed
-            episodeStatesProgress = 1.0
-            episodeStatesOperation = "✅ Ready"
-            
-            UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
-            UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
-            startArtworkDownloadTracking(totalFeeds: 0)
-            
-            print("✅ FRESH INSTALL: Sync completed immediately - ready for manual podcast addition")
-            return
-        }
-        
-        // Non-fresh install: Try CloudKit with timeout protection
-        print("🔄 NON-FRESH INSTALL: Attempting CloudKit sync...")
+        print("🔄 \(isFreshInstall ? "FRESH INSTALL" : "NON-FRESH INSTALL"): Fetching podcast feeds from CloudKit...")
         podcastFeedsOperation = "Fetching feeds from iCloud..."
         podcastFeedsProgress = 0.2
         
