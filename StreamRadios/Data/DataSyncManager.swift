@@ -1387,9 +1387,6 @@ class DataSyncManager: ObservableObject {
                     let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
                     let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
                     
-                    // DEBUG: Log states for ALL episodes to see what's happening
-                    print("📸 FINAL SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
-                    
                     // Update episode state with current values
                     updatedEpisode.state.progress = progress
                     updatedEpisode.state.isFavorite = isFavorite
@@ -2286,9 +2283,6 @@ class DataSyncManager: ObservableObject {
                         let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
                         let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
                         let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
-                        
-                        // DEBUG: Log states for ALL episodes to see what's happening
-                        print("📸 SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
                         
                         // Update episode state with current values
                         updatedEpisode.state.progress = progress

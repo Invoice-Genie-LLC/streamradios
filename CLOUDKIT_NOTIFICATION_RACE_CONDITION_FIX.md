@@ -501,30 +501,40 @@ Result:
 
 ## Summary
 
-This **two-part fix** completely solves the episode contamination issue during fresh install:
+This **three-part fix** completely solves the fresh install sync issue:
 
-### Part 1: Defer CloudKit Notifications
+### Part 1: Re-Enable CloudKit Sync (MOST CRITICAL)
+**Fixes the root cause** - CloudKit podcast sync was completely disabled, resulting in 0 feeds being loaded. Now feeds are fetched from CloudKit during fresh install.
+
+### Part 2: Defer CloudKit Notifications
 **Prevents race conditions** by deferring CloudKit notification processing until after RSS parsing completes.
 
-### Part 2: Preserve CloudKit Feed IDs
+### Part 3: Preserve CloudKit Feed IDs
 **Prevents feed ID mismatches** by passing CloudKit feed IDs to the RSS parser during fresh install.
 
 ### Combined Result:
 
-1. ✅ **Episodes saved with correct feedIds** - CloudKit IDs preserved throughout parsing
-2. ✅ **No feed ID mismatches** - RSS parser uses existing CloudKit feed IDs
-3. ✅ **No contamination during RSS parsing** - Notifications deferred until parsing complete
-4. ✅ **Episode states applied correctly** - Via explicit sync after parsing
-5. ✅ **Snapshots created successfully** - All episodes have correct feedIds
-6. ✅ **Instant episode access after fresh install** - No loading delays
-7. ✅ **Normal CloudKit sync after install completes** - Notifications re-enabled
-8. ✅ **No breaking changes** - Only affects fresh install flow
+1. ✅ **Podcasts actually load** - CloudKit sync no longer skipped (FIX 1)
+2. ✅ **Episodes saved with correct feedIds** - CloudKit IDs preserved throughout parsing (FIX 3)
+3. ✅ **No feed ID mismatches** - RSS parser uses existing CloudKit feed IDs (FIX 3)
+4. ✅ **No contamination during RSS parsing** - Notifications deferred until parsing complete (FIX 2)
+5. ✅ **Episode states applied correctly** - Via explicit sync after parsing (FIX 2)
+6. ✅ **Snapshots created successfully** - All episodes have correct feedIds (FIX 3)
+7. ✅ **Instant episode access after fresh install** - No loading delays
+8. ✅ **Normal CloudKit sync after install completes** - Notifications re-enabled (FIX 2)
+9. ✅ **No breaking changes** - Only affects fresh install flow
 
-### Why Both Fixes Are Needed:
+### Why All Three Fixes Are Needed:
 
-- **Fix 1 alone:** Would prevent race conditions but episodes would still have wrong feedIds due to RSS parser generating new IDs
-- **Fix 2 alone:** Would preserve feed IDs but CloudKit notifications could still corrupt data during parsing
-- **Both together:** Complete solution - correct feed IDs + no race conditions = perfect fresh install
+- **Fix 1 alone:** Would fetch feeds but they'd have wrong IDs and get contaminated by notifications
+- **Fix 2 alone:** Would prevent notifications but feeds wouldn't be fetched at all (still skipped)
+- **Fix 3 alone:** Would preserve IDs but feeds wouldn't be fetched and notifications would corrupt data
+- **All three together:** Complete solution - feeds fetched + correct IDs + no race conditions = perfect fresh install
+
+**Priority Order:**
+1. **Fix 1 (Re-enable sync)** - Without this, nothing else matters (0 feeds loaded)
+2. **Fix 3 (Preserve IDs)** - Without this, episodes get rejected due to ID mismatch
+3. **Fix 2 (Defer notifications)** - Without this, cross-feed contamination occurs
 
 The solution is **minimal**, **targeted**, and **effective** - it only affects the fresh install flow and has no impact on normal app operation or cross-device sync.
 
@@ -534,9 +544,11 @@ The solution is **minimal**, **targeted**, and **effective** - it only affects t
 **Build Status:** ✅ Successful  
 **Compilation Errors:** 0  
 **Issues Resolved:**
-1. Race condition during fresh install causing episode contamination
+1. CloudKit podcast sync completely skipped during fresh install (0 feeds loaded)
 2. Feed ID mismatch between CloudKit feeds and RSS-generated feeds
+3. Race condition during fresh install causing episode contamination
 
 **Solutions Implemented:**
-1. Defer CloudKit notifications until fresh install sync completes
+1. Re-enabled CloudKit sync for fresh install (removed skip logic)
 2. Preserve CloudKit feed IDs during RSS parsing
+3. Defer CloudKit notifications until fresh install sync completes

@@ -219,9 +219,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
             } else {
                 print("⚡ Skipping CloudKit radio station sync in ViewModel - loading from local storage only for better performance")
                 
-                // Only check for CloudKit changes if we haven't done a complete check recently or if changes are expected
-                Task {
-                    await checkForCloudKitChangesIfNeeded()
+                // CRITICAL FIX: Run CloudKit change detection in background to prevent blocking main thread
+                Task.detached(priority: .userInitiated) { [weak self] in
+                    await self?.checkForCloudKitChangesIfNeeded()
                 }
             }
     
@@ -603,11 +603,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Check for CloudKit changes on app launch and trigger sync banner if needed
     private func checkForCloudKitChangesOnLaunch() async {
-        print("🔍 Checking for CloudKit changes on app launch...")
+        print("🔍 [SYNC-1] Checking for CloudKit changes on app launch...")
+        print("🔍 [SYNC-2] Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
         
         do {
             // Get the count of stations in CloudKit
+            print("🔍 [SYNC-3] About to call getCloudKitStationCount()...")
             let cloudKitStationCount = try await RadioStationCloudKitManager.shared.getCloudKitStationCount()
+            print("🔍 [SYNC-4] Completed getCloudKitStationCount(): \(cloudKitStationCount)")
             let localStationCount = stations.count
             
             print("📊 Station count comparison - CloudKit: \(cloudKitStationCount), Local: \(localStationCount)")
@@ -621,7 +624,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // Schedule sync for later to avoid interfering with podcast operations
                 print("⚡ PERFORMANCE: Deferring radio station sync to prevent interference with podcast loading")
                 
-                await MainActor.run {
+                Task { @MainActor in
                     // Update DataSyncManager to show that sync is needed but deferred
                     DataSyncManager.shared.radioStationsOperation = "\(newStationsCount) new stations available - will sync when convenient"
                 }
@@ -632,7 +635,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     
                     print("⏰ DEFERRED SYNC: Starting radio station sync after delay")
                     
-                    await MainActor.run {
+                    Task { @MainActor in
                         DataSyncManager.shared.radioStationsStatus = .inProgress
                         DataSyncManager.shared.radioStationsOperation = "Loading \(newStationsCount) new stations from other devices"
                         DataSyncManager.shared.radioStationsProgress = 0.0
@@ -674,7 +677,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 print("🗑️ Proceeding with deletion sync for \(deletedStationsCount) stations...")
                 
-                await MainActor.run {
+                Task { @MainActor in
                     // Update DataSyncManager to show sync banner  
                     DataSyncManager.shared.radioStationsStatus = .inProgress
                     DataSyncManager.shared.radioStationsOperation = "Loading station deletions from other devices..."
@@ -683,8 +686,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     DataSyncManager.shared.radioStationsCurrentCount = localStationCount
                 }
                 
-                // Trigger the sync with progress tracking
-                await syncStationsFromCloudKitWithProgress()
+                // CRITICAL FIX: Run sync in background to prevent blocking main thread
+                Task.detached(priority: .userInitiated) { [weak self] in
+                    await self?.syncStationsFromCloudKitWithProgress()
+                }
                 
             } else {
                 // Station counts match - only sync if there are significant changes worth showing to user
@@ -696,22 +701,34 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 let minimumSyncInterval: TimeInterval = 300 // 5 minutes
                 
                 if timeSinceLastSync > minimumSyncInterval {
+                    print("🔍 [SYNC-5] About to call checkForStationModifications()...")
                     let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations)
+                    print("🔍 [SYNC-6] Completed checkForStationModifications(): \(hasModifications)")
                     
                     if hasModifications {
                         print("📝 Detected station modifications on other devices, triggering sync")
                         
-                        await MainActor.run {
+                        print("🔍 [SYNC-7] Scheduling DataSyncManager update on MainActor (non-blocking)...")
+                        Task { @MainActor in
+                            print("🔍 [SYNC-8] Updating DataSyncManager (on main thread)...")
                             // Update DataSyncManager to show sync banner
                             DataSyncManager.shared.radioStationsStatus = .inProgress
                             DataSyncManager.shared.radioStationsOperation = "Loading station updates from other devices"
                             DataSyncManager.shared.radioStationsProgress = 0.0
                             DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
                             DataSyncManager.shared.radioStationsCurrentCount = 0
+                            print("🔍 [SYNC-9] Completed DataSyncManager update")
                         }
+                        print("🔍 [SYNC-10] DataSyncManager update scheduled (not waiting)")
                         
-                        // Trigger the sync with progress tracking
-                        await syncStationsFromCloudKitWithProgress()
+                        // CRITICAL FIX: Run sync in background to prevent blocking main thread
+                        print("🔍 [SYNC-11] Starting detached sync task...")
+                        Task.detached(priority: .userInitiated) { [weak self] in
+                            print("🔍 [SYNC-12] Inside detached sync task")
+                            await self?.syncStationsFromCloudKitWithProgress()
+                            print("🔍 [SYNC-13] Completed sync")
+                        }
+                        print("🔍 [SYNC-14] Detached sync task started")
                     } else {
                         print("✅ No significant CloudKit changes detected - station counts and modification times match")
                         print("ℹ️ Skipping sync banner - no changes needed")
@@ -1107,23 +1124,27 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     },
                     completion: { [weak self] stations, error in
                         if let cloudKitStations = stations {
-                            DispatchQueue.main.async {
+                            // CRITICAL FIX: Schedule operations on main thread WITHOUT blocking
+                            Task { @MainActor [weak self] in
+                                print("🔄 [MERGE-START] Starting merge of \(cloudKitStations.count) stations...")
                                 // CRITICAL: Merge CloudKit data with local state instead of replacing
                                 // This preserves Recent stations (lastPlayed), local favorites, and other local state
                                 self?.mergeCloudKitStationsWithLocalState(cloudKitStations)
+                                print("✅ [MERGE-DONE] Merge completed")
+                                
+                                print("💾 [SAVE-START] Saving stations to Core Data...")
                                 self?.saveStationsToCoreData()
+                                print("✅ [SAVE-DONE] Save completed")
                                 
                                 // Update final progress
-                                Task { @MainActor in
-                                    DataSyncManager.shared.radioStationsCurrentCount = self?.stations.count ?? cloudKitStations.count
-                                    DataSyncManager.shared.radioStationsTotalCount = self?.stations.count ?? cloudKitStations.count
-                                    DataSyncManager.shared.radioStationsOperation = "✅ \(self?.stations.count ?? cloudKitStations.count) stations synced from other devices"
-                                    DataSyncManager.shared.radioStationsStatus = .completed
-                                    DataSyncManager.shared.radioStationsProgress = 1.0
-                                    
-                                    // Update the last sync time to prevent false positives on next check
-                                    UserDefaults.standard.set(Date(), forKey: "LastCloudKitSyncTime")
-                                }
+                                DataSyncManager.shared.radioStationsCurrentCount = self?.stations.count ?? cloudKitStations.count
+                                DataSyncManager.shared.radioStationsTotalCount = self?.stations.count ?? cloudKitStations.count
+                                DataSyncManager.shared.radioStationsOperation = "✅ \(self?.stations.count ?? cloudKitStations.count) stations synced from other devices"
+                                DataSyncManager.shared.radioStationsStatus = .completed
+                                DataSyncManager.shared.radioStationsProgress = 1.0
+                                
+                                // Update the last sync time to prevent false positives on next check
+                                UserDefaults.standard.set(Date(), forKey: "LastCloudKitSyncTime")
                                 
                                 print("✅ Auto-synced \(self?.stations.count ?? cloudKitStations.count) stations from CloudKit with local state preserved")
                             }
