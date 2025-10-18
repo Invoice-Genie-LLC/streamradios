@@ -665,6 +665,17 @@ class DataSyncManager: ObservableObject {
         }
     }
     
+    /// Update podcast feed counts during RSS parsing
+    @MainActor
+    func updatePodcastFeedCounts(current: Int, total: Int) {
+        podcastFeedsCurrentCount = current
+        podcastFeedsTotalCount = max(podcastFeedsTotalCount, total)
+        
+        // Update progress to reflect RSS parsing (30% to 70% of total sync)
+        let rssProgress = Double(current) / Double(total)
+        podcastFeedsProgress = 0.3 + (rssProgress * 0.4) // Maps 0-100% RSS to 30-70% overall
+    }
+    
     /// Start episode state synchronization tracking
     @MainActor
     func startEpisodeStateSync(totalCount: Int) {
@@ -2798,25 +2809,30 @@ class DataSyncManager: ObservableObject {
             
             // Parse ALL RSS feeds and save ALL episodes
             print("🔄 📻 Parsing ALL RSS feeds and saving episodes...")
-            podcastFeedsOperation = "Parsing RSS feeds..."
+            podcastFeedsOperation = "Parsing \(cloudKitFeeds.count) RSS feeds..."
             podcastFeedsProgress = 0.3
             isParsingFeeds = true
             feedParsingProgress = 0.0
             feedParsingMessage = "Processing RSS feeds..."
             
-            // Load and parse all feeds
+            // Load and parse all feeds with progress monitoring
             await podcastViewModel.loadFreshInstallPodcastData(cloudKitFeeds)
             
-            // Update progress
-            podcastFeedsProgress = 0.7
+            // Update progress after RSS parsing
+            podcastFeedsProgress = 0.75
             podcastFeedsCurrentCount = podcastViewModel.podcastFeeds.count
             podcastFeedsTotalCount = max(podcastFeedsTotalCount, podcastFeedsCurrentCount)
+            podcastFeedsOperation = "Parsed \(podcastFeedsCurrentCount) feeds, finalizing..."
             
             // Apply metadata from CloudKit
             print("🔄 📻 Applying CloudKit metadata to feeds...")
-            podcastFeedsOperation = "Applying feed metadata..."
-            podcastFeedsProgress = 0.8
+            podcastFeedsOperation = "Applying metadata to \(podcastFeedsCurrentCount) feeds..."
+            podcastFeedsProgress = 0.85
             await podcastViewModel.applyCloudKitFeedMetadata(cloudKitFeeds)
+            
+            // Update progress after metadata
+            podcastFeedsProgress = 0.95
+            podcastFeedsOperation = "Completing feed sync..."
             
             // Start artwork downloads in background (don't wait here)
             let finalCount = podcastViewModel.podcastFeeds.count
