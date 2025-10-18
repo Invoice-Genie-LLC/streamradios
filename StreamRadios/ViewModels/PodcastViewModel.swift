@@ -24,7 +24,7 @@ struct PodcastFeed: Identifiable, Codable, Equatable {
     var imageData: Data?
     var episodes: [PodcastEpisode] = []
     var maxEpisodes: Int? = nil // Optional episode limit - nil means unlimited
-    var order: Int = 0 // Order for manual sorting and CloudKit sync
+    var order: Int = 0 // Order in the feed list
     
     init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = [], maxEpisodes: Int? = nil, order: Int = 0) {
         self.id = id
@@ -461,13 +461,6 @@ class PodcastViewModel: ObservableObject {
     private var _episodeCacheFeedId: String?
     private var _feedTransitionInProgress: Bool = false
     
-    // PERFORMANCE: Lazy loading support for large feeds
-    @Published var displayedEpisodeCount: Int = 100 // Initial episodes to display
-    @Published var totalEpisodeCount: Int = 0 // Total episodes available
-    @Published var isLoadingMoreEpisodes: Bool = false
-    private let episodeLoadBatchSize: Int = 100 // Load 100 episodes at a time
-    private var allEpisodesCache: [PodcastEpisode] = [] // Full episode list for pagination
-    
     // MARK: - Shared Instance
     static let shared = PodcastViewModel()
     
@@ -537,23 +530,27 @@ class PodcastViewModel: ObservableObject {
         get {
             // Use isolation manager for guaranteed clean episodes
             guard let feedId = selectedFeedId else { 
+                print("🔍 EPISODE GETTER: selectedFeedId is nil, returning empty")
                 return [] 
             }
             
-            // ⚡ PERFORMANCE: No logging in hot path - this is called frequently
+            // Removed debug print for performance - this is called frequently
             
             // Block cache access during feed transitions
             if _feedTransitionInProgress {
                 // Check if this is a delayed call and we should clear the flag
                 if let selectedId = selectedFeedId, selectedId == feedId {
+                    print("🔧 EPISODE GETTER: Transition flag still set but feed matches - clearing immediately")
                     _feedTransitionInProgress = false
                 } else {
+                    print("🚨 EPISODE GETTER: Transition in progress, returning empty for feed \(feedId)")
                     return []
                 }
             }
             
             // Clear cache if it's for a different feed
             if let cacheFeedId = _episodeCacheFeedId, cacheFeedId != feedId {
+                print("🚨 EPISODE GETTER: Cache mismatch - cached=\(cacheFeedId), requested=\(feedId), clearing and returning empty")
                 _episodeCache = nil
                 _episodeCacheFeedId = nil
                 return []
@@ -573,6 +570,7 @@ class PodcastViewModel: ObservableObject {
                 // Double-verify cache integrity before returning
                 let cleanCached = cached.filter { $0.feedId == feedId }
                 if cleanCached.count != cached.count {
+                    print("🚨 EPISODE GETTER: Cache contaminated, clearing and reloading")
                     _episodeCache = nil
                     _episodeCacheFeedId = nil
                     // Fall through to reload
@@ -584,23 +582,32 @@ class PodcastViewModel: ObservableObject {
             // Ensure feed is registered before getting episodes
             if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
                 feedIsolationManager.registerFeed(feedId: feedId, feedUrl: feed.url)
+                print("🔍 EPISODE GETTER: Registered feed \(feedId) with isolation manager")
+            } else {
+                print("🚨 EPISODE GETTER: Feed \(feedId) not found in podcastFeeds! Available feeds: \(podcastFeeds.map { $0.id })")
             }
             
             // Get episodes from isolation manager
             let isolatedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
+            print("🔍 EPISODE GETTER: Got \(isolatedEpisodes.count) episodes from isolation manager for feed \(feedId)")
             
             // 🛡️ SMART EMPTY STATE HANDLING: Check for available snapshot before returning empty
             if isolatedEpisodes.isEmpty {
+                print("🔍 EPISODE GETTER: No episodes in isolation manager, checking snapshots...")
                 // Try to get episodes from snapshot if available
                 if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
+                    print("🔍 EPISODE GETTER: Found \(snapshotEpisodes.count) episodes in snapshot, using those")
                     // Register snapshot episodes with isolation manager for future safety
                     feedIsolationManager.replaceEpisodesForFeed(snapshotEpisodes, feedId: feedId)
                     // Clear transition flag since we found episodes
                     _feedTransitionInProgress = false
+                    print("🔧 EPISODE GETTER: Found episodes, clearing transition flag")
                     // Cache the result
                     _episodeCache = snapshotEpisodes
                     _episodeCacheFeedId = feedId
                     return snapshotEpisodes
+                } else {
+                    print("🚨 EPISODE GETTER: No episodes in isolation manager AND no snapshots for feed \(feedId) - returning empty")
                 }
                 // Cache empty result
                 _episodeCache = []
@@ -615,36 +622,16 @@ class PodcastViewModel: ObservableObject {
                 feedIsolationManager.replaceEpisodesForFeed(validatedEpisodes, feedId: feedId)
             }
             
-            // 🚨 CRITICAL: Remove episodes with empty titles (corrupted data)
-            let nonEmptyEpisodes = validatedEpisodes.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            if nonEmptyEpisodes.count != validatedEpisodes.count {
-                // Update isolation manager with cleaned episodes
-                feedIsolationManager.replaceEpisodesForFeed(nonEmptyEpisodes, feedId: feedId)
-            }
-            
             // Clear transition flag since we have valid episodes
             _feedTransitionInProgress = false
+            print("🔧 EPISODE GETTER: Found \(validatedEpisodes.count) episodes, clearing transition flag")
             
-            // 🚨 CRITICAL DEDUPLICATION: Remove any duplicate episode IDs before displaying
-            var seenIds = Set<String>()
-            let deduplicatedEpisodes = nonEmptyEpisodes.filter { episode in
-                if seenIds.contains(episode.id) {
-                    return false
-                }
-                seenIds.insert(episode.id)
-                return true
-            }
-            
-            if deduplicatedEpisodes.count != nonEmptyEpisodes.count {
-                // Update isolation manager with deduplicated list
-                feedIsolationManager.replaceEpisodesForFeed(deduplicatedEpisodes, feedId: feedId)
-            }
-            
-            // Cache the deduplicated result
-            _episodeCache = deduplicatedEpisodes
+            // Cache the validated result
+            _episodeCache = validatedEpisodes
             _episodeCacheFeedId = feedId
             
-            return deduplicatedEpisodes
+            print("🔍 EPISODE GETTER: Returning \(validatedEpisodes.count) validated episodes for feed \(feedId)")
+            return validatedEpisodes
         }
         set {
             // Clear cache when episodes are being set
@@ -684,6 +671,7 @@ class PodcastViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isLoadingFeeds = false
     @Published var isLoadingEpisodes = false
+    @Published var isLoadingMoreEpisodes = false
     @Published var hasMoreEpisodes = false
     @Published var operationInProgress = false
     @Published var error: String?
@@ -698,10 +686,6 @@ class PodcastViewModel: ObservableObject {
     @Published var lastPlayedEpisodes: [String: String] = [:]
     @Published var episodeProgress: [String: Double] = [:]
     @Published var downloadProgress: [String: Double] = [:]
-    
-    // MARK: - Background Sync Management
-    private var activeBackgroundSyncs = Set<String>() // Track feeds currently being synced
-    private let syncLock = NSLock() // Protect the sync set
     
     // MARK: - Operation Management
     
@@ -2283,106 +2267,116 @@ class PodcastViewModel: ObservableObject {
     /// MINIMAL SAMPLING: Get just the first few episodes to check for new content (lightweight)
     private func performMinimalEpisodeSampling(url: URL, feedId: String) async {
         do {
-            print("🪶 SAMPLING: Starting minimal episode sampling using optimized parser")
+            print("🪶 SAMPLING: Starting minimal episode sampling")
             
-            // PERFORMANCE: Use the new checkForNewEpisodes method that parses only first 50 episodes
-            let newEpisodes = try await feedManager.checkForNewEpisodes(feedId, sampleSize: 50)
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10.0
+            request.setValue("bytes=0-8192", forHTTPHeaderField: "Range")  // Only first 8KB
             
-            if !newEpisodes.isEmpty {
-                print("🪶 SAMPLING: Found \(newEpisodes.count) new episodes - triggering full background sync")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("🪶 SAMPLING: Got \(data.count) bytes for sampling")
                 
-                // Trigger a full background sync to ensure Core Data matches RSS exactly
-                // This will add new episodes AND remove old ones that are no longer in the feed
-                Task.detached(priority: .background) {
-                    await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: false)
+                // Quick string search for episode markers without full XML parsing
+                let content = String(data: data, encoding: .utf8) ?? ""
+                let episodeCount = content.components(separatedBy: "<item>").count - 1
+                
+                if episodeCount > 0 {
+                    // Get current episode count from snapshot
+                    let currentCount = await MainActor.run {
+                        self.getEpisodeSnapshot(for: feedId)?.count ?? 0
+                    }
+                    
+                    print("🪶 SAMPLING: Found \(episodeCount) episodes in sample, current snapshot has \(currentCount)")
+                    
+                    // Only trigger full refresh if there's a significant difference or it's been a while
+                    let lastFullRefreshKey = "LastFullRefresh_\(feedId)"
+                    let lastFullRefresh = UserDefaults.standard.double(forKey: lastFullRefreshKey)
+                    let now = Date().timeIntervalSince1970
+                    
+                    if now - lastFullRefresh > 3600 { // 1 hour
+                        print("🪶 SAMPLING: Scheduling background refresh (1+ hours since last full refresh)")
+                        UserDefaults.standard.set(now, forKey: lastFullRefreshKey)
+                        
+                        // Schedule background refresh with delay to avoid immediate CPU spike
+                        Task.detached(priority: .background) {
+                            try await Task.sleep(nanoseconds: 5_000_000_000) // 5 second delay
+                            await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: false)
+                        }
+                    } else {
+                        print("🪶 SAMPLING: Skipping background refresh - recently refreshed")
+                    }
+                } else {
+                    print("🪪 SAMPLING: Skipping background refresh - recently refreshed")
                 }
             } else {
-                print("🪶 SAMPLING: No new episodes found in sample")
+                print("🪪 BACKGROUND: No new episodes found")
             }
         } catch {
-            print("🪶 SAMPLING: Failed to check for new episodes: \(error.localizedDescription)")
+            print("🪪 BACKGROUND: Background refresh failed: \(error.localizedDescription)")
         }
     }
     
-    /// Background refresh: Full feed sync to match RSS feed exactly
+    /// Background refresh for new episodes without blocking UI
     private func backgroundRefreshForNewEpisodes(feedId: String, isInitialLoad: Bool) async {
-        print("🔄 BACKGROUND REFRESH: Starting full feed sync for \(feedId)")
+        print("🔄 BACKGROUND REFRESH: Checking for new episodes for feed \(feedId)")
         
-        // CRITICAL: Prevent concurrent syncs for the same feed
-        syncLock.lock()
-        if activeBackgroundSyncs.contains(feedId) {
-            syncLock.unlock()
-            print("⏱️ BACKGROUND REFRESH: Sync already in progress for \(feedId) - skipping")
+        // 🚀 INSTANT SNAPSHOT CHECK: Skip all background operations if snapshot is fresh
+        if let snapshot = getEpisodeSnapshot(for: feedId), !snapshot.isEmpty {
+            let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
+            if snapshotAge < 300 { // 5 minutes
+                print("⚡ INSTANT SNAPSHOT: Skipping background refresh - fresh snapshot (\(Int(snapshotAge/60)) min old)")
+                return
+            }
+        }
+        
+        // Check if feed needs RSS refresh for new episodes
+        let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
+        guard shouldAutoRefresh else {
+            print("⚡ BACKGROUND REFRESH: No refresh needed for feed \(feedId)")
             return
         }
-        activeBackgroundSyncs.insert(feedId)
-        syncLock.unlock()
-        
-        // Ensure we remove from active syncs when done
-        defer {
-            syncLock.lock()
-            activeBackgroundSyncs.remove(feedId)
-            syncLock.unlock()
-        }
-        
-        // CRITICAL: Always do full sync to ensure Core Data matches RSS exactly
-        // This prevents episode accumulation and ensures latest episodes are fetched
-        
-        // Throttle: Don't sync more than once every 10 minutes to prevent excessive API calls
-        let currentTime = Date().timeIntervalSince1970
-        let lastSyncKey = "LastBackgroundSync_\(feedId)"
-        let lastSyncTime = UserDefaults.standard.double(forKey: lastSyncKey)
-        let timeSinceLastSync = currentTime - lastSyncTime
-        
-        if timeSinceLastSync < 600 && lastSyncTime > 0 { // 10 minutes
-            print("⏱️ BACKGROUND REFRESH: Skipping sync - last synced \(Int(timeSinceLastSync/60)) min ago")
-            return
-        }
-        
-        // Update last sync time
-        UserDefaults.standard.set(currentTime, forKey: lastSyncKey)
         
         do {
-            print("🔄 BACKGROUND REFRESH: Performing full feed sync from RSS for \(feedId)")
+            print("🔄 BACKGROUND REFRESH: Fetching new episodes from RSS for feed \(feedId)")
+            let (updatedFeed, newEpisodes) = try await feedManager.refreshFeed(feedId)
             
-            // Do full feed refresh which syncs with RSS completely
-            let (updatedFeed, allEpisodes) = try await feedManager.refreshFeed(feedId)
-            
-            print("✅ BACKGROUND REFRESH: Synced \(allEpisodes.count) total episodes from RSS feed")
-            
-            // Get fresh episode list from Core Data (which now matches RSS exactly)
-            let refreshedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
-            print("💾 BACKGROUND REFRESH: Core Data now has \(refreshedEpisodes.count) episodes for feed \(feedId)")
-            
-            // Update snapshot with synced episodes
-            updateEpisodeSnapshot(for: feedId, episodes: refreshedEpisodes)
-            
-            // Update UI if this feed is currently selected
-            await MainActor.run {
-                if selectedFeedId == feedId {
-                    // Apply current filter to refreshed episodes
-                    let filter = EpisodeFilter(rawValue: currentTab) ?? .all
-                    let filteredEpisodes: [PodcastEpisode]
-                    switch filter {
-                    case .all:
-                        filteredEpisodes = refreshedEpisodes
-                    case .favorites:
-                        filteredEpisodes = refreshedEpisodes.filter { $0.state.isFavorite }
-                    case .downloads:
-                        filteredEpisodes = refreshedEpisodes.filter { $0.state.isDownloaded }
+            if !newEpisodes.isEmpty {
+                print("🆕 BACKGROUND REFRESH: Found \(newEpisodes.count) new episodes")
+                
+                // Update cached episodes and refresh UI if this feed is currently selected
+                let refreshedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                updateEpisodeSnapshot(for: feedId, episodes: refreshedEpisodes)
+                
+                await MainActor.run {
+                    if selectedFeedId == feedId {
+                        // Apply current filter to refreshed episodes
+                        let filter = EpisodeFilter(rawValue: currentTab) ?? .all
+                        let filteredEpisodes: [PodcastEpisode]
+                        switch filter {
+                        case .all:
+                            filteredEpisodes = refreshedEpisodes
+                        case .favorites:
+                            filteredEpisodes = refreshedEpisodes.filter { $0.state.isFavorite }
+                        case .downloads:
+                            filteredEpisodes = refreshedEpisodes.filter { $0.state.isDownloaded }
+                        }
+                        
+                        // Update UI with new episodes
+                        currentEpisodes = filteredEpisodes
+                        
+                        // Update episode counts
+                        let allCount = refreshedEpisodes.count
+                        let favoritesCount = refreshedEpisodes.filter { $0.state.isFavorite }.count
+                        let downloadsCount = refreshedEpisodes.filter { $0.state.isDownloaded }.count
+                        episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
+                        
+                        print("🔄 BACKGROUND REFRESH: Updated UI with \(newEpisodes.count) new episodes")
                     }
-                    
-                    // Update UI with synced episodes
-                    currentEpisodes = filteredEpisodes
-                    
-                    // Update episode counts
-                    let allCount = refreshedEpisodes.count
-                    let favoritesCount = refreshedEpisodes.filter { $0.state.isFavorite }.count
-                    let downloadsCount = refreshedEpisodes.filter { $0.state.isDownloaded }.count
-                    episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
-                    
-                    print("🔄 BACKGROUND REFRESH: Updated UI - now showing \(filteredEpisodes.count) episodes")
                 }
+            } else {
+                print("✅ BACKGROUND REFRESH: No new episodes found for feed \(feedId)")
             }
             
             // Update refresh timestamp
@@ -2393,7 +2387,7 @@ class PodcastViewModel: ObservableObject {
             }
             
         } catch {
-            print("❌ BACKGROUND REFRESH: Failed to sync feed \(feedId): \(error)")
+            print("❌ BACKGROUND REFRESH: Failed to refresh feed \(feedId): \(error)")
         }
     }
     
@@ -3809,11 +3803,6 @@ class PodcastViewModel: ObservableObject {
                 print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) validated episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
             }
             
-            // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
-            Task.detached(priority: .background) {
-                await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
-            }
-            
             return
         }
         
@@ -3876,9 +3865,6 @@ class PodcastViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                // PERFORMANCE: Setup lazy loading for large feeds
-                self.resetLazyLoading(totalEpisodes: filteredEpisodes.count)
-                
                 // CONTAMINATION GUARD: Use isolation manager for absolute safety
                 print("🛡️ CONTAMINATION GUARD: Sanitizing \(filteredEpisodes.count) episodes for feed \(feedId)")
                 
@@ -3907,10 +3893,9 @@ class PodcastViewModel: ObservableObject {
                 print("📸 SNAPSHOT SUCCESS: Displayed \(filteredEpisodes.count) episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
             }
             
-            // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
-            Task.detached(priority: .background) {
-                await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
-            }
+            // PERFORMANCE: Skip expensive new episode check when using snapshots
+            // Snapshots already contain the most recent episodes from the last refresh
+            print("⚡ PERFORMANCE: Skipping expensive new episode check - using snapshot data")
             
             return // CRITICAL: Return immediately, bypass all expensive operations below
         }
@@ -3966,11 +3951,6 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) validated episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
-            }
-            
-            // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
-            Task.detached(priority: .background) {
-                await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
             }
             
             return
@@ -4213,30 +4193,6 @@ class PodcastViewModel: ObservableObject {
             if !isUserScrolling {
                 print("🔍 DEBUG: Found \(feed.episodes.count) episodes already loaded in feed: \(feed.title)")
                 print("⚡ Using cached episodes - displaying immediately while checking for new episodes")
-            }
-            
-            // CRITICAL FIX: Update currentEpisodes immediately with feed episodes to prevent empty list
-            // This ensures episodes display right away, even before RSS refresh completes
-            await MainActor.run {
-                if self.selectedFeedId == feedId && self.currentEpisodes.isEmpty {
-                    // Apply current filter to the feed episodes
-                    let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
-                    let filteredEpisodes: [PodcastEpisode]
-                    
-                    switch filter {
-                    case .all:
-                        filteredEpisodes = feed.episodes
-                    case .favorites:
-                        filteredEpisodes = feed.episodes.filter { $0.state.isFavorite }
-                    case .downloads:
-                        filteredEpisodes = feed.episodes.filter { $0.state.isDownloaded }
-                    }
-                    
-                    self.currentEpisodes = filteredEpisodes
-                    self.isLoadingEpisodes = false
-                    self.operationInProgress = false
-                    print("✅ INSTANT DISPLAY: Showing \(filteredEpisodes.count) episodes immediately from feed object")
-                }
             }
             
             // CRITICAL PERFORMANCE: Skip expensive individual state updates if we have a snapshot
@@ -4618,14 +4574,9 @@ class PodcastViewModel: ObservableObject {
             
             // Update UI immediately with snapshot data (already sorted newest first)
             Task { @MainActor in
-                // CARPLAY FIX: Only update currentEpisodes if this is the selected feed
-                // Don't change selectedFeedId - that should only happen on user navigation
-                if self.selectedFeedId == feedId {
-                    self.currentEpisodes = snapshot
-                    self.updateFilter(tab: self.currentTab)
-                } else {
-                    print("⚠️ CARPLAY PROTECTION: Not updating currentEpisodes - feedId (\(feedId)) doesn't match selectedFeedId (\(self.selectedFeedId ?? "nil"))")
-                }
+                self.currentEpisodes = snapshot
+                self.selectedFeedId = feedId
+                self.updateFilter(tab: self.currentTab)
                 
                 // PERFORMANCE BOOST: Clear loading states immediately since we have data
                 self.isLoadingEpisodes = false
@@ -4793,34 +4744,6 @@ class PodcastViewModel: ObservableObject {
                 await self.loadEpisodesForFeed(feedId, isInitialLoad: false)
             }
         }
-    }
-    
-    /// PERFORMANCE: Increment displayed episode count for lazy loading (pagination)
-    func incrementDisplayedEpisodes() {
-        guard !isLoadingMoreEpisodes else { return }
-        guard displayedEpisodeCount < totalEpisodeCount else { return }
-        
-        isLoadingMoreEpisodes = true
-        
-        Task {
-            // Simulate async loading with small delay to prevent UI blocking
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-            
-            await MainActor.run {
-                let newCount = min(displayedEpisodeCount + episodeLoadBatchSize, totalEpisodeCount)
-                displayedEpisodeCount = newCount
-                isLoadingMoreEpisodes = false
-                
-                print("📊 LAZY LOAD: Displaying \(displayedEpisodeCount) of \(totalEpisodeCount) episodes")
-            }
-        }
-    }
-    
-    /// PERFORMANCE: Reset lazy loading for new feed
-    func resetLazyLoading(totalEpisodes: Int) {
-        totalEpisodeCount = totalEpisodes
-        displayedEpisodeCount = min(episodeLoadBatchSize, totalEpisodes)
-        print("📊 LAZY LOAD: Reset - showing \(displayedEpisodeCount) of \(totalEpisodeCount) episodes")
     }
     
     /// Update filter (All, Favorites, Downloads) with efficient reloading - OPTIMIZED FOR PERFORMANCE
@@ -5519,6 +5442,7 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
+        print("📸 ISOLATION SNAPSHOT: Using \(isolatedEpisodes.count) contamination-free episodes for feed \(feedId)")
         return isolatedEpisodes
     }
     
@@ -5899,141 +5823,17 @@ class PodcastViewModel: ObservableObject {
                     feedDeletionProgress = 0.1
                 }
                 
-                // Step 1.5: CRITICAL - Stop and clear player FIRST (without saving progress) if playing episode from deleted feed
-                await MainActor.run {
-                    feedDeletionMessage = "Checking active player..."
-                    feedDeletionProgress = 0.12
-                    
-                    let podcastPlayer = PodcastPlayer.shared
-                    if let currentEpisode = podcastPlayer.currentEpisode {
-                        // Check if the currently playing episode belongs to the feed being deleted
-                        if currentEpisode.feedId == feed.id {
-                            print("🎵 PLAYER CLEAR: Currently playing episode '\(currentEpisode.title)' belongs to feed being deleted")
-                            print("🎵 PLAYER CLEAR: Stopping playback WITHOUT saving progress to prevent re-creating state data")
-                            
-                            // CRITICAL: Stop player WITHOUT saving progress
-                            // This prevents the player from re-creating episode state data after we clear it
-                            if let player = podcastPlayer.player {
-                                player.pause()
-                            }
-                            podcastPlayer.isPlaying = false
-                            podcastPlayer.userWantsToPlay = false
-                            podcastPlayer.wasManuallyPaused = false
-                            
-                            // Clear the current episode BEFORE clearing states
-                            podcastPlayer.currentEpisode = nil
-                            
-                            // Post notification to update UI
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("PodcastPlayerCleared"),
-                                object: nil,
-                                userInfo: ["reason": "feed_being_deleted", "feedId": feed.id]
-                            )
-                            
-                            print("🎵 PLAYER CLEAR: ✅ Player stopped and cleared WITHOUT saving progress")
-                        } else {
-                            print("🎵 PLAYER CHECK: Currently playing episode belongs to different feed - no action needed")
-                        }
-                    } else {
-                        print("🎵 PLAYER CHECK: No episode currently playing - no action needed")
-                    }
-                }
-                
-                // Step 2: Clear episode states COMPREHENSIVELY from ALL sources
+                // Step 2: Clear episode states from EpisodeStateManager (BATCH OPTIMIZED)
                 await MainActor.run {
                     feedDeletionMessage = "Clearing episode progress and states..."
                     feedDeletionProgress = 0.2
                 }
                 
-                // 2a. Clear from EpisodeStateManager (in-memory dictionaries + UserDefaults)
-                print("🧹 FEED DELETION: Clearing from EpisodeStateManager (in-memory + UserDefaults)...")
+                // Use batch deletion for much better performance
                 EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
-                print("🧹 FEED DELETION: ✅ Cleared \(episodeIds.count) episodes from EpisodeStateManager")
-                
-                // 2a2. Clear from ViewModel's local episodeProgress dictionary IMMEDIATELY
-                await MainActor.run {
-                    print("🧹 FEED DELETION: Clearing from ViewModel episodeProgress dictionary...")
-                    for episodeId in episodeIds {
-                        self.episodeProgress.removeValue(forKey: episodeId)
-                    }
-                    print("🧹 FEED DELETION: ✅ Cleared \(episodeIds.count) episodes from ViewModel episodeProgress")
-                }
-                
-                // 2b. Clear episode state data from Core Data BEFORE episodes are deleted
-                await MainActor.run {
-                    feedDeletionMessage = "Clearing Core Data episode states (progress, played, etc)..."
-                    feedDeletionProgress = 0.3
-                }
-                
-                print("🧹 FEED DELETION: Clearing progress and states from Core Data records...")
-                await clearEpisodeStatesFromCoreData(episodeIds)
-                print("🧹 FEED DELETION: ✅ Cleared episode states from Core Data for \(episodeIds.count) episodes")
-                
-                // 2b2. CRITICAL: Force IMMEDIATE synchronous save to Core Data to persist changes
-                await MainActor.run {
-                    do {
-                        let context = CoreDataStack.shared.persistentContainer.viewContext
-                        
-                        // Force immediate save if there are changes
-                        if context.hasChanges {
-                            try context.save()
-                            print("🧹 💾 IMMEDIATE SAVE: Forced main context save to persist cleared states")
-                        }
-                        
-                        // Force persistent store to flush to disk immediately
-                        try context.persistentStoreCoordinator?.performAndWait {
-                            // This ensures changes are written to disk immediately
-                            print("🧹 💾 IMMEDIATE SAVE: Flushed changes to persistent store")
-                        }
-                        
-                    } catch {
-                        print("🧹 ❌ Error forcing immediate Core Data save: \(error)")
-                    }
-                }
-                
-                // 2c. IMMEDIATE verification - Force context refresh and verify clearing
-                await MainActor.run {
-                    do {
-                        let context = CoreDataStack.shared.persistentContainer.viewContext
-                        
-                        // CRITICAL: Refresh context to ensure we see latest data
-                        context.refreshAllObjects()
-                        print("🧹 🔄 VERIFICATION: Refreshed main context to see latest data")
-                        
-                        // Verify ALL episode states are cleared
-                        let verifyRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                        verifyRequest.predicate = NSPredicate(format: "id IN %@ AND (progress > 0 OR isPlayed == YES OR isFavorite == YES OR isDownloaded == YES)", episodeIds)
-                        let episodesWithStates = try context.count(for: verifyRequest)
-                        
-                        if episodesWithStates > 0 {
-                            print("🧹 ⚠️ WARNING: \(episodesWithStates) episodes still have state data after clearing!")
-                            
-                            // Force clear them again if they still have states
-                            print("🧹 🔄 FORCING SECOND CLEAR: Attempting to clear remaining states...")
-                            
-                            let fetchForClear: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                            fetchForClear.predicate = NSPredicate(format: "id IN %@", episodeIds)
-                            let episodes = try context.fetch(fetchForClear)
-                            
-                            for episode in episodes {
-                                episode.progress = 0.0
-                                episode.isPlayed = false
-                                episode.isFavorite = false
-                                episode.isDownloaded = false
-                            }
-                            
-                            try context.save()
-                            print("🧹 ✅ SECOND CLEAR: Force-cleared \(episodes.count) episodes and saved")
-                        } else {
-                            print("🧹 ✅ VERIFIED: All episode states successfully cleared from Core Data")
-                        }
-                    } catch {
-                        print("🧹 ❌ Error verifying/clearing progress: \(error)")
-                    }
-                }
                 
                 await MainActor.run {
-                    feedDeletionMessage = "✅ Cleared \(totalEpisodes) episode states from all sources"
+                    feedDeletionMessage = "✅ Cleared \(totalEpisodes) episode states (batch)"
                     feedDeletionProgress = 0.4
                 }
                 
@@ -6092,78 +5892,21 @@ class PodcastViewModel: ObservableObject {
                     }
                 }
                 
-                // Step 5: Delete from Core Data with comprehensive cleanup
+                // Step 5: Delete from Core Data
                 await MainActor.run {
                     feedDeletionMessage = "Deleting from local database..."
                     feedDeletionProgress = 0.85
                 }
                 
-                // Delete the feed and all episode entities from Core Data
-                // This will handle both the feed record and all associated episodes
+                // First, explicitly clear all episode state data for this feed
+                await clearEpisodeStatesFromCoreData(episodeIds)
+                
+                // Then delete the feed and episode entities
                 try await deleteFeedFromCoreData(feed)
-                
-                // CRITICAL: Comprehensive Core Data context refresh (same as Settings -> Delete Podcast Data)
-                await MainActor.run {
-                    feedDeletionMessage = "Refreshing Core Data contexts..."
-                    feedDeletionProgress = 0.87
-                    
-                    print("🔄 FEED DELETION: Starting comprehensive context refresh...")
-                    let mainContext = CoreDataStack.shared.persistentContainer.viewContext
-                    
-                    // Reset the main context to clear all cached objects
-                    mainContext.reset()
-                    print("🔄 FEED DELETION: Main context reset completed")
-                    
-                    // Refresh all objects in the context (in case any are still cached)
-                    mainContext.refreshAllObjects()
-                    print("🔄 FEED DELETION: All objects refreshed")
-                    
-                    // Also refresh any background contexts
-                    CoreDataStack.shared.persistentContainer.performBackgroundTask { backgroundContext in
-                        backgroundContext.reset()
-                        print("🔄 FEED DELETION: Background context reset completed")
-                    }
-                }
-                
-                // CRITICAL: Verify deletion was successful after context refresh
-                await MainActor.run {
-                    do {
-                        let mainContext = CoreDataStack.shared.persistentContainer.viewContext
-                        
-                        // Check for remaining episodes
-                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                        episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                        let remainingEpisodes = try mainContext.count(for: episodeRequest)
-                        
-                        // Check for remaining feed
-                        let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                        feedRequest.predicate = NSPredicate(format: "id == %@", feed.id)
-                        let remainingFeeds = try mainContext.count(for: feedRequest)
-                        
-                        if remainingEpisodes > 0 || remainingFeeds > 0 {
-                            print("❌ FEED DELETION ERROR: Data still exists after deletion! Episodes: \(remainingEpisodes), Feeds: \(remainingFeeds)")
-                        } else {
-                            print("✅ FEED DELETION SUCCESS: All data successfully deleted and contexts refreshed")
-                        }
-                    } catch {
-                        print("❌ FEED DELETION: Error verifying deletion: \(error)")
-                    }
-                }
-                
-                // CRITICAL: Verify and clean up any orphaned episode records
-                await verifyAndCleanupOrphanedEpisodes(feedId: feed.id, episodeIds: episodeIds)
                 
                 // PERSISTENT CACHE: Clear all cached data for deleted feed
                 await episodeManager.clearPersistentCacheForFeed(feed.id)
                 print("🧽 DELETION: Cleared persistent cache for deleted feed \(feed.title)")
-                
-                // Clear tab filter cache and snapshots for deleted feed
-                await MainActor.run {
-                    self.clearTabFilterCache(for: feed.id)
-                    self.feedIsolationManager.clearEpisodesForFeed(feed.id)
-                    self.snapshotTimestamps.removeValue(forKey: feed.id)
-                    print("🧽 DELETION: Cleared tab filter cache and snapshots for deleted feed")
-                }
                 
                 await MainActor.run {
                     feedDeletionMessage = "Database cleanup complete"
@@ -6187,122 +5930,13 @@ class PodcastViewModel: ObservableObject {
                         selectedFeedId = nil
                     }
                     
-                    // NOTE: episodeProgress already cleared in Step 2a2
-                    // Verify it's still clear (should be empty for these episodes)
-                    let remainingProgress = episodeIds.filter { episodeProgress[$0] != nil }
-                    if !remainingProgress.isEmpty {
-                        print("🧹 ⚠️ WARNING: Found \(remainingProgress.count) episodes still in episodeProgress after clearing!")
-                        // Force clear them again
-                        for episodeId in remainingProgress {
-                            episodeProgress.removeValue(forKey: episodeId)
-                        }
-                    } else {
-                        print("🧹 ✅ VERIFIED: All episodes cleared from ViewModel episodeProgress")
+                    // Clear local episode progress tracking
+                    for episodeId in episodeIds {
+                        episodeProgress.removeValue(forKey: episodeId)
                     }
                     
                     // Trigger UI update
                     throttledUIUpdate()
-                    
-                    // CRITICAL: Force immediate UI refresh to show cleared states without app restart
-                    print("🔄 IMMEDIATE REFRESH: Forcing UI update to reflect cleared episode states...")
-                    objectWillChange.send()
-                }
-                
-                // Step 6.5: Force reload ALL remaining feeds to ensure UI shows cleared states
-                await MainActor.run {
-                    feedDeletionMessage = "Refreshing remaining feeds..."
-                    feedDeletionProgress = 0.96
-                }
-                
-                // Step 6.5a: CRITICAL - Double-verify EpisodeStateManager in-memory cache is cleared
-                await MainActor.run {
-                    print("🔄 IMMEDIATE REFRESH: Double-checking EpisodeStateManager in-memory cache...")
-                    
-                    // Force clear from EpisodeStateManager again to ensure in-memory dictionaries are empty
-                    EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
-                    
-                    // Verify by checking a few episodes
-                    var stillHasData = false
-                    for episodeId in episodeIds.prefix(5) {
-                        let progress = EpisodeStateManager.shared.getProgress(for: episodeId)
-                        if progress > 0 {
-                            print("🔄 ⚠️ WARNING: Episode \(episodeId) still has progress \(progress) in EpisodeStateManager!")
-                            stillHasData = true
-                        }
-                    }
-                    
-                    if !stillHasData {
-                        print("🔄 ✅ VERIFIED: EpisodeStateManager in-memory cache is clear")
-                    } else {
-                        print("🔄 ⚠️ WARNING: Some episodes still have data in EpisodeStateManager - forcing third clear")
-                        // Force clear one more time
-                        EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
-                    }
-                }
-                
-                // Step 6.5b: Force reload feeds and episodes from Core Data
-                print("🔄 IMMEDIATE REFRESH: Reloading all feeds from Core Data to reflect cleared states...")
-                await MainActor.run {
-                    loadFeedsFromCoreData()
-                }
-                print("🔄 IMMEDIATE REFRESH: ✅ Feeds reloaded - UI should now show cleared states")
-                
-                // Step 6.5b2: FINAL Core Data verification after feed reload
-                await MainActor.run {
-                    print("🔄 FINAL CORE DATA CHECK: Verifying episode states are cleared in Core Data...")
-                    
-                    do {
-                        let context = CoreDataStack.shared.persistentContainer.viewContext
-                        
-                        // Final check for any remaining episode states
-                        let finalVerifyRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                        finalVerifyRequest.predicate = NSPredicate(format: "id IN %@ AND (progress > 0 OR isPlayed == YES OR isFavorite == YES OR isDownloaded == YES)", episodeIds)
-                        let remainingStates = try context.count(for: finalVerifyRequest)
-                        
-                        if remainingStates > 0 {
-                            print("🔄 ⚠️ CRITICAL WARNING: \(remainingStates) episodes STILL have state data in Core Data after all clearing!")
-                            print("🔄 ⚠️ This indicates a Core Data persistence issue that needs investigation")
-                        } else {
-                            print("🔄 ✅ FINAL VERIFICATION: Core Data is completely clear - NO episode states remain")
-                        }
-                        
-                    } catch {
-                        print("🔄 ❌ Error in final Core Data verification: \(error)")
-                    }
-                }
-                
-                // Step 6.5c: Force immediate update with multiple UI refresh mechanisms
-                await MainActor.run {
-                    print("🔄 IMMEDIATE REFRESH: Broadcasting state changes to all views...")
-                    
-                    // Clear ViewModel's episodeProgress one more time for safety
-                    for episodeId in episodeIds {
-                        self.episodeProgress.removeValue(forKey: episodeId)
-                    }
-                    
-                    // Post notification to update any open episode views
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("EpisodeStatesCleared"),
-                        object: nil,
-                        userInfo: ["episodeIds": episodeIds, "feedId": feed.id]
-                    )
-                    print("🔄 IMMEDIATE REFRESH: Posted EpisodeStatesCleared notification to update all views")
-                    
-                    // CRITICAL: Post general episode update notification
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("EpisodeProgressChanged"),
-                        object: nil
-                    )
-                    print("🔄 IMMEDIATE REFRESH: Posted EpisodeProgressChanged notification for full refresh")
-                    
-                    // Force immediate UI update with objectWillChange
-                    objectWillChange.send()
-                    print("🔄 IMMEDIATE REFRESH: Sent objectWillChange to trigger SwiftUI re-render")
-                    
-                    // Trigger throttled update to ensure all UI components refresh
-                    throttledUIUpdate()
-                    
-                    print("🔄 IMMEDIATE REFRESH: ✅ All refresh mechanisms triggered")
                 }
                 
                 // Step 7: Sync deletion to other devices (if CloudKit succeeded)
@@ -6313,35 +5947,6 @@ class PodcastViewModel: ObservableObject {
                             feedTitle: feed.title,
                             episodeIds: episodeIds
                         )
-                    }
-                }
-                
-                // Step 7.5: FINAL COMPREHENSIVE VERIFICATION - Check all progress sources are cleared
-                await MainActor.run {
-                    feedDeletionMessage = "Final verification of progress clearing..."
-                    feedDeletionProgress = 0.98
-                    
-                    print("🔍 FINAL VERIFICATION: Checking all progress sources for \(episodeIds.count) episodes...")
-                    
-                    // Check 1: ViewModel episodeProgress
-                    let viewModelProgress = episodeIds.filter { episodeProgress[$0] != nil }
-                    print("🔍   ViewModel episodeProgress: \(viewModelProgress.count) episodes still have progress")
-                    
-                    // Check 2: EpisodeStateManager
-                    var managerProgress = 0
-                    for episodeId in episodeIds {
-                        if EpisodeStateManager.shared.getProgress(for: episodeId) > 0 {
-                            managerProgress += 1
-                        }
-                    }
-                    print("🔍   EpisodeStateManager: \(managerProgress) episodes still have progress")
-                    
-                    // Final summary
-                    let totalRemaining = viewModelProgress.count + managerProgress
-                    if totalRemaining > 0 {
-                        print("🔍 ⚠️ FINAL VERIFICATION: \(totalRemaining) episodes still have progress data!")
-                    } else {
-                        print("🔍 ✅ FINAL VERIFICATION: All progress successfully cleared from all sources!")
                     }
                 }
                 
@@ -7150,30 +6755,23 @@ class PodcastViewModel: ObservableObject {
     /// 
     /// To force a re-sync (for troubleshooting), call resetEpisodeStatesSyncFlag()
     func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async -> Bool {
-        // CRITICAL FIX: During fresh install, ALWAYS sync from CloudKit even if snapshots exist
-        // Snapshots created during fresh install don't have CloudKit state data yet!
-        if !isFreshInstall {
-            // PERFORMANCE: Skip expensive CloudKit episode sync if we have snapshots for ANY feed
-            // This optimization only applies to non-fresh installs
-            let hasAnySnapshot = await MainActor.run {
-                // Check if we have snapshots for any loaded feeds
-                for feed in self.podcastFeeds {
-                    if self.getEpisodeSnapshot(for: feed.id) != nil {
-                        print("⚡ PERFORMANCE: Found snapshot for feed \(feed.title) - skipping CloudKit sync")
-                        return true
-                    }
+        // PERFORMANCE: Skip expensive CloudKit episode sync if we have snapshots for ANY feed
+        let hasAnySnapshot = await MainActor.run {
+            // Check if we have snapshots for any loaded feeds
+            for feed in self.podcastFeeds {
+                if self.getEpisodeSnapshot(for: feed.id) != nil {
+                    print("⚡ PERFORMANCE: Found snapshot for feed \(feed.title) - skipping CloudKit sync")
+                    return true
                 }
-                return false
             }
-            
-            // Skip CloudKit sync if we have snapshots (non-fresh install only)
-            // Snapshots already contain complete episode data with states
-            if hasAnySnapshot {
-                print("⚡ PERFORMANCE: Skipping CloudKit episode sync - using episode snapshots with complete state data")
-                return true
-            }
-        } else {
-            print("🆕 FRESH INSTALL: Forcing CloudKit episode state sync - snapshots don't have state data yet")
+            return false
+        }
+        
+        // Skip CloudKit sync if we have snapshots (regardless of fresh install status)
+        // Snapshots already contain complete episode data with states
+        if hasAnySnapshot {
+            print("⚡ PERFORMANCE: Skipping CloudKit episode sync - using episode snapshots with complete state data")
+            return true
         }
         
         print("🔄 Syncing episode states from CloudKit (fresh install: \(isFreshInstall))")
@@ -7216,23 +6814,10 @@ class PodcastViewModel: ObservableObject {
                 if !coreDataUpdates.isEmpty {
                     do {
                         try await episodeManager.updateEpisodeStates(coreDataUpdates)
-                        
-                        // Count meaningful states for better logging
-                        let favoritesCount = coreDataUpdates.filter { $0.isFavorite ?? false }.count
-                        let progressCount = coreDataUpdates.filter { ($0.progress ?? 0) > 0 }.count
-                        let playedCount = coreDataUpdates.filter { $0.isPlayed ?? false }.count
-                        
-                        print("💾 ========================================")
-                        print("💾 EPISODE STATES SAVED: \(coreDataUpdates.count) total updates")
-                        print("💾   - Favorites: \(favoritesCount)")
-                        print("💾   - With Progress: \(progressCount)")
-                        print("💾   - Played: \(playedCount)")
-                        print("💾 ========================================")
+                        print("💾 Saved \(coreDataUpdates.count) episode states to Core Data")
                     } catch {
                         print("❌ Failed to save synced episode states to Core Data: \(error)")
                     }
-                } else {
-                    print("⚠️ No episode state updates received from CloudKit")
                 }
                 
                 // Update progress during UI refresh
@@ -7273,7 +6858,7 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// Get all episode IDs directly from Core Data to ensure we don't miss any
-    private func getAllEpisodeIdsFromCoreData() async -> [String] {
+    func getAllEpisodeIdsFromCoreData() async -> [String] {
         return await withCheckedContinuation { continuation in
             let context = CoreDataStack.shared.context
             context.perform {
@@ -7470,9 +7055,8 @@ class PodcastViewModel: ObservableObject {
                             }
                             
                             let feedManager = PodcastFeedManager()
-                            // CRITICAL: Pass CloudKit feed ID to preserve it during RSS parsing
-                            let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false, existingFeedId: feed.id)
-                            print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title) (using CloudKit feedId: \(feed.id))")
+                            let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false)
+                            print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
                             
                         } catch {
                             print("❌ Failed to process feed \(feed.title): \(error)")
@@ -7516,44 +7100,6 @@ class PodcastViewModel: ObservableObject {
         // Clean up any duplicates that might have been created
         await cleanupDuplicateFeeds()
         
-        // CRITICAL: Load feeds from CoreData first, then restore order
-        await MainActor.run {
-            print("📡 🔄 LOADING FEEDS FROM COREDATA BEFORE ORDER RESTORATION...")
-            self.loadFeedsFromCoreData()
-        }
-        
-        // Wait for feeds to load
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-        
-        // CRITICAL: Restore correct order from CloudKit feeds before saving to CoreData
-        await MainActor.run {
-            print("📡 🔢 FEEDS LOADED: \(self.podcastFeeds.count) feeds in memory")
-            
-            // Create a map of CloudKit feed orders
-            let cloudKitOrderMap = Dictionary(uniqueKeysWithValues: cloudKitFeeds.map { ($0.url, $0.order) })
-            
-            print("📡 🔢 RESTORING ORDER FROM CLOUDKIT (loadFreshInstallPodcastData):")
-            for cloudFeed in cloudKitFeeds {
-                print("📡 🔢 CloudKit: \(cloudFeed.title) - order: \(cloudFeed.order)")
-            }
-            
-            // Update order for all feeds based on CloudKit data
-            for index in self.podcastFeeds.indices {
-                let feed = self.podcastFeeds[index]
-                if let cloudKitOrder = cloudKitOrderMap[feed.url] {
-                    self.podcastFeeds[index].order = cloudKitOrder
-                    print("📡 🔢 RESTORED: \(feed.title) - order: \(cloudKitOrder)")
-                }
-            }
-            
-            print("📡 🔢 SAVING FINAL ORDER TO COREDATA:")
-            for (index, feed) in self.podcastFeeds.enumerated() {
-                print("📡 🔢 Final Feed [\(index)]: \(feed.title) - order: \(feed.order)")
-            }
-            self.saveFeedsToCoreData()
-            print("✅ Saved feeds with correct order to CoreData")
-        }
-        
         // CRITICAL: Clear episode cache and reload feeds from Core Data AFTER all RSS processing and cleanup
         await episodeManager.clearAllCache()
         
@@ -7582,43 +7128,6 @@ class PodcastViewModel: ObservableObject {
         // Verify feeds are actually saved to Core Data
         let savedFeedCount = await countExistingFeeds()
         print("🔍 VERIFICATION: Found \(savedFeedCount) feeds in Core Data after fresh install processing")
-        
-        // CRITICAL: Load episodes from Core Data into memory for snapshot creation
-        print("📡 CRITICAL: Loading episodes into memory for all feeds to enable snapshot creation...")
-        
-        // Load episodes synchronously for each feed using TaskGroup for proper awaiting
-        let feedCount = await MainActor.run { self.podcastFeeds.count }
-        
-        if feedCount > 0 {
-            await withTaskGroup(of: (Int, [PodcastEpisode]).self) { group in
-                // Create tasks for each feed
-                for index in 0..<feedCount {
-                    let feedId = await MainActor.run { self.podcastFeeds[index].id }
-                    let feedTitle = await MainActor.run { self.podcastFeeds[index].title }
-                    
-                    group.addTask {
-                        let episodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
-                        print("📡 Loaded \(episodes.count) episodes from Core Data for feed: \(feedTitle)")
-                        return (index, episodes)
-                    }
-                }
-                
-                // Collect all results and update feeds
-                for await (index, episodes) in group {
-                    await MainActor.run {
-                        if index < self.podcastFeeds.count {
-                            self.podcastFeeds[index].episodes = episodes
-                        }
-                    }
-                }
-            }
-        }
-        
-        await MainActor.run {
-            let totalEpisodes = self.podcastFeeds.reduce(0) { $0 + $1.episodes.count }
-            let feedsWithEpisodes = self.podcastFeeds.filter { !$0.episodes.isEmpty }.count
-            print("✅ EPISODE LOADING COMPLETE: \(totalEpisodes) total episodes loaded into memory across \(feedsWithEpisodes)/\(self.podcastFeeds.count) feeds")
-        }
         
         // CRITICAL: Trigger UI refresh after fresh install processing
         print("🔄 Triggered UI refresh after fresh install RSS processing")
@@ -7674,12 +7183,6 @@ class PodcastViewModel: ObservableObject {
     private func processFreshInstallFeeds(_ cloudKitFeeds: [PodcastFeed]) async {
         print("🚀 Processing \(cloudKitFeeds.count) feeds for fresh install")
         
-        // Log the order of feeds from CloudKit
-        print("📡 🔢 CLOUDKIT FEED ORDER:")
-        for (index, feed) in cloudKitFeeds.enumerated() {
-            print("📡 🔢 CloudKit Feed [\(index)]: \(feed.title) - order property: \(feed.order)")
-        }
-        
         await MainActor.run {
             self.isLoading = true
         }
@@ -7687,12 +7190,6 @@ class PodcastViewModel: ObservableObject {
         // Remove duplicates from CloudKit feeds before processing
         let uniqueFeeds = removeDuplicateFeeds(cloudKitFeeds)
         print("📊 Removed \(cloudKitFeeds.count - uniqueFeeds.count) duplicate feeds from CloudKit data")
-        
-        // Log the order after deduplication
-        print("📡 🔢 AFTER DEDUPLICATION:")
-        for (index, feed) in uniqueFeeds.enumerated() {
-            print("📡 🔢 Unique Feed [\(index)]: \(feed.title) - order property: \(feed.order)")
-        }
         
         // Check what feeds already exist in Core Data to prevent duplicate processing
         let existingFeedUrls = await getExistingFeedUrls()
@@ -7730,7 +7227,7 @@ class PodcastViewModel: ObservableObject {
                 for feed in batch {
                     group.addTask {
                         do {
-                            print("📡 Processing feed: \(feed.title) with order: \(feed.order)")
+                            print("📡 Processing feed: \(feed.title)")
                             
                             // Use FeedManager to properly add feed with RSS parsing
                             guard let url = URL(string: feed.url) else {
@@ -7741,18 +7238,10 @@ class PodcastViewModel: ObservableObject {
                             let addedFeed = try await self.feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false)
                             print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
                             
-                            // CRITICAL: Preserve the order from CloudKit
-                            await MainActor.run {
-                                if let index = self.podcastFeeds.firstIndex(where: { $0.id == addedFeed.id }) {
-                                    self.podcastFeeds[index].order = feed.order
-                                    print("📡 🔢 PRESERVED ORDER: Set \(addedFeed.title) order to \(feed.order)")
-                                }
-                            }
-                            
                         } catch {
                             print("❌ Failed to process feed \(feed.title): \(error)")
                             
-                            // Save feed without episodes if RSS parsing fails (preserving order)
+                            // Save feed without episodes if RSS parsing fails
                             try? await self.saveFeedToCoreData(feed)
                         }
                     }
@@ -7775,33 +7264,6 @@ class PodcastViewModel: ObservableObject {
         
         // Clean up any duplicates that might have been created
         await cleanupDuplicateFeeds()
-        
-        // CRITICAL: Restore correct order from CloudKit feeds before saving to CoreData
-        await MainActor.run {
-            // Create a map of CloudKit feed orders
-            let cloudKitOrderMap = Dictionary(uniqueKeysWithValues: cloudKitFeeds.map { ($0.url, $0.order) })
-            
-            print("📡 🔢 RESTORING ORDER FROM CLOUDKIT:")
-            for cloudFeed in cloudKitFeeds {
-                print("📡 🔢 CloudKit: \(cloudFeed.title) - order: \(cloudFeed.order)")
-            }
-            
-            // Update order for all feeds based on CloudKit data
-            for index in self.podcastFeeds.indices {
-                let feed = self.podcastFeeds[index]
-                if let cloudKitOrder = cloudKitOrderMap[feed.url] {
-                    self.podcastFeeds[index].order = cloudKitOrder
-                    print("📡 🔢 RESTORED: \(feed.title) - order: \(cloudKitOrder)")
-                }
-            }
-            
-            print("📡 🔢 SAVING FINAL ORDER TO COREDATA:")
-            for (index, feed) in self.podcastFeeds.enumerated() {
-                print("📡 🔢 Final Feed [\(index)]: \(feed.title) - order: \(feed.order)")
-            }
-            self.saveFeedsToCoreData()
-            print("✅ Saved feeds with correct order to CoreData")
-        }
         
         // CRITICAL: Clear episode cache and reload feeds from Core Data AFTER all RSS processing and cleanup
         await episodeManager.clearAllCache()
@@ -8567,10 +8029,10 @@ class PodcastViewModel: ObservableObject {
     // MARK: - Delete Feed with CloudKit Integration
     
     private func deleteFeedFromCoreData(_ feed: PodcastFeed) async throws {
-        print("💾 Starting comprehensive deletion from Core Data for feed: \(feed.title)")
+        print("💾 Starting safe deletion from Core Data for feed: \(feed.title)")
         
-        // Use background context to avoid blocking UI and prevent merge conflicts
-        let context = CoreDataStack.shared.persistentContainer.newBackgroundContext()
+        // Use main context with proper transaction handling to avoid merge conflicts
+        let context = CoreDataStack.shared.persistentContainer.viewContext
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -8582,38 +8044,39 @@ class PodcastViewModel: ObservableObject {
                     let episodeCount = try context.count(for: episodeCountRequest)
                     print("💾 Found \(episodeCount) episodes to delete for feed: \(feed.title)")
                     
-                    // Step 2: Delete ALL episodes for this feed using batch delete for better performance
-                    // This is more efficient than fetching and deleting individually
-                    let episodeBatchDeleteRequest = NSBatchDeleteRequest(
-                        fetchRequest: {
-                            let request: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
-                            request.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                            return request
-                        }()
-                    )
+                    // Step 2: Fetch and delete episodes in batches to avoid memory issues
+                    var totalDeleted = 0
+                    let batchSize = 500
                     
-                    // Configure batch delete to return object IDs for proper notification
-                    episodeBatchDeleteRequest.resultType = .resultTypeObjectIDs
-                    
-                    // Execute batch delete
-                    let batchDeleteResult = try context.execute(episodeBatchDeleteRequest) as? NSBatchDeleteResult
-                    let deletedObjectIDs = batchDeleteResult?.result as? [NSManagedObjectID] ?? []
-                    
-                    print("💾 Batch deleted \(deletedObjectIDs.count) episodes from Core Data")
-                    
-                    // Step 3: Merge changes to other contexts to keep them in sync
-                    let changes = [NSDeletedObjectsKey: deletedObjectIDs]
-                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context])
-                    
-                    // Also merge to view context on main thread
-                    DispatchQueue.main.async {
-                        NSManagedObjectContext.mergeChanges(
-                            fromRemoteContextSave: changes,
-                            into: [CoreDataStack.shared.persistentContainer.viewContext]
-                        )
+                    while true {
+                        let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        episodeFetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                        episodeFetchRequest.fetchLimit = batchSize
+                        
+                        let episodes = try context.fetch(episodeFetchRequest)
+                        if episodes.isEmpty {
+                            break
+                        }
+                        
+                        // Delete this batch of episodes
+                        for episode in episodes {
+                            // Clear any relationships first
+                            episode.feed = nil
+                            context.delete(episode)
+                        }
+                        
+                        totalDeleted += episodes.count
+                        
+                        // Save periodically to prevent memory buildup
+                        if totalDeleted % (batchSize * 2) == 0 {
+                            try context.save()
+                            print("💾 Intermediate save: deleted \(totalDeleted) episodes so far")
+                        }
                     }
                     
-                    // Step 4: Now delete the feed record
+                    print("💾 Deleted \(totalDeleted) episodes from Core Data")
+                    
+                    // Step 3: Now delete the feed record
                     let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                     feedFetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
                     
@@ -8625,65 +8088,22 @@ class PodcastViewModel: ObservableObject {
                     }
                     print("💾 Deleted \(feedResults.count) feed records from Core Data")
                     
-                    // Step 5: Save all changes
+                    // Step 4: Final save
                     try context.save()
-                    
-                    // Step 6: Verify deletion was successful
-                    let verifyEpisodesRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                    verifyEpisodesRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                    let remainingEpisodes = try context.count(for: verifyEpisodesRequest)
-                    
-                    let verifyFeedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    verifyFeedRequest.predicate = NSPredicate(format: "id == %@", feed.id)
-                    let remainingFeeds = try context.count(for: verifyFeedRequest)
-                    
-                    if remainingEpisodes > 0 || remainingFeeds > 0 {
-                        print("💾 ⚠️ WARNING: Deletion incomplete - \(remainingEpisodes) episodes and \(remainingFeeds) feeds still exist!")
-                        throw NSError(domain: "PodcastDeletion", code: 1, userInfo: [
-                            NSLocalizedDescriptionKey: "Failed to completely delete feed. \(remainingEpisodes) episodes and \(remainingFeeds) feeds remain."
-                        ])
-                    }
-                    
-                    print("💾 ✅ Successfully completed comprehensive deletion for feed: \(feed.title)")
-                    print("💾 ✅ Verified: 0 episodes and 0 feeds remain in Core Data")
+                    print("💾 ✅ Successfully completed safe deletion for feed: \(feed.title)")
                     continuation.resume()
                     
                 } catch {
                     print("💾 ❌ Error in Core Data deletion: \(error.localizedDescription)")
                     
-                    // Attempt recovery by rolling back and trying a fallback approach
+                    // Attempt recovery by rolling back and trying a simpler approach
                     context.rollback()
                     
                     do {
-                        // Fallback: Try manual deletion with fresh context state
+                        // Try one more time with a fresh context state
                         context.refreshAllObjects()
                         
-                        // Delete episodes manually in batches
-                        var totalDeleted = 0
-                        let batchSize = 500
-                        
-                        while true {
-                            let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                            episodeFetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                            episodeFetchRequest.fetchLimit = batchSize
-                            
-                            let episodes = try context.fetch(episodeFetchRequest)
-                            if episodes.isEmpty {
-                                break
-                            }
-                            
-                            for episode in episodes {
-                                episode.feed = nil
-                                context.delete(episode)
-                            }
-                            
-                            totalDeleted += episodes.count
-                            try context.save()
-                        }
-                        
-                        print("💾 Fallback: Deleted \(totalDeleted) episodes manually")
-                        
-                        // Delete feed records
+                        // Simple deletion approach - just delete what we can find
                         let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                         feedFetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
                         
@@ -8693,10 +8113,10 @@ class PodcastViewModel: ObservableObject {
                         }
                         
                         try context.save()
-                        print("💾 ✅ Fallback deletion successful")
+                        print("💾 ✅ Recovery successful - completed deletion")
                         continuation.resume()
                     } catch {
-                        print("💾 ❌ Fallback deletion also failed: \(error)")
+                        print("💾 ❌ Recovery also failed: \(error)")
                         continuation.resume(throwing: error)
                     }
                 }
@@ -9621,10 +9041,8 @@ extension PodcastViewModel {
     @available(*, deprecated, message: "Use new feed management")
     func updatePodcastFeed(_ feed: PodcastFeed) {
         print("📡 PodcastViewModel - Before update:")
-        var oldURL: String? = nil
         if let existingFeed = podcastFeeds.first(where: { $0.id == feed.id }) {
             print("📡   Existing - Title: '\(existingFeed.title)', URL: '\(existingFeed.url)'")
-            oldURL = existingFeed.url
         }
         print("📡   New - Title: '\(feed.title)', URL: '\(feed.url)'")
         
@@ -9648,8 +9066,7 @@ extension PodcastViewModel {
         // Save to CloudKit in background
         Task {
             do {
-                // Pass old URL to CloudKit manager so it can find and update the old record
-                try await cloudKitManager.savePodcastFeedToCloudKit(feed, oldURL: oldURL)
+                try await cloudKitManager.savePodcastFeedToCloudKit(feed)
                 print("☁️ Successfully saved podcast feed to CloudKit: \(feed.title)")
             } catch {
                 print("❌ Failed to save podcast feed to CloudKit: \(error)")
@@ -9669,7 +9086,6 @@ extension PodcastViewModel {
     /// For PodcastListView compatibility
     @available(*, deprecated, message: "Use new feed management")
     func sortFeedsAlphabetically() {
-        print("📡 🔄 PODCAST SORT: Starting alphabetical sort...")
         isAscendingSort.toggle()
         
         podcastFeeds.sort { feed1, feed2 in
@@ -9683,27 +9099,8 @@ extension PodcastViewModel {
         // Update feed order to match sorted feeds
         podcastFeedOrder = podcastFeeds.map { $0.id }
         
-        // Update order property for each feed
-        for (index, feed) in podcastFeeds.enumerated() {
-            if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
-                podcastFeeds[feedIndex].order = index
-                print("📡 🔢 PODCAST SORT: \(feed.title) - new order: \(index)")
-            }
-        }
-        
         // SORTING FIX: Save the sorted order to Core Data to persist the changes
         saveFeedsToCoreData()
-        
-        // Save to UserDefaults
-        UserDefaults.standard.set(podcastFeedOrder, forKey: "PodcastFeedOrder")
-        UserDefaults.standard.synchronize()
-        print("📡 💾 PODCAST SORT: Saved feed order to UserDefaults for \(podcastFeeds.count) feeds")
-        
-        // Sync to CloudKit
-        print("📡 ☁️ PODCAST SORT: Starting CloudKit sync...")
-        Task {
-            await syncPodcastFeedOrderToCloudKit()
-        }
         
         // Notify CarPlay immediately about podcast feed order change
         NotificationCenter.default.post(
@@ -9717,12 +9114,11 @@ extension PodcastViewModel {
         
         // CRITICAL: Trigger UI refresh to show the sorted order immediately
         objectWillChange.send()
-        print("🎯 PODCAST SORT: Applied \(isAscendingSort ? "A-Z" : "Z-A") sort and triggered UI refresh")
+        print("🎯 SORTING: Applied \(isAscendingSort ? "A-Z" : "Z-A") sort and triggered UI refresh")
     }
     
     /// Update podcast feed order manually and notify CarPlay immediately
     func updatePodcastFeedOrder(_ newOrder: [String]) {
-        print("📡 🔄 PODCAST DRAG AND DROP: Starting updatePodcastFeedOrder with \(newOrder.count) feeds")
         podcastFeedOrder = newOrder
         
         // Reorder the podcastFeeds array to match the new order
@@ -9745,28 +9141,8 @@ extension PodcastViewModel {
         
         podcastFeeds = reorderedFeeds
         
-        // Update order property for each feed
-        for (index, feed) in podcastFeeds.enumerated() {
-            if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
-                let oldOrder = podcastFeeds[feedIndex].order
-                podcastFeeds[feedIndex].order = index
-                print("📡 🔢 PODCAST DRAG AND DROP: \(feed.title) - old order: \(oldOrder), new order: \(index)")
-            }
-        }
-        
         // Save the new order to Core Data
         saveFeedsToCoreData()
-        
-        // Save to UserDefaults
-        UserDefaults.standard.set(podcastFeedOrder, forKey: "PodcastFeedOrder")
-        UserDefaults.standard.synchronize()
-        print("📡 💾 PODCAST DRAG AND DROP: Saved feed order to UserDefaults for \(podcastFeeds.count) feeds")
-        
-        // Sync to CloudKit
-        print("📡 ☁️ PODCAST DRAG AND DROP: Starting CloudKit sync...")
-        Task {
-            await syncPodcastFeedOrderToCloudKit()
-        }
         
         // Notify CarPlay immediately about podcast feed order change
         NotificationCenter.default.post(
@@ -9775,54 +9151,7 @@ extension PodcastViewModel {
             userInfo: ["newOrder": podcastFeedOrder]
         )
         
-        print("🎙️ PODCAST DRAG AND DROP: Updated podcast feed order and notified CarPlay")
-    }
-    
-    /// Sync podcast feed order to CloudKit
-    func syncPodcastFeedOrderToCloudKit() async {
-        print("📡 🚨 PODCAST FEED ORDER SYNC: Starting batch feed order sync to CloudKit...")
-        
-        guard !podcastFeeds.isEmpty else {
-            print("📡 ⚠️ PODCAST FEED ORDER SYNC: No feeds to sync")
-            return
-        }
-        
-        // Update DataSyncManager to show we're starting a save operation
-        await MainActor.run {
-            DataSyncManager.shared.podcastFeedsStatus = .inProgress
-            DataSyncManager.shared.podcastFeedsOperation = "Saving podcast feeds to iCloud"
-            DataSyncManager.shared.podcastFeedsProgress = 0.0
-            DataSyncManager.shared.podcastFeedsTotalCount = podcastFeeds.count
-            DataSyncManager.shared.podcastFeedsCurrentCount = 0
-        }
-        
-        // Save each feed to CloudKit
-        var savedCount = 0
-        for (index, feed) in podcastFeeds.enumerated() {
-            do {
-                try await cloudKitManager.savePodcastFeedToCloudKit(feed)
-                savedCount += 1
-                
-                await MainActor.run {
-                    DataSyncManager.shared.podcastFeedsProgress = Double(savedCount) / Double(podcastFeeds.count)
-                    DataSyncManager.shared.podcastFeedsCurrentCount = savedCount
-                    DataSyncManager.shared.podcastFeedsOperation = "Saved \(savedCount)/\(podcastFeeds.count) feeds to iCloud"
-                }
-                
-                print("📡 ✅ PODCAST FEED ORDER SYNC: Saved \(feed.title) (order: \(index))")
-            } catch {
-                print("📡 ❌ PODCAST FEED ORDER SYNC: Failed to save \(feed.title): \(error)")
-            }
-        }
-        
-        // Mark operation as completed
-        await MainActor.run {
-            DataSyncManager.shared.podcastFeedsStatus = .completed
-            DataSyncManager.shared.podcastFeedsOperation = "Saved \(savedCount) feeds to CloudKit"
-            DataSyncManager.shared.podcastFeedsProgress = 1.0
-        }
-        
-        print("📡 ✅ PODCAST FEED ORDER SYNC: Successfully synced \(savedCount) feeds to CloudKit")
+        print("🎙️ Updated podcast feed order and notified CarPlay")
     }
     
     /// Load sorting preferences from UserDefaults
@@ -10040,7 +9369,7 @@ extension PodcastViewModel {
                     existingFeed.descriptionText = feed.descriptionText
                     existingFeed.iconData = feed.iconData
                     existingFeed.imageData = feed.imageData
-                    existingFeed.sortOrder = Int16(feed.order)  // Use feed.order instead of index
+                    existingFeed.sortOrder = Int16(index)
                 } else {
                     // Create new feed if it doesn't exist
                     let newFeed = FeedModel(context: context)
@@ -10051,7 +9380,7 @@ extension PodcastViewModel {
                     newFeed.descriptionText = feed.descriptionText
                     newFeed.iconData = feed.iconData
                     newFeed.imageData = feed.imageData
-                    newFeed.sortOrder = Int16(feed.order)  // Use feed.order instead of index
+                    newFeed.sortOrder = Int16(index)
                 }
             }
             
@@ -10159,24 +9488,16 @@ extension PodcastViewModel {
                     description: feedModel.descriptionText,
                     iconData: feedModel.iconData,
                     imageData: feedModel.imageData,
-                    episodes: episodes,
-                    order: Int(feedModel.sortOrder)  // Load order from CoreData
+                    episodes: episodes
                 )
                 loadedFeeds.append(feed)
             }
             
             // CRITICAL: Assign to @Published properties on main thread to trigger UI updates
             Task { @MainActor in
-                // Sort feeds by order property to ensure correct display order
-                let sortedFeeds = loadedFeeds.sorted { $0.order < $1.order }
-                print("📡 🔢 SORTED FEEDS BY ORDER:")
-                for (index, feed) in sortedFeeds.enumerated() {
-                    print("📡 🔢 Sorted Feed [\(index)]: \(feed.title) - order: \(feed.order)")
-                }
-                
                 // Batch property updates to prevent multiple UI refreshes
-                self.podcastFeeds = sortedFeeds
-                self.podcastFeedOrder = sortedFeeds.map { $0.id }
+                self.podcastFeeds = loadedFeeds
+                self.podcastFeedOrder = loadedFeeds.map { $0.id }
                 
                 // 🛡️ CRITICAL: Register all feeds with FeedIsolationManager immediately after loading
                 for feed in loadedFeeds {
@@ -10506,8 +9827,6 @@ extension PodcastViewModel {
     
     /// Move feed order (following radio station pattern)
     func movePodcastFeed(from source: IndexSet, to destination: Int) {
-        print("📡 🔄 PODCAST DRAG AND DROP: Starting movePodcastFeed - source: \(source), destination: \(destination)")
-        
         podcastFeedOrder.move(fromOffsets: source, toOffset: destination)
         
         // Reorder the actual feeds array to match
@@ -10519,28 +9838,8 @@ extension PodcastViewModel {
         }
         podcastFeeds = reorderedFeeds
         
-        // Update order property for each feed
-        for (index, feed) in podcastFeeds.enumerated() {
-            if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
-                let oldOrder = podcastFeeds[feedIndex].order
-                podcastFeeds[feedIndex].order = index
-                print("📡 🔢 PODCAST DRAG AND DROP: \(feed.title) - old order: \(oldOrder), new order: \(index)")
-            }
-        }
-        
         // Save the new order to Core Data
         saveFeedsToCoreData()
-        
-        // Save to UserDefaults
-        UserDefaults.standard.set(podcastFeedOrder, forKey: "PodcastFeedOrder")
-        UserDefaults.standard.synchronize()
-        print("📡 💾 PODCAST DRAG AND DROP: Saved feed order to UserDefaults for \(podcastFeeds.count) feeds")
-        
-        // Sync to CloudKit
-        print("📡 ☁️ PODCAST DRAG AND DROP: Starting CloudKit sync...")
-        Task {
-            await syncPodcastFeedOrderToCloudKit()
-        }
         
         // Notify CarPlay immediately about podcast feed order change
         NotificationCenter.default.post(
@@ -10552,7 +9851,7 @@ extension PodcastViewModel {
             ]
         )
         
-        print("🎙️ PODCAST DRAG AND DROP: Moved podcast feed and notified CarPlay of new order")
+        print("🎙️ Moved podcast feed and notified CarPlay of new order")
     }
     
     /// Clear all episode states from EpisodeStateManager during bulk deletion
@@ -10614,19 +9913,9 @@ extension PodcastViewModel {
                         // Save batch immediately to ensure data is persisted
                         if episodes.count > 0 {
                             try context.save()
-                            
-                            // CRITICAL: Merge changes to main context to ensure isPlayed state is cleared
-                            let objectIDs = episodes.map { $0.objectID }
-                            DispatchQueue.main.async {
-                                NSManagedObjectContext.mergeChanges(
-                                    fromRemoteContextSave: [NSUpdatedObjectsKey: objectIDs],
-                                    into: [CoreDataStack.shared.persistentContainer.viewContext]
-                                )
-                            }
-                            
                             // Log only every 10th batch to reduce logging volume
                             if (i/batchSize + 1) % 10 == 0 {
-                                print("💾 💾 Saved batch \(i/batchSize + 1) - cleared \(episodes.count) episodes (merged to main context)")
+                                print("💾 💾 Saved batch \(i/batchSize + 1) - cleared \(episodes.count) episodes")
                             }
                         }
                     }
@@ -10658,19 +9947,6 @@ extension PodcastViewModel {
                     context.rollback()
                     continuation.resume()
                 }
-            }
-        }
-        
-        // CRITICAL: Save main context after all merges complete to persist isPlayed state clearing
-        await MainActor.run {
-            do {
-                let mainContext = CoreDataStack.shared.persistentContainer.viewContext
-                if mainContext.hasChanges {
-                    try mainContext.save()
-                    print("💾 ✅ CRITICAL: Saved main context after episode state clearing - isPlayed state persisted")
-                }
-            } catch {
-                print("💾 ❌ Error saving main context after episode state clearing: \(error)")
             }
         }
     }
@@ -11231,53 +10507,6 @@ extension PodcastViewModel {
     private func markFeedAsFinished(_ feedId: String) {
         feedProcessingQueue.sync(flags: .barrier) {
             feedsBeingProcessed.remove(feedId)
-        }
-    }
-    
-    /// Verify and clean up any orphaned episode records after feed deletion
-    private func verifyAndCleanupOrphanedEpisodes(feedId: String, episodeIds: [String]) async {
-        print("🧹 CLEANUP: Verifying episode deletion for feed: \(feedId)")
-        
-        let context = CoreDataStack.shared.persistentContainer.newBackgroundContext()
-        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-        
-        await context.perform {
-            do {
-                // Check for any remaining episodes with this feedId
-                let feedIdRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                feedIdRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
-                let remainingByFeedId = try context.fetch(feedIdRequest)
-                
-                if !remainingByFeedId.isEmpty {
-                    print("🧹 CLEANUP: Found \(remainingByFeedId.count) orphaned episodes by feedId - deleting")
-                    for episode in remainingByFeedId {
-                        context.delete(episode)
-                    }
-                }
-                
-                // Check for any remaining episodes by episode IDs
-                let episodeIdRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                episodeIdRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
-                let remainingByEpisodeId = try context.fetch(episodeIdRequest)
-                
-                if !remainingByEpisodeId.isEmpty {
-                    print("🧹 CLEANUP: Found \(remainingByEpisodeId.count) orphaned episodes by episodeId - deleting")
-                    for episode in remainingByEpisodeId {
-                        context.delete(episode)
-                    }
-                }
-                
-                // Save if we deleted anything
-                if context.hasChanges {
-                    try context.save()
-                    print("🧹 ✅ CLEANUP: Removed \(remainingByFeedId.count + remainingByEpisodeId.count) orphaned episode records")
-                } else {
-                    print("🧹 ✅ CLEANUP: No orphaned episodes found - deletion was complete")
-                }
-                
-            } catch {
-                print("🧹 ❌ CLEANUP: Failed to verify episode deletion: \(error.localizedDescription)")
-            }
         }
     }
 

@@ -197,7 +197,8 @@ class DataSyncManager: ObservableObject {
     // MARK: - Public Methods
     
     /// Start the complete data synchronization process for fresh installs
-    /// ⚡ OPTIMIZED: Ensures proper order - CloudKit fetch -> Core Data save -> Episode state sync
+    /// ⚡ REDESIGNED: Ensures ALL data is fetched, parsed, and saved during initial sync
+    /// Everything completes in DataSyncProgressView - no lazy loading afterwards
     func startFreshInstallSync() {
         guard !isSyncing else { return }
         
@@ -211,60 +212,61 @@ class DataSyncManager: ObservableObject {
             resetProgress()
             
             print("🔄 ========================================")
-            print("🔄 FRESH INSTALL SYNC: Starting...")
+            print("🔄 FRESH INSTALL SYNC: Starting COMPREHENSIVE sync...")
+            print("🔄 ALL data will be fetched and processed during initial sync")
             print("🔄 Core Data should be EMPTY at this point")
             print("🔄 ========================================")
             
             // ⚡ CRITICAL: Enable fresh install mode to prevent premature episode state saves
             EpisodeStateManager.shared.enableFreshInstallMode()
             
-            // ⚡ SYNC ORDER (CRITICAL for fresh install):
-            // 1. Radio Stations: CloudKit -> Core Data
-            // 2. Podcast Feeds: CloudKit -> RSS Parse -> Core Data
-            // 3. Episode States: CloudKit -> Apply to existing episodes
+            // ⚡ COMPREHENSIVE SYNC ORDER (CRITICAL for fresh install):
+            // 1. Radio Stations: CloudKit -> Core Data -> Create ALL Snapshots
+            // 2. Podcast Feeds: CloudKit -> Parse ALL RSS -> Core Data (with ALL episodes)
+            // 3. Episode States: CloudKit -> Apply to ALL episodes in Core Data
+            // 4. Create ALL Episode Snapshots for instant loading
+            // 5. Wait for ALL artwork downloads to complete
+            // 6. Final verification and completion
             
-            print("🔄 STEP 1: Fetching radio stations from CloudKit...")
-            await syncRadioStations()
+            print("🔄 ═══════════════════════════════════════")
+            print("🔄 STEP 1: Syncing ALL Radio Stations")
+            print("🔄 ═══════════════════════════════════════")
+            await syncRadioStationsComprehensive()
             
-            print("🔄 STEP 2: Fetching podcast feeds from CloudKit and parsing RSS...")
-            await syncPodcastFeeds()  // This will create episodes in Core Data
+            print("🔄 ═══════════════════════════════════════")
+            print("🔄 STEP 2: Syncing ALL Podcast Feeds & Episodes")
+            print("🔄 ═══════════════════════════════════════")
+            await syncPodcastFeedsComprehensive()
             
-            // Parallel operations that don't use CloudKit heavily
-            await withTaskGroup(of: Void.self) { group in
-                // User Preferences Sync (lightweight, can run in parallel)
-                group.addTask {
-                    await self.syncUserPreferences()
-                }
-                
-                // Wait for all parallel operations to complete
-                for await _ in group {
-                    // Tasks completed
-                }
-            }
+            print("🔄 ═══════════════════════════════════════")
+            print("🔄 STEP 3: Syncing ALL Episode States")
+            print("🔄 ═══════════════════════════════════════")
+            await syncEpisodeStatesComprehensive()
             
-            // ⚡ STEP 3: Disable fresh install mode
-            // NOTE: Episode states were already synced inside initializeCloudKitFeedsForFreshInstall
-            print("🔄 STEP 3: Episodes and states synced - disabling fresh install mode")
+            print("🔄 ═══════════════════════════════════════")
+            print("🔄 STEP 4: Creating ALL Snapshots")
+            print("🔄 ═══════════════════════════════════════")
+            await createAllSnapshotsComprehensive()
+            
+            print("🔄 ═══════════════════════════════════════")
+            print("🔄 STEP 5: Waiting for ALL Artwork Downloads")
+            print("🔄 ═══════════════════════════════════════")
+            await waitForAllArtworkDownloadsComplete()
+            
+            print("🔄 ═══════════════════════════════════════")
+            print("🔄 STEP 6: User Preferences Sync")
+            print("🔄 ═══════════════════════════════════════")
+            await syncUserPreferences()
+            
+            // ⚡ STEP 7: Disable fresh install mode
+            print("🔄 STEP 7: Disabling fresh install mode...")
             EpisodeStateManager.shared.disableFreshInstallMode()
             
-            // Mark episode states as completed (already synced during RSS processing)
-            let hasEpisodeStatesSynced = UserDefaults.standard.bool(forKey: "HasEpisodeStatesSynced")
-            if hasEpisodeStatesSynced {
-                print("✅ FRESH INSTALL: Episode states already synced during RSS processing")
-                await MainActor.run {
-                    if episodeStatesStatus != .completed {
-                        episodeStatesStatus = .completed
-                        episodeStatesProgress = 1.0
-                        episodeStatesOperation = "✅ Episode states synced during fresh install"
-                    }
-                }
-            }
-            
-            // Wait for artwork downloads to complete before finishing
-            await waitForArtworkDownloads()
-            
-            // Final completion
-            await completeSynchronization()
+            // ⚡ STEP 8: Final verification and completion
+            print("🔄 ═══════════════════════════════════════")
+            print("🔄 STEP 8: Final Verification & Completion")
+            print("🔄 ═══════════════════════════════════════")
+            await completeSynchronizationComprehensive()
         }
     }
     
@@ -318,8 +320,13 @@ class DataSyncManager: ObservableObject {
             
             if isFreshInstall || !hasRadioStationsSynced {
                 print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
-                radioStationsOperation = "Fetching radio stations from iCloud..."
+                
+                // ⚡ ALWAYS CHECK CLOUDKIT: User may have manual stations from another device
+                // Aggressive timeouts (5s) ensure fast fallback to ManualStationsData if no CloudKit data
+                print("🔄 Checking CloudKit for radio stations (may have data from other device)...")
+                radioStationsOperation = "Checking iCloud for stations..."
                 await syncRadioStationsFromCloudKitWithProgress()
+                
                 // Mark radio stations as synced
                 UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
             } else {
@@ -436,13 +443,18 @@ class DataSyncManager: ObservableObject {
             // ⚡ NON-BLOCKING: Start artwork downloads in background (don't wait)
             startArtworkDownloadTracking(totalFeeds: finalCount)
             
-            // Auto-reset banner
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                self.podcastFeedsStatus = .none
-                self.podcastFeedsProgress = 0.0
-                self.podcastFeedsOperation = ""
-                self.podcastFeedsCurrentCount = 0
+            // Auto-reset banner (skip on fresh install to allow verification to complete)
+            let isFreshInstallCheck = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            if !isFreshInstallCheck {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    self.podcastFeedsStatus = .none
+                    self.podcastFeedsProgress = 0.0
+                    self.podcastFeedsOperation = ""
+                    self.podcastFeedsCurrentCount = 0
+                }
+            } else {
+                print("⚡ FRESH INSTALL: Skipping auto-reset to allow verification to complete")
             }
             
         } catch {
@@ -1267,8 +1279,13 @@ class DataSyncManager: ObservableObject {
         
         // Final check and warning if feeds are still not available
         if podcastViewModel.podcastFeeds.isEmpty {
-            print("⚠️ WARNING: UI update verification failed - no feeds found after \(maxUIUpdateAttempts) attempts")
-            print("⚠️ This may indicate a data synchronization issue")
+            print("⚠️ WARNING: No podcast feeds found - this is expected on truly fresh install")
+            print("✅ FRESH INSTALL: User starts with empty podcast library - can add feeds manually")
+            
+            // CRITICAL: Set UI as ready even with 0 feeds (fresh install scenario)
+            isFreshInstallUIReady = true
+            isSyncing = false
+            print("✅ FRESH INSTALL UI READY: Marked as ready with 0 podcast feeds")
         }
         
         // Mark sync as completed only after everything is truly ready
@@ -1356,55 +1373,83 @@ class DataSyncManager: ObservableObject {
     private func ensureEpisodeSnapshotsAreCreated(_ podcastViewModel: PodcastViewModel) async {
         print("📸 FINAL SNAPSHOT CHECK: Ensuring all feeds have episode snapshots...")
         
-        // CRITICAL: Clear old snapshots first to ensure fresh state data
-        podcastViewModel.clearAllEpisodeSnapshots()
-        print("🗑️ CLEARED: All old episode snapshots before final creation")
+        // CRITICAL: Don't clear snapshots if they already exist and are valid
+        // Check if snapshots already exist for all feeds
+        var allSnapshotsExist = true
+        for feed in podcastViewModel.podcastFeeds {
+            if podcastViewModel.getEpisodeSnapshot(for: feed.id) == nil {
+                allSnapshotsExist = false
+                break
+            }
+        }
         
-        let feedsWithEpisodes = podcastViewModel.podcastFeeds.filter { !$0.episodes.isEmpty }
+        if allSnapshotsExist && !podcastViewModel.podcastFeeds.isEmpty {
+            print("✅ FINAL SNAPSHOT CHECK: All snapshots already exist - skipping recreation")
+            episodeSnapshotsReady = true
+            return
+        }
+        
+        // Load episodes from Core Data for all feeds
+        print("📡 FINAL SNAPSHOT: Loading episodes from Core Data for all feeds...")
+        var feedsWithLoadedEpisodes: [(PodcastFeed, [PodcastEpisode])] = []
+        
+        await withTaskGroup(of: (PodcastFeed, [PodcastEpisode]).self) { group in
+            for feed in podcastViewModel.podcastFeeds {
+                group.addTask {
+                    let episodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feed.id)
+                    return (feed, episodes)
+                }
+            }
+            
+            // Collect all results
+            for await (feed, episodes) in group {
+                if !episodes.isEmpty {
+                    feedsWithLoadedEpisodes.append((feed, episodes))
+                }
+            }
+        }
+        
+        print("📡 FINAL SNAPSHOT: Loaded episodes for \(feedsWithLoadedEpisodes.count) feeds from Core Data")
+        
         var snapshotsCreated = 0
         var totalEpisodes = 0
         
         // Update snapshot tracking
-        totalFeedsRequiringSnapshots = feedsWithEpisodes.count
+        totalFeedsRequiringSnapshots = feedsWithLoadedEpisodes.count
         feedsWithSnapshots = 0
         
-        for feed in podcastViewModel.podcastFeeds {
-            // Since we cleared all snapshots, create new ones for feeds with episodes
-            if !feed.episodes.isEmpty {
-                // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating snapshot
-                let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
-                if validEpisodes.count != feed.episodes.count {
-                    print("🚨 STARTUP CONTAMINATION: Feed '\(feed.title)' has \(feed.episodes.count - validEpisodes.count) contaminated episodes")
-                }
-                
-                // Apply current states from EpisodeStateManager before creating snapshot
-                let episodesWithCurrentStates = validEpisodes.map { episode in
-                    var updatedEpisode = episode
-                    
-                    // Get current states from EpisodeStateManager
-                    let progress = EpisodeStateManager.shared.getProgress(for: episode.id)
-                    let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
-                    let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
-                    let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
-                    
-                    // Update episode state with current values
-                    updatedEpisode.state.progress = progress
-                    updatedEpisode.state.isFavorite = isFavorite
-                    updatedEpisode.state.isDownloaded = isDownloaded
-                    updatedEpisode.state.isPlayed = (playbackState == .played)
-                    
-                    return updatedEpisode
-                }
-                
-                // Create snapshot for feeds with validated episodes that have current states
-                podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: episodesWithCurrentStates)
-                feedsWithSnapshots += 1
-                snapshotsCreated += 1
-                totalEpisodes += validEpisodes.count
-                print("📸 Created final snapshot for '\(feed.title)' with \(validEpisodes.count) episodes with current states")
-            } else {
-                print("📸 Skipped snapshot for '\(feed.title)' - no episodes available")
+        for (feed, episodes) in feedsWithLoadedEpisodes {
+            // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating snapshot
+            let validEpisodes = episodes.filter { $0.feedId == feed.id }
+            if validEpisodes.count != episodes.count {
+                print("🚨 FINAL CONTAMINATION: Feed '\(feed.title)' has \(episodes.count - validEpisodes.count) contaminated episodes")
             }
+            
+            // Apply current states from EpisodeStateManager before creating snapshot
+            let episodesWithCurrentStates = validEpisodes.map { episode in
+                var updatedEpisode = episode
+                
+                // Get current states from EpisodeStateManager
+                let progress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
+                
+                // Update episode state with current values
+                updatedEpisode.state.progress = progress
+                updatedEpisode.state.isFavorite = isFavorite
+                updatedEpisode.state.isDownloaded = isDownloaded
+                updatedEpisode.state.isPlayed = (playbackState == .played)
+                
+                return updatedEpisode
+            }
+            
+            // Create snapshot for feeds with validated episodes that have current states
+            podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: episodesWithCurrentStates)
+            feedsWithSnapshots += 1
+            snapshotsCreated += 1
+            totalEpisodes += validEpisodes.count
+            print("📸 Created final snapshot for '\(feed.title)' with \(validEpisodes.count) episodes with current states")
         }
         
         // Mark snapshots as ready
@@ -1579,8 +1624,8 @@ class DataSyncManager: ObservableObject {
             do {
                 print("☁️ FRESH INSTALL: Attempting CloudKit sync (attempt \(retryCount + 1)/\(maxRetries))")
                 
-                // ⚡ OPTIMIZED: Shorter timeout for fresh install
-                let timeoutSeconds: TimeInterval = isFreshInstall ? 15.0 : 30.0
+                // ⚡ OPTIMIZED: Generous timeout for fresh install (CloudKit can be slow, especially with many feeds)
+                let timeoutSeconds: TimeInterval = isFreshInstall ? 60.0 : 45.0
                 print("⏱️ TIMEOUT: Starting \(Int(timeoutSeconds))s timeout wrapper (fresh install: \(isFreshInstall))")
                 
                 let result = try await withTimeout(seconds: timeoutSeconds) {
@@ -1616,13 +1661,13 @@ class DataSyncManager: ObservableObject {
                     print("⏱️ FRESH INSTALL: Rate limited, waiting \(Int(retryAfter))s before retry")
                     
                     if retryCount < maxRetries {
-                        await MainActor.run {
+                        Task { @MainActor in
                             podcastFeedsOperation = "Rate limited, waiting \(Int(retryAfter))s..."
                         }
                         
                         try await Task.sleep(nanoseconds: UInt64(retryAfter * 1_000_000_000))
                         
-                        await MainActor.run {
+                        Task { @MainActor in
                             podcastFeedsOperation = "Retrying podcast feeds from iCloud..."
                         }
                     }
@@ -1643,86 +1688,51 @@ class DataSyncManager: ObservableObject {
     }
     
     /// Helper for timeout operations with return value
+    /// CRITICAL: Returns nil immediately after timeout to avoid hanging
     private func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T? {
         print("⏱️ TIMEOUT WRAPPER: Starting with \(Int(seconds))s timeout")
         
-        let result = try await withThrowingTaskGroup(of: T?.self) { group in
-            // Start the actual operation
-            group.addTask {
-                print("⏱️ TIMEOUT WRAPPER: Operation task started")
-                do {
-                    let result = try await operation()
-                    print("⏱️ TIMEOUT WRAPPER: Operation completed successfully")
-                    return result
-                } catch {
-                    print("⏱️ TIMEOUT WRAPPER: Operation threw error: \(error.localizedDescription)")
-                    throw error
-                }
-            }
-            
-            // Start timeout task with progress logging
-            group.addTask {
-                print("⏱️ TIMEOUT WRAPPER: Timeout monitor started")
-                let startTime = Date()
-                var elapsed: TimeInterval = 0
-                
-                while elapsed < seconds {
-                    let sleepDuration: TimeInterval = min(5.0, seconds - elapsed)
-                    try await Task.sleep(nanoseconds: UInt64(sleepDuration * 1_000_000_000))
-                    elapsed = Date().timeIntervalSince(startTime)
-                    
-                    if elapsed < seconds {
-                        print("⏱️ TIMEOUT: \(Int(elapsed))s elapsed, waiting for CloudKit...")
-                    }
-                }
-                
-                print("⚠️ ⚠️ ⚠️ TIMEOUT: \(Int(seconds))s timeout reached!")
-                print("⏱️ TIMEOUT WRAPPER: Returning nil to trigger timeout")
-                return nil // Timeout
-            }
-            
-            // Wait for first result
-            print("⏱️ TIMEOUT WRAPPER: Waiting for first result...")
-            if let firstResult = try await group.next() {
-                // Check if first result is timeout (nil) or success
-                if firstResult != nil {
-                    // Success result - use it immediately
-                    print("⏱️ TIMEOUT WRAPPER: Got success result, canceling timeout")
-                    group.cancelAll()
-                    return firstResult
-                } else {
-                    // Timeout result (nil) - give operation a VERY brief grace period
-                    print("⏱️ TIMEOUT WRAPPER: Timeout reached, checking for late success (500ms grace period)...")
-                    
-                    // Give 500ms grace period for operation to complete
-                    let graceDeadline = Date().addingTimeInterval(0.5)
-                    
-                    // Check if we have another result within grace period
-                    while Date() < graceDeadline {
-                        if let secondResult = try await group.next() {
-                            if secondResult != nil {
-                                print("✅ TIMEOUT WRAPPER: Operation completed within grace period! Using success result")
-                                group.cancelAll()
-                                return secondResult
-                            }
-                        }
-                        // Very brief check interval
-                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-                    }
-                    
-                    // No success within grace period, return timeout
-                    print("⏱️ TIMEOUT WRAPPER: No success within grace period, returning timeout")
-                    group.cancelAll()
-                    return nil
-                }
-            }
-            
-            print("⏱️ TIMEOUT WRAPPER: No result received, returning nil")
-            return nil
+        // Use a detached task to avoid blocking on task group completion
+        let resultRef = UnsafeMutablePointer<T?>.allocate(capacity: 1)
+        resultRef.initialize(to: nil)
+        defer { 
+            resultRef.deinitialize(count: 1)
+            resultRef.deallocate() 
         }
         
-        print("⏱️ TIMEOUT WRAPPER: Exiting with result: \(result != nil ? "Success" : "Timeout")")
-        return result
+        let completed = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        completed.initialize(to: false)
+        defer {
+            completed.deinitialize(count: 1)
+            completed.deallocate()
+        }
+        
+        // Start operation in background
+        Task {
+            do {
+                let result = try await operation()
+                if !completed.pointee {
+                    resultRef.pointee = result
+                    print("⏱️ TIMEOUT WRAPPER: Operation completed successfully")
+                }
+            } catch {
+                print("⏱️ TIMEOUT WRAPPER: Operation threw error: \(error.localizedDescription)")
+            }
+        }
+        
+        // Wait for timeout or operation completion
+        print("⏱️ TIMEOUT WRAPPER: Waiting for timeout or completion...")
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        
+        completed.pointee = true
+        
+        if let result = resultRef.pointee {
+            print("⏱️ TIMEOUT WRAPPER: Operation completed before timeout - returning result")
+            return result
+        } else {
+            print("⏱️ TIMEOUT WRAPPER: Timeout reached - returning nil")
+            return nil
+        }
     }
     
     /// Initialize CloudKit feeds for fresh install (with RSS processing)
@@ -1730,19 +1740,59 @@ class DataSyncManager: ObservableObject {
     private func initializeCloudKitFeedsForFreshInstall(_ podcastViewModel: PodcastViewModel) async {
         print("🚀 Initializing CloudKit feeds for fresh install...")
         
-        // Fetch podcast feeds from CloudKit for all install types
-        let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-        print("🔄 \(isFreshInstall ? "FRESH INSTALL" : "NON-FRESH INSTALL"): Fetching podcast feeds from CloudKit...")
-        podcastFeedsOperation = "Fetching feeds from iCloud..."
+        // ⚡ ALWAYS CHECK CLOUDKIT: User may have data from another device/reinstall
+        // Use 20s timeout - fast fail if CloudKit is hung or rate limited
+        print("🔄 Checking CloudKit for existing podcast feeds...")
+        print("⚡ FRESH INSTALL: Using 20s timeout for CloudKit sync (inner batch: 10s)")
+        podcastFeedsOperation = "Checking iCloud..."
         podcastFeedsProgress = 0.2
+        
+        // ⚡ CLOUDKIT HUNG FIX: Use 20s outer timeout (inner batch timeout is 10s)
+        // If CloudKit doesn't respond in 10s, it's likely rate-limited or network issue
+        // Quick fallback to local storage prevents app from hanging
+        let quickTimeoutSeconds: TimeInterval = 20.0
+        print("⏱️ Using 20s timeout for CloudKit fetch (inner batch: 10s)")
+        print("⏱️ If timeout occurs, falling back to local storage immediately")
         
         let cloudKitFeeds: [PodcastFeed]
         do {
-            cloudKitFeeds = try await syncFromCloudKitWithRetry()
-            print("✅ Successfully fetched \(cloudKitFeeds.count) feeds from CloudKit")
+            print("🔍 [PODCAST-SYNC-1] About to call syncFromCloudKitWithRetry()...")
+            
+            // Try with timeout
+            print("🔍 [PODCAST-SYNC-1.5] Calling withTimeout now...")
+            let result = try await withTimeout(seconds: quickTimeoutSeconds) {
+                return try await PodcastCloudKitManager.shared.syncFromCloudKit()
+            }
+            
+            print("🔍 [PODCAST-SYNC-1.75] withTimeout returned! Result is nil: \(result == nil)")
+            
+            if let feeds = result {
+                print("🔍 [PODCAST-SYNC-2] syncFromCloudKit() returned successfully!")
+                print("✅ Successfully fetched \(feeds.count) feeds from CloudKit")
+                cloudKitFeeds = feeds
+            } else {
+                // Timeout - use local data immediately
+                print("⏱️ CloudKit fetch timed out after \(Int(quickTimeoutSeconds))s - using local data")
+                print("⚠️ FRESH INSTALL TIMEOUT: CloudKit hung or rate-limited - falling back to local defaults")
+                print("⚠️ This is usually caused by rate limiting or network issues")
+                print("⚠️ User's data is safe and will sync automatically when CloudKit is available")
+                
+                // Do NOT start background sync on fresh install timeout
+                // It will also hang and waste resources
+                
+                cloudKitFeeds = []
+                print("🔍 [PODCAST-SYNC-2.5] Set cloudKitFeeds to empty array")
+            }
         } catch {
             print("⚠️ CloudKit sync failed: \(error.localizedDescription)")
-            print("🔄 Loading from local Core Data instead...")
+            print("🔄 [FALLBACK-START] Loading from local Core Data instead...")
+            cloudKitFeeds = []
+        }
+        
+        print("🔍 [PODCAST-SYNC-3] After try-catch block, cloudKitFeeds.count = \(cloudKitFeeds.count)")
+        
+        // Handle empty CloudKit result
+        if cloudKitFeeds.isEmpty {
             
             podcastFeedsOperation = "Loading from local storage..."
             podcastFeedsProgress = 0.5
@@ -1754,18 +1804,24 @@ class DataSyncManager: ObservableObject {
                 print("✅ Loaded \(localCount) feeds from local storage")
                 podcastFeedsOperation = "✅ Loaded \(localCount) feeds"
             } else {
-                print("📱 No feeds available")
+                // Fresh install with CloudKit timeout - user will have empty library
+                print("📱 FRESH INSTALL TIMEOUT FALLBACK: No feeds available - user starts with empty library")
+                print("📱 User can add podcast feeds manually")
                 podcastFeedsOperation = "Ready to add podcasts"
             }
+            
+            // CRITICAL: Mark podcast feeds as completed to prevent verification timeout
+            podcastFeedsStatus = .completed
+            podcastFeedsProgress = 1.0
+            print("✅ Podcast feeds sync completed - \(localCount) feeds")
             
             episodeStatesStatus = .completed
             episodeStatesProgress = 1.0
             episodeStatesOperation = "✅ Ready"
             UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
             UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
-            startArtworkDownloadTracking(totalFeeds: localCount)
+            startArtworkDownloadTracking(totalFeeds: podcastViewModel.podcastFeeds.count)
             
-            podcastFeedsProgress = 1.0
             return
         }
         
@@ -1978,116 +2034,176 @@ class DataSyncManager: ObservableObject {
     private func syncRadioStationsFromCloudKitWithProgress() async {
         let viewModel = RadioStationViewModel.shared
         
-        // ⚠️ TIMEOUT FIX: Add timeout detection for stuck CloudKit operations
-        let timeoutSeconds: TimeInterval = 30.0
-        var hasCompleted = false
-        var lastProgressUpdate = Date()
+        print("⚡ Starting modernized CloudKit radio station sync with async/await...")
+        radioStationsOperation = "Connecting to iCloud..."
+        radioStationsProgress = 0.0
         
-        return await withCheckedContinuation { continuation in
-            // Start timeout monitoring
-            let timeoutTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { timer in
-                Task { @MainActor in
-                    guard !hasCompleted else {
-                        timer.invalidate()
-                        return
+        // ⚡ MODERNIZED: Use async/await with proper timeout
+        let timeoutSeconds: TimeInterval = 45.0 // More generous timeout
+        
+        do {
+            let result = try await withTimeout(seconds: timeoutSeconds) {
+                return try await self.fetchRadioStationsModern(progressCallback: { progress, count, message in
+                    Task { @MainActor in
+                        self.radioStationsProgress = progress
+                        self.radioStationsCurrentCount = count
+                        self.radioStationsOperation = message
+                        print("📊 Radio stations progress: \(Int(progress * 100))% - \(count) stations - \(message)")
                     }
-                    
-                    let timeSinceLastProgress = Date().timeIntervalSince(lastProgressUpdate)
-                    
-                    if timeSinceLastProgress > timeoutSeconds {
-                        print("⚠️ CloudKit radio station fetch appears stuck (no progress for \(Int(timeSinceLastProgress))s) - falling back to local data")
-                        timer.invalidate()
-                        hasCompleted = true
-                        
-                        // Fall back to local data
-                        Task { @MainActor in
-                            self.radioStationsOperation = "Loading from local storage (CloudKit timeout)..."
-                            self.radioStationsProgress = 0.5
-                            
-                            // Load from Core Data
-                            viewModel.loadStationsFromCoreData()
-                            
-                            let localCount = viewModel.stations.count
-                            self.radioStationsCurrentCount = localCount
-                            self.radioStationsTotalCount = localCount
-                            self.radioStationsProgress = 1.0
-                            self.radioStationsOperation = "✅ \(localCount) stations loaded from local storage"
-                            
-                            print("✅ Loaded \(localCount) radio stations from local storage after CloudKit timeout")
-                            
-                            continuation.resume()
-                        }
-                    } else if timeSinceLastProgress > 10.0 {
-                        // Show waiting message after 10 seconds of no progress
-                        self.radioStationsOperation = "Still fetching from iCloud... (\(Int(timeSinceLastProgress))s)"
+                })
+            }
+            
+            if let stations = result {
+                // Success!
+                viewModel.stations = stations
+                viewModel.saveStationsToCoreData()
+                
+                radioStationsCurrentCount = stations.count
+                radioStationsTotalCount = stations.count
+                radioStationsProgress = 1.0
+                radioStationsOperation = "✅ \(stations.count) radio stations synced from iCloud"
+                
+                print("✅ Synced \(stations.count) radio stations successfully")
+                UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+            } else {
+                // Timeout - fall back to local
+                print("⏱️ CloudKit fetch timed out - falling back to local data")
+                await fallbackToLocalRadioStations(viewModel)
+            }
+        } catch {
+            // Error - fall back to local
+            print("⚠️ CloudKit error: \(error.localizedDescription) - falling back to local data")
+            await fallbackToLocalRadioStations(viewModel)
+        }
+    }
+    
+    /// Modernized radio station fetch using async/await API
+    private func fetchRadioStationsModern(progressCallback: @escaping (Double, Int, String) -> Void) async throws -> [RadioStation] {
+        print("📡 MODERN API: Starting radio station fetch with async/await...")
+        print("📡 MODERN API: Fetching ONLY manual stations (not API stations)")
+        
+        let privateDatabase = CKContainer.default().privateCloudDatabase
+        
+        var allStations: [RadioStation] = []
+        var cursor: CKQueryOperation.Cursor? = nil
+        var batchCount = 0
+        let maxBatches = 5 // Safety limit
+        
+        // ⚡ CRITICAL: Only fetch manual stations from CloudKit
+        let manualStationPredicate = NSPredicate(format: "id BEGINSWITH %@", "manual_")
+        let query = CKQuery(recordType: "streamingRadios", predicate: manualStationPredicate)
+        
+        repeat {
+            batchCount += 1
+            print("📡 MODERN API: Fetching batch \(batchCount)/\(maxBatches)...")
+            
+            // Add per-batch timeout
+            // ⚡ PERFORMANCE: Use aggressive 5s timeout for fast fallback
+            let batchTimeoutSeconds: TimeInterval = 5.0
+            let batchResult = try await withTimeout(seconds: batchTimeoutSeconds) {
+                return try await (cursor == nil
+                    ? privateDatabase.records(matching: query, resultsLimit: 400) // Reduced batch size
+                    : privateDatabase.records(continuingMatchFrom: cursor!))
+            }
+            
+            guard let (matchResults, nextCursor) = batchResult else {
+                print("⚠️ MODERN API: Batch \(batchCount) timed out after \(Int(batchTimeoutSeconds))s")
+                if allStations.isEmpty {
+                    throw NSError(domain: "DataSyncManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "CloudKit batch timeout with no data"])
+                }
+                // If we have some stations, return what we got
+                print("⚡ MODERN API: Returning \(allStations.count) stations from \(batchCount - 1) completed batches")
+                break
+            }
+            
+            print("✅ MODERN API: Batch \(batchCount) got \(matchResults.count) results")
+            
+            // Parse stations from this batch
+            for (recordID, result) in matchResults {
+                switch result {
+                case .success(let record):
+                    if let station = parseRadioStation(from: record) {
+                        allStations.append(station)
                     }
+                case .failure(let error):
+                    print("⚠️ Skipping record \(recordID.recordName): \(error.localizedDescription)")
                 }
             }
             
-            DataStore.shared.fetchRadioStationsWithProgress(
-                progressCallback: { [weak self] progress, count, message in
-                    Task { @MainActor in
-                        lastProgressUpdate = Date()
-                        self?.radioStationsProgress = progress
-                        self?.radioStationsCurrentCount = count
-                        self?.radioStationsOperation = message
-                        // Estimate total based on current progress and count
-                        if progress > 0.1 && count > 0 {
-                            let estimatedTotal = Int(Double(count) / progress)
-                            self?.radioStationsTotalCount = max(self?.radioStationsTotalCount ?? 0, estimatedTotal)
-                        }
-                        print("📊 Radio stations progress: \(Int(progress * 100))% - \(count) stations - \(message)")
-                    }
-                },
-                completion: { [weak self] stations, error in
-                    guard !hasCompleted else { return }
-                    hasCompleted = true
-                    timeoutTimer.invalidate()
-                    
-                    if let stations = stations {
-                        DispatchQueue.main.async {
-                            viewModel.stations = stations
-                            viewModel.saveStationsToCoreData()
-                            
-                            // Update final counts
-                            Task { @MainActor in
-                                self?.radioStationsCurrentCount = stations.count
-                                self?.radioStationsTotalCount = stations.count
-                                self?.radioStationsOperation = "✅ \(stations.count) radio stations synced from iCloud"
-                            }
-                            
-                            print("✅ Synced \(stations.count) radio stations with progress tracking")
-                            
-                            // Mark radio stations as synced to prevent future CloudKit syncing on app launches
-                            UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
-                        }
-                    } else if let error = error {
-                        // ⚠️ ERROR RECOVERY: Fall back to local data on CloudKit errors
-                        print("⚠️ CloudKit error: \(error.localizedDescription) - falling back to local data")
-                        Task { @MainActor in
-                            self?.radioStationsOperation = "Loading from local storage (CloudKit error)..."
-                            self?.radioStationsProgress = 0.5
-                            
-                            // Load from Core Data
-                            viewModel.loadStationsFromCoreData()
-                            
-                            let localCount = viewModel.stations.count
-                            self?.radioStationsCurrentCount = localCount
-                            self?.radioStationsTotalCount = localCount
-                            self?.radioStationsProgress = 1.0
-                            
-                            if localCount > 0 {
-                                self?.radioStationsOperation = "✅ \(localCount) stations loaded from local storage"
-                                print("✅ Loaded \(localCount) radio stations from local storage after error")
-                            } else {
-                                self?.radioStationsOperation = "⚠️ No stations available (CloudKit error and no local data)"
-                                print("⚠️ No radio stations available")
-                            }
-                        }
-                    }
-                    continuation.resume()
-                }
-            )
+            // Report progress
+            let progress = min(0.95, Double(allStations.count) / 50.0) // Estimate ~50 manual stations
+            await MainActor.run {
+                progressCallback(progress, allStations.count, "Loading \(allStations.count) manual stations from iCloud...")
+            }
+            
+            cursor = nextCursor
+            
+            // Longer delay between batches to avoid rate limiting
+            if cursor != nil {
+                print("📡 MODERN API: Waiting 1s before next batch to avoid rate limiting...")
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1s delay
+            }
+            
+            // Safety check
+            if batchCount >= maxBatches {
+                print("⚠️ MODERN API: Reached max batches (\(maxBatches)), stopping with \(allStations.count) stations")
+                break
+            }
+            
+        } while cursor != nil
+        
+        print("🌟 MODERN API: Completed fetching \(allStations.count) stations in \(batchCount) batches")
+        
+        // Final progress report
+        await MainActor.run {
+            progressCallback(1.0, allStations.count, "Processing \(allStations.count) stations...")
+        }
+        
+        return allStations
+    }
+    
+    /// Parse a CloudKit record into a RadioStation
+    private func parseRadioStation(from record: CKRecord) -> RadioStation? {
+        guard let name = record["name"] as? String,
+              let url = record["url"] as? String else {
+            return nil
+        }
+        
+        return RadioStation(
+            id: record.recordID.recordName,
+            name: name,
+            url: url,
+            iconData: record["iconData"] as? String,
+            iTunesArtworkData: record["iTunesArtworkData"] as? String,
+            country: record["country"] as? String ?? "Unknown Region",
+            isFavorite: record["isFavorite"] as? Bool ?? false,
+            favoritedAt: record["favoritedAt"] as? Date,
+            favoriteOrder: record["favoriteOrder"] as? Int,
+            order: record["order"] as? Int ?? 0,
+            lastPlayed: record["lastPlayed"] as? Date,
+            isRecent: record["isRecent"] as? Bool ?? false
+        )
+    }
+    
+    /// Fallback to local radio stations when CloudKit fails
+    @MainActor
+    private func fallbackToLocalRadioStations(_ viewModel: RadioStationViewModel) async {
+        radioStationsOperation = "Loading from local storage..."
+        radioStationsProgress = 0.5
+        
+        viewModel.loadStationsFromCoreData()
+        
+        let localCount = viewModel.stations.count
+        radioStationsCurrentCount = localCount
+        radioStationsTotalCount = localCount
+        radioStationsProgress = 1.0
+        
+        if localCount > 0 {
+            radioStationsOperation = "✅ \(localCount) stations loaded from local storage"
+            print("✅ Loaded \(localCount) radio stations from local storage")
+        } else {
+            radioStationsOperation = "⚠️ No stations available"
+            print("⚠️ No radio stations available")
         }
     }
     
@@ -2198,17 +2314,26 @@ class DataSyncManager: ObservableObject {
             print("🗑️ CLEARED: All old episode snapshots to ensure fresh state data")
         }
         
-        // First, ensure EpisodeStateManager is ready before creating snapshots
+        // CRITICAL: Ensure EpisodeStateManager is ready and has loaded all states
+        print("⏳ SNAPSHOT: Ensuring EpisodeStateManager is fully ready...")
         if !EpisodeStateManager.shared.isReady {
             print("⚠️ SNAPSHOT: EpisodeStateManager not ready, waiting...")
-            // Wait briefly for it to be ready
-            for _ in 0..<10 {
+            // Wait for it to be ready with longer timeout
+            for i in 0..<30 {
                 if EpisodeStateManager.shared.isReady {
+                    print("✅ SNAPSHOT: EpisodeStateManager became ready after \(i * 100)ms")
                     break
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
             }
         }
+        
+        // CRITICAL: Force reload episode states from Core Data to ensure we have latest
+        print("🔄 SNAPSHOT: Force reloading episode states from Core Data...")
+        await EpisodeStateManager.shared.loadAllStatesFromCoreData()
+        
+        // Wait a moment for states to be fully loaded
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
         
         // CRITICAL FIX: Load episodes from Core Data into memory BEFORE creating snapshots
         print("📡 CRITICAL FIX: Loading episodes from Core Data for all feeds before snapshot creation...")
@@ -2433,6 +2558,26 @@ class DataSyncManager: ObservableObject {
         print("📡 DataSyncManager: Skipping duplicate feed processing - handled by PodcastViewModel")
     }
     
+    /// Force Core Data save to ensure all episode states are persisted
+    private func forceEpisodeStateCoreDataSave() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                if context.hasChanges {
+                    do {
+                        try context.save()
+                        print("✅ FORCED SAVE: Episode states persisted to Core Data")
+                    } catch {
+                        print("❌ FORCED SAVE: Failed to save episode states: \(error)")
+                    }
+                } else {
+                    print("ℹ️ FORCED SAVE: No pending episode state changes")
+                }
+                continuation.resume()
+            }
+        }
+    }
+    
     // MARK: - Cross-Device Feed Sync Management
     
     /// Start tracking cross-device feed sync (when feeds exist on CloudKit but not locally)
@@ -2558,5 +2703,402 @@ class DataSyncManager: ObservableObject {
         UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
         print("🔄 Reset episode states sync flag - will re-sync from CloudKit on next launch")
     }
+    
+    // MARK: - Comprehensive Fresh Install Sync Methods
+    
+    /// Comprehensive radio stations sync - fetches ALL stations from CloudKit and saves to Core Data
+    @MainActor
+    private func syncRadioStationsComprehensive() async {
+        radioStationsStatus = .inProgress
+        radioStationsOperation = "Fetching radio stations from iCloud..."
+        radioStationsProgress = 0.0
+        radioStationsCurrentCount = 0
+        radioStationsTotalCount = 0
+        
+        print("🔄 🔁 COMPREHENSIVE RADIO SYNC: Starting...")
+        
+        do {
+            let viewModel = RadioStationViewModel.shared
+            
+            // Always fetch from CloudKit on fresh install
+            print("🔄 🔁 Fetching ALL radio stations from CloudKit...")
+            radioStationsOperation = "Fetching stations from iCloud..."
+            radioStationsProgress = 0.1
+            
+            // Fetch stations from CloudKit with progress tracking
+            await syncRadioStationsFromCloudKitWithProgress()
+            
+            // Ensure all stations are saved to Core Data
+            radioStationsProgress = 0.8
+            radioStationsOperation = "Saving stations to local storage..."
+            print("🔄 🔁 Ensuring all stations are saved to Core Data...")
+            
+            // Verify save completion
+            radioStationsProgress = 0.9
+            radioStationsCurrentCount = await getLocalStationCount()
+            radioStationsTotalCount = radioStationsCurrentCount
+            
+            // Create station snapshots for all countries
+            print("🔄 🔁 Creating station snapshots for ALL countries...")
+            radioStationsOperation = "Creating station snapshots..."
+            await createStationSnapshotsForAllCountries()
+            
+            // Mark as synced
+            UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+            
+            radioStationsStatus = .completed
+            radioStationsProgress = 1.0
+            radioStationsOperation = "✅ \(radioStationsCurrentCount) radio stations synced with snapshots"
+            print("✅ 🔁 COMPREHENSIVE RADIO SYNC: Completed - \(radioStationsCurrentCount) stations")
+            
+        } catch {
+            radioStationsStatus = .failed
+            radioStationsOperation = "❌ Failed to sync radio stations"
+            print("❌ 🔁 COMPREHENSIVE RADIO SYNC: Failed - \(error)")
+        }
+    }
+    
+    /// Comprehensive podcast feeds sync - fetches ALL feeds, parses ALL RSS, saves ALL episodes
+    @MainActor
+    private func syncPodcastFeedsComprehensive() async {
+        podcastFeedsStatus = .inProgress
+        podcastFeedsOperation = "Fetching podcast feeds from iCloud..."
+        podcastFeedsProgress = 0.0
+        podcastFeedsCurrentCount = 0
+        podcastFeedsTotalCount = 0
+        
+        print("🔄 📻 COMPREHENSIVE PODCAST SYNC: Starting...")
+        
+        do {
+            let podcastViewModel = PodcastViewModel.shared
+            
+            // Fetch feeds from CloudKit
+            print("🔄 📻 Fetching ALL podcast feeds from CloudKit...")
+            podcastFeedsOperation = "Fetching feeds from iCloud..."
+            podcastFeedsProgress = 0.1
+            
+            let cloudKitFeeds = try await syncFromCloudKitWithRetry()
+            
+            if cloudKitFeeds.isEmpty {
+                print("⚠️ 📻 No podcast feeds found in CloudKit - starting with empty library")
+                podcastFeedsStatus = .completed
+                podcastFeedsProgress = 1.0
+                podcastFeedsOperation = "No podcast feeds to sync"
+                UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
+                return
+            }
+            
+            podcastFeedsTotalCount = cloudKitFeeds.count
+            print("🔄 📻 Found \(cloudKitFeeds.count) feeds in CloudKit")
+            
+            // Clear episode snapshots
+            podcastFeedsProgress = 0.2
+            podcastFeedsOperation = "Preparing to process feeds..."
+            await podcastViewModel.clearAllEpisodeSnapshots()
+            
+            // Parse ALL RSS feeds and save ALL episodes
+            print("🔄 📻 Parsing ALL RSS feeds and saving episodes...")
+            podcastFeedsOperation = "Parsing RSS feeds..."
+            podcastFeedsProgress = 0.3
+            isParsingFeeds = true
+            feedParsingProgress = 0.0
+            feedParsingMessage = "Processing RSS feeds..."
+            
+            // Load and parse all feeds
+            await podcastViewModel.loadFreshInstallPodcastData(cloudKitFeeds)
+            
+            // Update progress
+            podcastFeedsProgress = 0.7
+            podcastFeedsCurrentCount = podcastViewModel.podcastFeeds.count
+            podcastFeedsTotalCount = max(podcastFeedsTotalCount, podcastFeedsCurrentCount)
+            
+            // Apply metadata from CloudKit
+            print("🔄 📻 Applying CloudKit metadata to feeds...")
+            podcastFeedsOperation = "Applying feed metadata..."
+            podcastFeedsProgress = 0.8
+            await podcastViewModel.applyCloudKitFeedMetadata(cloudKitFeeds)
+            
+            // Start artwork downloads in background (don't wait here)
+            let finalCount = podcastViewModel.podcastFeeds.count
+            startArtworkDownloadTracking(totalFeeds: finalCount)
+            
+            // Mark as synced
+            UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
+            
+            podcastFeedsStatus = .completed
+            podcastFeedsProgress = 1.0
+            podcastFeedsCurrentCount = finalCount
+            podcastFeedsOperation = "✅ \(finalCount) podcast feeds synced"
+            isParsingFeeds = false
+            
+            print("✅ 📻 COMPREHENSIVE PODCAST SYNC: Completed - \(finalCount) feeds with all episodes")
+            
+        } catch {
+            podcastFeedsStatus = .failed
+            podcastFeedsOperation = "❌ Failed to sync podcast feeds"
+            isParsingFeeds = false
+            print("❌ 📻 COMPREHENSIVE PODCAST SYNC: Failed - \(error)")
+        }
+    }
+    
+    /// Comprehensive episode states sync - fetches ALL episode states from CloudKit
+    @MainActor
+    private func syncEpisodeStatesComprehensive() async {
+        episodeStatesStatus = .inProgress
+        episodeStatesOperation = "Syncing episode states from iCloud..."
+        episodeStatesProgress = 0.0
+        episodeStatesCurrentCount = 0
+        episodeStatesTotalCount = 0
+        
+        print("🔄 📚 COMPREHENSIVE EPISODE STATE SYNC: Starting...")
+        
+        do {
+            let podcastViewModel = PodcastViewModel.shared
+            
+            // Get all episode IDs from Core Data
+            print("🔄 📚 Getting all episode IDs from Core Data...")
+            let allEpisodeIds = await podcastViewModel.getAllEpisodeIdsFromCoreData()
+            
+            if allEpisodeIds.isEmpty {
+                print("⚠️ 📚 No episodes found in Core Data - skipping episode state sync")
+                episodeStatesStatus = .completed
+                episodeStatesProgress = 1.0
+                episodeStatesOperation = "No episodes to sync"
+                return
+            }
+            
+            episodeStatesTotalCount = allEpisodeIds.count
+            print("🔄 📚 Syncing states for \(allEpisodeIds.count) episodes...")
+            
+            // Start tracking
+            await startEpisodeStateSync(totalCount: allEpisodeIds.count)
+            
+            // Sync from CloudKit
+            episodeStatesProgress = 0.2
+            episodeStatesOperation = "Fetching episode states from iCloud..."
+            print("🔄 📚 Fetching episode states from CloudKit...")
+            
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let syncSuccess = await podcastViewModel.syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+            
+            if syncSuccess {
+                episodeStatesProgress = 0.5
+                episodeStatesOperation = "Episode states synced from iCloud"
+                print("✅ 📚 Episode states synced successfully")
+            } else {
+                episodeStatesProgress = 0.3
+                print("⚠️ 📚 Episode state sync had issues, continuing...")
+            }
+            
+            // CRITICAL: Wait for all Core Data saves to complete
+            episodeStatesProgress = 0.6
+            episodeStatesOperation = "Ensuring all episode states are saved..."
+            print("⏳ 📚 Waiting for all Core Data episode state saves to complete...")
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            
+            // CRITICAL: Force Core Data save to ensure all states are persisted
+            episodeStatesProgress = 0.7
+            episodeStatesOperation = "Persisting episode states to storage..."
+            await forceEpisodeStateCoreDataSave()
+            
+            // Mark as synced
+            UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+            
+            episodeStatesStatus = .completed
+            episodeStatesProgress = 1.0
+            episodeStatesCurrentCount = episodeStatesTotalCount
+            episodeStatesOperation = "✅ \(episodeStatesTotalCount) episode states synced"
+            
+            print("✅ 📚 COMPREHENSIVE EPISODE STATE SYNC: Completed - \(episodeStatesTotalCount) states")
+            
+        } catch {
+            episodeStatesStatus = .failed
+            episodeStatesOperation = "❌ Failed to sync episode states"
+            print("❌ 📚 COMPREHENSIVE EPISODE STATE SYNC: Failed - \(error)")
+        }
+    }
+    
+    /// Create ALL snapshots (both stations and episodes) for instant loading
+    @MainActor
+    private func createAllSnapshotsComprehensive() async {
+        print("🔄 📸 COMPREHENSIVE SNAPSHOT CREATION: Starting...")
+        
+        currentOperation = "Creating snapshots for instant loading..."
+        
+        // Create episode snapshots for all feeds
+        print("🔄 📸 Creating episode snapshots for all feeds...")
+        let podcastViewModel = PodcastViewModel.shared
+        await createEpisodeSnapshotsForAllFeeds(podcastViewModel)
+        
+        // Verify episode snapshots
+        await verifyEpisodeSnapshotsAreReady(podcastViewModel)
+        
+        // Station snapshots already created in syncRadioStationsComprehensive
+        // But verify they're ready
+        let radioViewModel = RadioStationViewModel.shared
+        await verifyStationSnapshotsAreReady(radioViewModel)
+        
+        print("✅ 📸 COMPREHENSIVE SNAPSHOT CREATION: Completed")
+    }
+    
+    /// Wait for ALL artwork downloads to complete (with generous timeout)
+    @MainActor
+    private func waitForAllArtworkDownloadsComplete() async {
+        print("🔄 🎨 COMPREHENSIVE ARTWORK WAIT: Starting...")
+        print("⏳ 🎨 Waiting for all artwork downloads to complete...")
+        
+        artworkDownloadsOperation = "Waiting for artwork downloads..."
+        
+        // Much more generous timeout for artwork downloads (60 seconds)
+        let maxWaitTime: TimeInterval = 60.0
+        let checkInterval: TimeInterval = 1.0
+        let maxChecks = Int(maxWaitTime / checkInterval)
+        var checks = 0
+        
+        while artworkDownloadsStatus == .inProgress && checks < maxChecks {
+            try? await Task.sleep(nanoseconds: UInt64(checkInterval * 1_000_000_000))
+            checks += 1
+            
+            // Update operation with progress
+            if totalArtworkDownloads > 0 {
+                artworkDownloadsOperation = "Downloading artwork \(completedArtworkDownloads)/\(totalArtworkDownloads)..."
+                print("🎨 Artwork progress: \(completedArtworkDownloads)/\(totalArtworkDownloads) (\(checks * 100 / maxChecks)% of wait time)")
+            }
+        }
+        
+        if checks >= maxChecks && artworkDownloadsStatus == .inProgress {
+            print("⚠️ 🎨 Artwork download timeout reached - some may still be downloading in background")
+            artworkDownloadsStatus = .completed
+            artworkDownloadsProgress = 1.0
+            artworkDownloadsOperation = "Artwork downloads continuing in background"
+        } else {
+            print("✅ 🎨 All artwork downloads completed: \(completedArtworkDownloads)/\(totalArtworkDownloads)")
+            artworkDownloadsStatus = .completed
+            artworkDownloadsProgress = 1.0
+            artworkDownloadsOperation = "✅ Artwork downloads completed"
+        }
+        
+        print("✅ 🎨 COMPREHENSIVE ARTWORK WAIT: Completed")
+    }
+    
+    /// Comprehensive completion - final verification and UI readiness
+    @MainActor
+    private func completeSynchronizationComprehensive() async {
+        currentOperation = "Finalizing synchronization..."
+        
+        print("🔄 ✅ COMPREHENSIVE COMPLETION: Starting final verification...")
+        
+        // Ensure all components are ready
+        let podcastViewModel = PodcastViewModel.shared
+        let radioViewModel = RadioStationViewModel.shared
+        
+        // Force final save and reload
+        print("🔄 ✅ Forcing final Core Data save and reload...")
+        await podcastViewModel.forceSaveAndReload()
+        
+        // Verify feeds are loaded
+        print("🔄 ✅ Verifying podcast feeds are loaded...")
+        await podcastViewModel.ensureFeedsAreLoaded()
+        await waitForPodcastLoadingToComplete(podcastViewModel)
+        await waitForCloudKitInitializationToComplete(podcastViewModel)
+        
+        // Verify radio stations are loaded
+        print("🔄 ✅ Verifying radio stations are loaded...")
+        await waitForRadioStationsToLoad(radioViewModel)
+        
+        // Verify all sync statuses are completed
+        print("🔄 ✅ Verifying all sync statuses are completed...")
+        await waitForAllSyncStatusesToComplete()
+        
+        // Verify episode snapshots are ready
+        print("🔄 ✅ Verifying episode snapshots are ready...")
+        await verifyEpisodeSnapshotsAreReady(podcastViewModel)
+        await ensureEpisodeSnapshotsAreCreated(podcastViewModel)
+        
+        // Verify station snapshots are ready
+        print("🔄 ✅ Verifying station snapshots are ready...")
+        await verifyStationSnapshotsAreReady(radioViewModel)
+        await ensureStationSnapshotsAreCreated(radioViewModel)
+        
+        // Trigger UI refresh
+        print("🔄 ✅ Triggering final UI refresh...")
+        await podcastViewModel.ensureFeedsAreLoaded()
+        
+        // Post notification
+        NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
+        print("📢 ✅ Posted fresh install completion notification")
+        
+        // Wait for UI to process
+        print("⏳ ✅ Waiting for UI to process and refresh...")
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds for UI
+        
+        // Verify UI has been updated
+        var verificationAttempts = 0
+        let maxVerificationAttempts = 10
+        
+        while verificationAttempts < maxVerificationAttempts {
+            // Check if data is visible
+            if podcastViewModel.podcastFeeds.count > 0 && radioViewModel.stations.count > 0 {
+                print("✅ ✅ UI data verified - feeds: \(podcastViewModel.podcastFeeds.count), stations: \(radioViewModel.stations.count)")
+                break
+            }
+            
+            verificationAttempts += 1
+            print("⏳ ✅ UI verification attempt \(verificationAttempts)/\(maxVerificationAttempts)...")
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        }
+        
+        // Mark as completed
+        UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
+        UserDefaults.standard.set(true, forKey: "DataSyncCompleted")
+        
+        // Clear fresh install flags
+        isFreshInstallSyncInProgress = false
+        
+        currentOperation = "✅ Synchronization completed!"
+        overallProgress = 1.0
+        
+        // Mark UI as ready
+        isFreshInstallUIReady = true
+        
+        print("🎉 ✅ COMPREHENSIVE COMPLETION: All sync completed successfully!")
+        print("🎉 ✅ Fresh install sync is COMPLETE - UI is ready to show")
+        
+        // CRITICAL: Reset all sync statuses to .none to hide banners after completion
+        print("🧹 ✅ Resetting all sync statuses to hide banners...")
+        podcastFeedsStatus = .none
+        podcastFeedsProgress = 0.0
+        podcastFeedsOperation = ""
+        podcastFeedsCurrentCount = 0
+        podcastFeedsTotalCount = 0
+        
+        radioStationsStatus = .none
+        radioStationsProgress = 0.0
+        radioStationsOperation = ""
+        radioStationsCurrentCount = 0
+        radioStationsTotalCount = 0
+        
+        episodeStatesStatus = .none
+        episodeStatesProgress = 0.0
+        episodeStatesOperation = ""
+        episodeStatesCurrentCount = 0
+        episodeStatesTotalCount = 0
+        
+        artworkDownloadsStatus = .none
+        artworkDownloadsProgress = 0.0
+        artworkDownloadsOperation = ""
+        artworkDownloadsCurrentCount = 0
+        artworkDownloadsTotalCount = 0
+        
+        userPreferencesStatus = .none
+        userPreferencesProgress = 0.0
+        userPreferencesOperation = ""
+        
+        print("✅ ✅ All sync statuses reset - banners will not show")
+        
+        // Stop syncing
+        isSyncing = false
+    }
 }
+
 

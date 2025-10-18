@@ -2526,6 +2526,12 @@ class PodcastCloudKitManager: ObservableObject {
         os_log("🔄 Starting CloudKit sync for podcast feeds", log: log, type: .info)
         print("🔄 CLOUDKIT: Starting CloudKit sync for podcast feeds (batched)")
         
+        // ⚡ SKIP PRE-CHECK on fresh install to avoid rate limiting issues
+        // Pre-check can timeout after manual station save, causing unnecessary delays
+        print("⚡ CLOUDKIT: Skipping pre-check query (causes rate limiting on fresh install)")
+        print("⚡ CLOUDKIT: Proceeding directly to batched feed fetch")
+        os_log("⚡ Skipping pre-check - proceeding with full sync", log: log, type: .info)
+        
         var allFeeds: [PodcastFeed] = []
         var cursor: CKQueryOperation.Cursor? = nil
         var batchCount = 0
@@ -2537,20 +2543,36 @@ class PodcastCloudKitManager: ObservableObject {
             batchCount += 1
             print("🔄 CLOUDKIT: Fetching batch \(batchCount)...")
             
+            // Use withTimeout for better cancellation handling
             do {
-                let (matchResults, nextCursor) = cursor == nil 
-                    ? try await privateDatabase.records(matching: query, resultsLimit: 50)  // Batch size: 50 records
-                    : try await privateDatabase.records(continuingMatchFrom: cursor!)
+                // ⚡ CRITICAL: Use MUCH longer timeout for fresh installs (user may have actual data in CloudKit)
+                // Fresh install needs 60s per batch to fetch data from other devices
+                // Regular sync can use 10s timeout (data should be cached)
+                let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+                let timeoutSeconds: TimeInterval = isFreshInstall ? 60.0 : 10.0
+                print("⏱️ CLOUDKIT: Executing CloudKit query for batch \(batchCount) with \(Int(timeoutSeconds))s timeout (fresh install: \(isFreshInstall))...")
+                let result: ([(CKRecord.ID, Result<CKRecord, Error>)], CKQueryOperation.Cursor?)? = try await withTimeout(seconds: timeoutSeconds) {
+                    if cursor == nil {
+                        return try await self.privateDatabase.records(matching: query, resultsLimit: 50)
+                    } else {
+                        return try await self.privateDatabase.records(continuingMatchFrom: cursor!)
+                    }
+                }
+                
+                guard let (matchResults, nextCursor) = result else {
+                    print("⚠️ CLOUDKIT: Query returned nil - should not happen")
+                    if allFeeds.isEmpty {
+                        return []
+                    }
+                    break
+                }
                 
                 print("✅ CLOUDKIT: Batch \(batchCount) completed, got \(matchResults.count) results")
                 
                 var batchFeeds: [PodcastFeed] = []
-                var processedCount = 0
                 
                 // Process records in this batch
                 for (recordID, recordResult) in matchResults {
-                    processedCount += 1
-                    
                     switch recordResult {
                     case .success(let record):
                         if let feed = try? await parsePodcastFeedRecord(record) {
@@ -2569,10 +2591,24 @@ class PodcastCloudKitManager: ObservableObject {
                 
                 cursor = nextCursor
                 
+            } catch is TimeoutError {
+                let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+                let timeoutUsed = isFreshInstall ? 60 : 10
+                print("⚠️ CLOUDKIT: Batch \(batchCount) timed out after \(timeoutUsed)s")
+                print("⚠️ CLOUDKIT: This usually indicates rate limiting or network issues")
+                if allFeeds.isEmpty {
+                    print("⚠️ CLOUDKIT: No feeds fetched - returning empty to trigger local fallback")
+                    return []
+                }
+                print("⚡ CLOUDKIT: Returning \(allFeeds.count) feeds from \(batchCount - 1) completed batches")
+                break
             } catch {
                 print("❌ CLOUDKIT: Batch \(batchCount) failed: \(error.localizedDescription)")
-                os_log("❌ CloudKit sync failed on batch %d: %@", log: log, type: .error, batchCount, error.localizedDescription)
-                throw error
+                if allFeeds.isEmpty {
+                    throw error
+                }
+                print("⚡ CLOUDKIT: Returning \(allFeeds.count) feeds from partial sync")
+                break
             }
             
         } while cursor != nil
@@ -3154,6 +3190,51 @@ class PodcastCloudKitManager: ObservableObject {
         }
     }
     
+    // MARK: - Helper Methods
+    
+    /// Helper for timeout operations with return value
+    /// CRITICAL: Returns nil immediately after timeout to avoid hanging
+    private func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T? {
+        print("⏱️ PODCAST TIMEOUT: Starting with \(Int(seconds))s timeout")
+        
+        return try await withThrowingTaskGroup(of: T?.self) { group in
+            // Add operation task
+            group.addTask {
+                do {
+                    let result = try await operation()
+                    print("⏱️ PODCAST TIMEOUT: Operation completed successfully")
+                    return result
+                } catch {
+                    print("⏱️ PODCAST TIMEOUT: Operation threw error: \(error.localizedDescription)")
+                    throw error
+                }
+            }
+            
+            // Add timeout task
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                print("⚠️ PODCAST TIMEOUT: \(Int(seconds))s timeout reached - returning nil immediately!")
+                return nil
+            }
+            
+            // Return the first result (either operation or timeout)
+            guard let result = try await group.next() else {
+                print("⚠️ PODCAST TIMEOUT: No result from task group")
+                group.cancelAll()
+                return nil
+            }
+            
+            // Cancel remaining tasks immediately
+            group.cancelAll()
+            
+            if result == nil {
+                print("⚠️ PODCAST TIMEOUT: Timeout won the race - CloudKit operation abandoned")
+            }
+            
+            return result
+        }
+    }
+    
     // MARK: - Debug Methods
     
     /// Debug method to verify a feed exists in CloudKit
@@ -3191,4 +3272,36 @@ class PodcastCloudKitManager: ObservableObject {
         }
     }
 
+}
+
+// MARK: - Timeout Helper
+
+struct TimeoutError: Error {}
+
+func withTimeout<T>(
+    seconds: TimeInterval,
+    operation: @escaping () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        // Add the actual operation
+        group.addTask {
+            try await operation()
+        }
+        
+        // Add timeout task
+        group.addTask {
+            try await Task<Never, Never>.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw TimeoutError()
+        }
+        
+        // Wait for first to complete
+        guard let result = try await group.next() else {
+            throw TimeoutError()
+        }
+        
+        // Cancel remaining tasks
+        group.cancelAll()
+        
+        return result
+    }
 }

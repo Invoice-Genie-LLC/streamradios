@@ -2288,6 +2288,78 @@ class EpisodeStateManager: ObservableObject {
         sendThrottledUpdate()
     }
     
+    /// Load ALL episode states from Core Data - used during fresh install sync to ensure snapshots have latest data
+    func loadAllStatesFromCoreData() async {
+        print("🔄 RELOAD: Loading ALL episode states from Core Data...")
+        
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    // Fetch ALL episodes from Core Data
+                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    let allEpisodes = try context.fetch(fetchRequest)
+                    
+                    var loadedStates = 0
+                    var loadedProgress = 0
+                    var loadedFavorites = 0
+                    var loadedDownloads = 0
+                    
+                    for managedEpisode in allEpisodes {
+                        guard let episodeId = managedEpisode.id else { continue }
+                        
+                        // Load progress
+                        let progress = managedEpisode.progress
+                        if progress > 0 {
+                            DispatchQueue.main.async {
+                                self.episodeProgress[episodeId] = progress
+                            }
+                            loadedProgress += 1
+                            
+                            // Derive playback state from progress
+                            let state: EpisodePlaybackState
+                            if progress >= 0.95 {
+                                state = .played
+                            } else if progress > 0 {
+                                state = .inProgress
+                            } else {
+                                state = .new
+                            }
+                            
+                            DispatchQueue.main.async {
+                                self.episodeStates[episodeId] = state
+                            }
+                            loadedStates += 1
+                        }
+                        
+                        // Load favorite state
+                        if managedEpisode.isFavorite {
+                            DispatchQueue.main.async {
+                                self.episodeFavorites[episodeId] = true
+                            }
+                            loadedFavorites += 1
+                        }
+                        
+                        // Load download state
+                        if managedEpisode.isDownloaded {
+                            DispatchQueue.main.async {
+                                self.episodeDownloads[episodeId] = true
+                            }
+                            loadedDownloads += 1
+                        }
+                    }
+                    
+                    print("✅ RELOAD: Loaded \(loadedStates) states, \(loadedProgress) progress, \(loadedFavorites) favorites, \(loadedDownloads) downloads from Core Data")
+                    continuation.resume()
+                    
+                } catch {
+                    print("❌ RELOAD: Failed to load states from Core Data: \(error)")
+                    continuation.resume()
+                }
+            }
+        }
+    }
+    
     /// Synchronize download states from Core Data on startup to recover from force close scenarios
     /// UPGRADE PROTECTION: Enhanced to prevent download state loss during upgrades
     private func syncDownloadStatesFromCoreData() {

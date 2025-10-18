@@ -665,7 +665,15 @@ class DataStore {
 
     // Save stations to CloudKit - with duplicate prevention by URL
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
-        print("📡 🔍 FRESH INSTALL: Checking for existing stations before saving \(stations.count) stations to CloudKit")
+        // CRITICAL FIX: Always check for duplicates, even on fresh install
+        // Manual stations might already exist in CloudKit from previous installation or another device
+        let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+        
+        if isFreshInstall {
+            print("⚡ FRESH INSTALL: Checking CloudKit for existing manual stations before saving")
+        }
+        
+        print("📡 🔍 Checking for existing stations before saving \(stations.count) stations to CloudKit")
         
         // Fetch existing station URLs to prevent duplicates
         fetchExistingStationURLs { existingURLs, error in
@@ -675,7 +683,7 @@ class DataStore {
                 return
             }
             
-            print("📡 🔍 FRESH INSTALL: Found \(existingURLs.count) existing station URLs in CloudKit")
+            print("📡 🔍 Found \(existingURLs.count) existing station URLs in CloudKit")
             
             // Filter out stations that already exist by URL
             let newStations = stations.filter { station in
@@ -697,7 +705,7 @@ class DataStore {
                                     }
                 
                 if hasURLDuplicate {
-                    print("📻 🚫 FRESH INSTALL DUPLICATE: Station \(station.name) (URL: \(station.url)) already exists in CloudKit, skipping")
+                    print("📻 🚫 DUPLICATE PREVENTED: Manual station '\(station.name)' (URL: \(station.url)) already exists in CloudKit, skipping")
                     return false
                 }
                 
@@ -705,32 +713,38 @@ class DataStore {
             }
             
             let duplicatesFiltered = stations.count - newStations.count
-            print("📡 📊 FRESH INSTALL SUMMARY: Filtered \(duplicatesFiltered) duplicate stations, will save \(newStations.count) new stations")
+            print("📡 📊 DUPLICATE SUMMARY: Filtered \(duplicatesFiltered) duplicate manual stations, will save \(newStations.count) new stations")
             
             if newStations.isEmpty {
-                print("📡 ✅ FRESH INSTALL: All \(stations.count) stations already exist in CloudKit (duplicates prevented)")
+                print("📡 ✅ ALL DUPLICATES: All \(stations.count) manual stations already exist in CloudKit (duplicates prevented)")
                 completion(true, [])
                 return
             }
             
-            print("📡 🆕 FRESH INSTALL: Saving \(newStations.count) unique new stations to CloudKit")
+            print("📡 🆕 SAVING NEW STATIONS: Saving \(newStations.count) unique manual stations to CloudKit")
             self.processAllStations(newStations, completion: completion)
         }
     }
     
     // Original method for incremental saves (used elsewhere)
     func saveNewStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
-        // CRITICAL: First filter out any manual stations that shouldn't be saved during API fetch
-        let nonManualStations = stations.filter { station in
+        // ⚡ CRITICAL: Only save MANUAL stations to CloudKit (not API stations)
+        let manualStations = stations.filter { station in
             let isManual = station.id.hasPrefix("manual_")
-            if isManual {
-                print("📻 🚫 DATASTORE EXCLUSION: Manual station \(station.name) (ID: \(station.id)) excluded from CloudKit save in DataStore")
+            if !isManual {
+                print("📻 🚫 API STATION EXCLUSION: API station \(station.name) (ID: \(station.id)) excluded from CloudKit save")
             }
-            return !isManual
+            return isManual
         }
         
-        if nonManualStations.count != stations.count {
-            print("📻 ⚠️ DATASTORE: Filtered out \(stations.count - nonManualStations.count) manual stations from CloudKit save")
+        if manualStations.count != stations.count {
+            print("📻 ⚠️ DATASTORE: Filtered out \(stations.count - manualStations.count) API stations from CloudKit save (only saving manual stations)")
+        }
+        
+        if manualStations.isEmpty {
+            print("📡 ✅ NO MANUAL STATIONS: All stations are from API, nothing to save to CloudKit")
+            completion(true, [])
+            return
         }
         
         // Enhanced duplicate prevention: Check both IDs and URLs
@@ -752,7 +766,7 @@ class DataStore {
                 print("📡 🔍 DUPLICATE CHECK: Found \(existingIDs.count) existing station IDs and \(existingURLs.count) existing URLs in CloudKit")
                 
                 // Filter out stations that already exist by ID OR URL
-                let newStations = nonManualStations.filter { station in
+                let newStations = manualStations.filter { station in
                     // Check if station ID already exists
                     if existingIDs.contains(station.id) {
                         print("📻 🚫 DUPLICATE ID: Station \(station.name) (ID: \(station.id)) already exists in CloudKit")
@@ -784,20 +798,20 @@ class DataStore {
                     return true
                 }
                 
-                let duplicatesFilteredByID = nonManualStations.count - newStations.count - (nonManualStations.count - nonManualStations.filter { !existingIDs.contains($0.id) }.count)
-                let duplicatesFilteredByURL = nonManualStations.filter { !existingIDs.contains($0.id) }.count - newStations.count
+                let duplicatesFilteredByID = manualStations.count - newStations.count - (manualStations.count - manualStations.filter { !existingIDs.contains($0.id) }.count)
+                let duplicatesFilteredByURL = manualStations.filter { !existingIDs.contains($0.id) }.count - newStations.count
                 
                 print("📡 📊 DUPLICATE SUMMARY: Filtered \(duplicatesFilteredByID) ID duplicates and \(duplicatesFilteredByURL) URL duplicates")
                 
                 if newStations.isEmpty {
-                    print("📡 ✅ NO NEW STATIONS: All \(nonManualStations.count) stations already exist in CloudKit (duplicates prevented)")
+                    print("📡 ✅ NO NEW STATIONS: All \(manualStations.count) manual stations already exist in CloudKit (duplicates prevented)")
                     print("📡 🚫 CLOUDKIT SAVE SKIPPED: No actual new stations to save after duplicate filtering")
                     completion(true, [])
                     return
                 }
                 
-                print("📡 🆕 SAVING: \(newStations.count) unique new stations to CloudKit (from \(nonManualStations.count) candidates)")
-                print("📡 🔄 PROCEEDING with CloudKit batch save for \(newStations.count) truly new stations")
+                print("📡 🆕 SAVING: \(newStations.count) unique new manual stations to CloudKit (from \(manualStations.count) candidates)")
+                print("📡 🔄 PROCEEDING with CloudKit batch save for \(newStations.count) truly new manual stations")
                 self.processNewStations(newStations, completion: completion)
             }
         }
@@ -805,6 +819,19 @@ class DataStore {
     
     // Method specifically for import operations - handles both new and updated stations
     func saveImportedStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        // ⚡ CRITICAL: Only save MANUAL stations to CloudKit (not API stations)
+        let manualStations = stations.filter { $0.id.hasPrefix("manual_") }
+        
+        if manualStations.count != stations.count {
+            print("📡 IMPORT FILTER: Only processing \(manualStations.count) manual stations (filtered out \(stations.count - manualStations.count) API stations)")
+        }
+        
+        if manualStations.isEmpty {
+            print("📡 ✅ NO MANUAL STATIONS: All imported stations are from API, nothing to save to CloudKit")
+            completion(true, [])
+            return
+        }
+        
         fetchExistingStationURLs { existingURLs, error in
             guard error == nil else {
                 print("Error fetching existing station URLs: \(error?.localizedDescription ?? "Unknown error")")
@@ -812,8 +839,8 @@ class DataStore {
                 return
             }
 
-            let newStations = stations.filter { !existingURLs.contains($0.url) }
-            let existingStations = stations.filter { existingURLs.contains($0.url) }
+            let newStations = manualStations.filter { !existingURLs.contains($0.url) }
+            let existingStations = manualStations.filter { existingURLs.contains($0.url) }
             
             print("CloudKit Import: \(newStations.count) new stations, \(existingStations.count) existing stations to update")
             
@@ -846,8 +873,36 @@ class DataStore {
 
     // Method to process and save all stations (used during import)
     private func processAllStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        // ⚡ DEBUG: Log sample station IDs to diagnose filtering issue
+        print("📡 CLOUDKIT DEBUG: Processing \(stations.count) stations")
+        let sampleIDs = stations.prefix(3).map { $0.id }
+        print("📡 CLOUDKIT DEBUG: Sample station IDs: \(sampleIDs)")
+        
+        // ⚡ FRESH INSTALL FIX: On fresh install, save all stations (they're all manual)
+        let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+        
+        let manualStations: [RadioStation]
+        if isFreshInstall {
+            // On fresh install, all stations in the database are manual stations
+            // (no API stations exist yet, and stations may have legacy UUID IDs)
+            manualStations = stations
+            print("📡 FRESH INSTALL: Saving all \(manualStations.count) stations to CloudKit (no filtering)")
+        } else {
+            // On existing install, only save stations with manual_ prefix
+            manualStations = stations.filter { $0.id.hasPrefix("manual_") }
+            
+            if manualStations.count != stations.count {
+                print("📡 CLOUDKIT FILTER: Only saving \(manualStations.count) manual stations (filtered out \(stations.count - manualStations.count) API stations)")
+                if manualStations.isEmpty && !stations.isEmpty {
+                    print("📡 ⚠️ WARNING: No manual stations found! First station ID: \(stations.first?.id ?? "none")")
+                }
+            } else {
+                print("📡 CLOUDKIT FILTER: All \(manualStations.count) stations are manual stations - proceeding with CloudKit save")
+            }
+        }
+        
         var recordsToSave = [CKRecord]()
-        for station in stations {
+        for station in manualStations {
             let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
             
             // Sync ALL station fields to CloudKit
@@ -884,8 +939,23 @@ class DataStore {
 
     // Method to process and save new stations
     private func processNewStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+
+        let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+        
+        let manualStations: [RadioStation]
+        if isFreshInstall {
+            manualStations = stations
+            print("📡 FRESH INSTALL: Saving all \(manualStations.count) new stations to CloudKit (no filtering)")
+        } else {
+            manualStations = stations.filter { $0.id.hasPrefix("manual_") }
+            
+            if manualStations.count != stations.count {
+                print("📡 CLOUDKIT FILTER: Only saving \(manualStations.count) manual stations (filtered out \(stations.count - manualStations.count) API stations)")
+            }
+        }
+        
         var recordsToSave = [CKRecord]()
-        for station in stations {
+        for station in manualStations {
             let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
             
             // Sync ALL station fields to CloudKit

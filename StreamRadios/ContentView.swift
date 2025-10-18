@@ -680,9 +680,8 @@ struct ContentView: View {
                                         Task {
                                             UIDevice.playHapticFeedback()
                                             await viewModel?.fetchStationsForSelectedCountry(forceRefresh: false)
-                                            await MainActor.run {
-                                                viewModel?.syncStationsWithCloudKit()
-                                            }
+                                            // ⚡ CLOUDKIT POLICY: Manual stations are ONLY synced during fresh install
+                                            // Country selection does NOT trigger CloudKit sync
                                         }
                                     }
                                 )
