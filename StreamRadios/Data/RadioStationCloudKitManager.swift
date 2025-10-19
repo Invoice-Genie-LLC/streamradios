@@ -1098,6 +1098,32 @@ class RadioStationCloudKitManager: ObservableObject {
             return
         }
         
+        // ⚡ CRITICAL: Only save MANUAL stations to CloudKit (not API stations)
+        let manualStations = stations.filter { station in
+            let isManual = station.id.hasPrefix("manual_")
+            if !isManual {
+                print("📻 🚫 API STATION EXCLUSION: API station \(station.name) (ID: \(station.id)) excluded from CloudKit save")
+            }
+            return isManual
+        }
+        
+        if manualStations.count != stations.count {
+            print("📻 ⚠️ RADIO CLOUDKIT MANAGER: Filtered out \(stations.count - manualStations.count) API stations from CloudKit save (only saving manual stations)")
+        }
+        
+        if manualStations.isEmpty {
+            print("📡 ✅ NO MANUAL STATIONS: All \(stations.count) stations are from API, nothing to save to CloudKit")
+            await MainActor.run {
+                progressCallback(1.0, 0, "No manual stations to sync - API stations are not saved to iCloud")
+            }
+            return
+        }
+        
+        print("📡 🔄 RADIO CLOUDKIT MANAGER: Proceeding with \(manualStations.count) manual stations (filtered from \(stations.count) total)")
+        
+        // Use filtered manual stations for the rest of the method
+        let stationsToSave = manualStations
+        
         // Prevent concurrent batch save operations
         batchSaveLock.lock()
         defer { batchSaveLock.unlock() }
@@ -1114,34 +1140,34 @@ class RadioStationCloudKitManager: ObservableObject {
         isBatchSaveInProgress = true
         defer { isBatchSaveInProgress = false }
         
-        os_log("📡 🔄 RADIO Starting batch save for %d stations (country: %@)", log: log, type: .info, stations.count, country ?? "nil")
-        print("📡 🔄 RADIO Starting batch save for \(stations.count) stations (country: \(country ?? "nil"))")
+        os_log("📡 🔄 RADIO Starting batch save for %d manual stations (country: %@)", log: log, type: .info, stationsToSave.count, country ?? "nil")
+        print("📡 🔄 RADIO Starting batch save for \(stationsToSave.count) manual stations (country: \(country ?? "nil"))")
         
         // Debug: Print first few station IDs and names for verification
-        let debugStations = stations.prefix(3)
+        let debugStations = stationsToSave.prefix(3)
         for (index, station) in debugStations.enumerated() {
             print("📡 🔍 RADIO Station \(index + 1): ID=\(station.id), Name=\(station.name), Country=\(station.country)")
         }
         
-        let stationIds = stations.map { $0.id }
+        let stationIds = stationsToSave.map { $0.id }
         
         // Check for resumable sync
         let stationsToProcess: [RadioStation]
         if SyncStateManager.shared.hasIncompleteRadioStationSync() {
             let remainingIds = SyncStateManager.shared.getStationsToProcess(from: stationIds)
-            stationsToProcess = stations.filter { remainingIds.contains($0.id) }
-            os_log("📡 🔄 RADIO Resuming batch CloudKit save: %d remaining out of %d total stations", 
-                   log: log, type: .info, stationsToProcess.count, stations.count)
+            stationsToProcess = stationsToSave.filter { remainingIds.contains($0.id) }
+            os_log("📡 🔄 RADIO Resuming batch CloudKit save: %d remaining out of %d total manual stations", 
+                   log: log, type: .info, stationsToProcess.count, stationsToSave.count)
         } else {
-            stationsToProcess = stations
+            stationsToProcess = stationsToSave
             // Start new sync tracking
             SyncStateManager.shared.startRadioStationSync(
-                totalStations: stations.count,
+                totalStations: stationsToSave.count,
                 country: country,
                 operationType: "batch_save"
             )
-            os_log("📡 🔄 RADIO Starting new batch CloudKit save for %d stations", 
-                   log: log, type: .info, stations.count)
+            os_log("📡 🔄 RADIO Starting new batch CloudKit save for %d manual stations", 
+                   log: log, type: .info, stationsToSave.count)
         }
         
         // Enhanced duplicate prevention: Check for URL duplicates within the batch
@@ -1185,16 +1211,16 @@ class RadioStationCloudKitManager: ObservableObject {
             
             // Early return if no stations need to be saved
             guard !finalStationsToProcess.isEmpty else {
-                print("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All \(stations.count) stations already exist in CloudKit")
+                print("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All \(stationsToSave.count) manual stations already exist in CloudKit")
                 print("📡 ✅ DUPLICATE PREVENTION SUCCESSFUL: No expensive CloudKit operations performed")
-                os_log("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All %d stations already exist in CloudKit", log: log, type: .info, stations.count)
+                os_log("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All %d manual stations already exist in CloudKit", log: log, type: .info, stationsToSave.count)
                 
                 // Complete the sync state as successful
                 SyncStateManager.shared.completeRadioStationSync()
                 
                 // Report completion with clear messaging
                 await MainActor.run {
-                    progressCallback(1.0, 0, "All \(stations.count) stations already exist - no CloudKit operations needed")
+                    progressCallback(1.0, 0, "All \(stationsToSave.count) manual stations already exist - no CloudKit operations needed")
                 }
                 
                 print("📡 🏁 BATCH SAVE TERMINATION: Returning early to prevent expensive operations")
@@ -1204,9 +1230,9 @@ class RadioStationCloudKitManager: ObservableObject {
         
         // Additional safety check: If we're trying to save a very high percentage of existing stations, 
         // this might indicate a duplicate detection failure
-        let duplicatePercentage = Double(stations.count - finalStationsToProcess.count) / Double(stations.count)
+        let duplicatePercentage = Double(stationsToSave.count - finalStationsToProcess.count) / Double(stationsToSave.count)
         if duplicatePercentage > 0.8 && finalStationsToProcess.count > 50 {
-            print("📡 ⚠️ DUPLICATE WARNING: \(Int(duplicatePercentage * 100))% of stations were duplicates (\(stations.count - finalStationsToProcess.count) out of \(stations.count))")
+            print("📡 ⚠️ DUPLICATE WARNING: \(Int(duplicatePercentage * 100))% of manual stations were duplicates (\(stationsToSave.count - finalStationsToProcess.count) out of \(stationsToSave.count))")
             print("📡 🔍 DUPLICATE ANALYSIS: This might indicate an issue with duplicate detection")
         }
         
@@ -1214,7 +1240,7 @@ class RadioStationCloudKitManager: ObservableObject {
         
         // Report initial progress
         let syncState = SyncStateManager.shared.getRadioStationSyncState()
-        let totalStations = syncState?.totalStations ?? stations.count
+        let totalStations = syncState?.totalStations ?? stationsToSave.count
         let alreadyProcessed = syncState?.completedCount ?? 0
         
         await MainActor.run {
@@ -1328,7 +1354,7 @@ class RadioStationCloudKitManager: ObservableObject {
         os_log("✅ RADIO Successfully saved %d stations to CloudKit in batches", log: log, type: .info, totalStations)
         
         // Trigger bulk cross-device sync notification
-        await triggerCrossDeviceBulkStationSync(stations: stations, action: "batch_updated")
+        await triggerCrossDeviceBulkStationSync(stations: stationsToSave, action: "batch_updated")
     }
     
     /// Delete multiple radio stations from CloudKit in batches for improved performance
@@ -1355,6 +1381,12 @@ class RadioStationCloudKitManager: ObservableObject {
     
     /// Save radio station to CloudKit and trigger cross-device sync
     func saveRadioStationToCloudKit(_ station: RadioStation) async throws {
+        // ⚡ CRITICAL: Only save MANUAL stations to CloudKit (not API stations)
+        guard station.id.hasPrefix("manual_") else {
+            print("📻 🚫 API STATION EXCLUSION: API station \(station.name) (ID: \(station.id)) excluded from CloudKit save")
+            return
+        }
+        
         let recordID = CKRecord.ID(recordName: station.id)
         
         // Try to fetch existing record first
