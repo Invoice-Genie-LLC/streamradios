@@ -2549,8 +2549,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 print("📻 ☁️ FRESH INSTALL: Marked manual stations for \(country) as synced to prevent duplicate CloudKit saves")
             }
             
-            userDefaults.set(true, forKey: hasLaunchedBeforeKey)
-            userDefaults.synchronize() // Ensure the flag is saved immediately
+            // ⚡ CRITICAL FIX: Do NOT set HasLaunchedBefore here!
+            // This flag should ONLY be set by DataSyncManager AFTER comprehensive sync completes
+            // Setting it here prevents the fresh install sync from ever starting
+            // userDefaults.set(true, forKey: hasLaunchedBeforeKey)
+            // userDefaults.synchronize()
         }
     }
     
@@ -2622,20 +2625,19 @@ class RadioStationViewModel: NSObject, ObservableObject {
     /// Call this method whenever a user modifies any station field
     func syncStationToCloudKit(_ station: RadioStation, reason: String = "User modification") {
         print("📡 🔄 CLOUDKIT SYNC: Syncing station '\(station.name)' to CloudKit - Reason: \(reason)")
+        print("📡 🔍 CLOUDKIT DEBUG: Station ID: \(station.id), isFavorite: \(station.isFavorite)")
         
         // Save locally first
         saveStationsToCoreData()
         
-        // Sync to CloudKit
+        // CRITICAL FIX: Use RadioStationCloudKitManager for proper field sync
+        // This ensures ALL fields (including isFavorite) are properly saved
         Task {
-            DataStore.shared.saveImportedStationsToCloudKit(stations: [station]) { success, recordIDs in
-                DispatchQueue.main.async {
-                    if success {
-                        print("✅ CLOUDKIT SYNC: Successfully synced '\(station.name)' to CloudKit")
-                    } else {
-                        print("❌ CLOUDKIT SYNC: Failed to sync '\(station.name)' to CloudKit")
-                    }
-                }
+            do {
+                try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(station)
+                print("✅ CLOUDKIT SYNC: Successfully synced '\(station.name)' to CloudKit with isFavorite=\(station.isFavorite)")
+            } catch {
+                print("❌ CLOUDKIT SYNC: Failed to sync '\(station.name)' to CloudKit: \(error)")
             }
         }
     }
@@ -2819,7 +2821,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         // Create new station with order = 0 to place it at the top
-        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: false, favoriteOrder: nil, order: 0)
+        // CRITICAL FIX: Use "manual_" prefix so station syncs to CloudKit properly
+        let newStation = RadioStation(id: "manual_\(UUID().uuidString)", name: name, url: url, iconData: iconData, country: country, isFavorite: false, favoriteOrder: nil, order: 0)
         
         // Remove from deleted stations list if user is manually re-adding it
         // Note: This won't match by ID since manual additions get new UUIDs,
@@ -2834,11 +2837,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
         let countryStations = stations.filter { $0.country == country }
         updateStationSnapshot(for: country, stations: countryStations)
         
-        // Force UI refresh and notify listeners that stations changed
-        DispatchQueue.main.async {
-            self.objectWillChange.send()
-            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
-        }
+        // CRITICAL FIX: Force immediate UI refresh synchronously before sheet dismisses
+        // This ensures the new station appears immediately in RadioStationListView
+        self.objectWillChange.send()
+        NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+        print("📻 ✅ IMMEDIATE REFRESH: Posted stationsUpdated notification synchronously for new station")
         
         // Mark that changes are expected on other devices after manual addition
         forceCloudKitCheckOnNextLaunch()

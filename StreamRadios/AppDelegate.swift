@@ -29,9 +29,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     // Initialize enhanced crash logging first
         initializeEnhancedCrashLogging()
             
-            if isFirstLaunch() {
-                deleteLocalCoreDataStore()
-            }
+            // ⚡ CRITICAL FIX: Do NOT delete Core Data store on first launch!
+            // This was causing crashes because:
+            // 1. The model name was wrong ("YourModel" instead of "StreamRadiosModel")
+            // 2. The recreate method didn't update CoreDataStack.shared
+            // 3. Fresh installs already start with empty Core Data by default
+            // if isFirstLaunch() {
+            //     deleteLocalCoreDataStore()
+            // }
             
             UNUserNotificationCenter.current().delegate = self
             requestNotificationAuthorization()

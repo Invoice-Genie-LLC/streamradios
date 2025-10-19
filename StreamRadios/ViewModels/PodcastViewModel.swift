@@ -530,7 +530,7 @@ class PodcastViewModel: ObservableObject {
         get {
             // Use isolation manager for guaranteed clean episodes
             guard let feedId = selectedFeedId else { 
-                print("🔍 EPISODE GETTER: selectedFeedId is nil, returning empty")
+                // PERFORMANCE FIX: Don't log on every access - this is called thousands of times
                 return [] 
             }
             

@@ -135,6 +135,13 @@ class DataSyncManager: ObservableObject {
     // CRITICAL: Flag to defer CloudKit notifications during fresh install sync
     @Published var isFreshInstallSyncInProgress = false
     
+    // MARK: - Step Synchronization
+    // Ensures only one sync step runs at a time and each step completes before the next begins
+    private var currentSyncStep: String = ""
+    private var stepCompletionHandlers: [String: () -> Void] = [:]
+    private let stepSynchronizationQueue = DispatchQueue(label: "com.streamradios.step-sync", qos: .userInitiated)
+    private var isStepInProgress = false
+    
     private init() {
         setupProgressCalculation()
         
@@ -163,6 +170,54 @@ class DataSyncManager: ObservableObject {
         } else {
             print("🎯 DataSyncManager init: Set isFreshInstallUIReady=false (fresh install or sync not completed)")
         }
+    }
+    
+    // MARK: - Step Synchronization Methods
+    
+    /// Execute a sync step ensuring only one step runs at a time
+    private func executeStep(_ stepName: String, operation: @escaping () async -> Void) async {
+        print("🔄 STEP SYNC: Waiting to execute step '\(stepName)'")
+        
+        // Wait for any previous step to complete
+        await waitForCurrentStepToComplete()
+        
+        // Mark this step as in progress
+        await setCurrentStep(stepName)
+        
+        print("🔄 STEP SYNC: Starting step '\(stepName)'")
+        
+        // Execute the step
+        await operation()
+        
+        print("🔄 STEP SYNC: Completed step '\(stepName)'")
+        
+        // Mark step as complete
+        await clearCurrentStep()
+    }
+    
+    /// Wait for the current step to complete before proceeding
+    private func waitForCurrentStepToComplete() async {
+        while isStepInProgress {
+            print("🔄 STEP SYNC: Waiting for current step '\(currentSyncStep)' to complete...")
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        }
+    }
+    
+    /// Set the current step and mark as in progress
+    @MainActor
+    private func setCurrentStep(_ stepName: String) async {
+        currentSyncStep = stepName
+        isStepInProgress = true
+        print("🔄 STEP SYNC: Set current step to '\(stepName)'")
+    }
+    
+    /// Clear the current step and mark as complete
+    @MainActor
+    private func clearCurrentStep() async {
+        let completedStep = currentSyncStep
+        currentSyncStep = ""
+        isStepInProgress = false
+        print("🔄 STEP SYNC: Cleared step '\(completedStep)' - ready for next step")
     }
     
     // MARK: - Private Helper Methods
@@ -228,45 +283,62 @@ class DataSyncManager: ObservableObject {
             // 5. Wait for ALL artwork downloads to complete
             // 6. Final verification and completion
             
-            print("🔄 ═══════════════════════════════════════")
-            print("🔄 STEP 1: Syncing ALL Radio Stations")
-            print("🔄 ═══════════════════════════════════════")
-            await syncRadioStationsComprehensive()
+            // ⚡ SYNCHRONIZED STEPS: Each step waits for the previous to complete
+            await executeStep("Radio Stations Sync") {
+                print("🔄 ═══════════════════════════════════════")
+                print("🔄 STEP 1: Syncing ALL Radio Stations")
+                print("🔄 ═══════════════════════════════════════")
+                await self.syncRadioStationsComprehensive()
+            }
             
-            print("🔄 ═══════════════════════════════════════")
-            print("🔄 STEP 2: Syncing ALL Podcast Feeds & Episodes")
-            print("🔄 ═══════════════════════════════════════")
-            await syncPodcastFeedsComprehensive()
+            await executeStep("Podcast Feeds & Episodes Sync") {
+                print("🔄 ═══════════════════════════════════════")
+                print("🔄 STEP 2: Syncing ALL Podcast Feeds & Episodes")
+                print("🔄 ═══════════════════════════════════════")
+                await self.syncPodcastFeedsComprehensive()
+            }
             
-            print("🔄 ═══════════════════════════════════════")
-            print("🔄 STEP 3: Syncing ALL Episode States")
-            print("🔄 ═══════════════════════════════════════")
-            await syncEpisodeStatesComprehensive()
+            await executeStep("Episode States Sync") {
+                print("🔄 ═══════════════════════════════════════")
+                print("🔄 STEP 3: Syncing ALL Episode States")
+                print("🔄 ═══════════════════════════════════════")
+                await self.syncEpisodeStatesComprehensive()
+            }
             
-            print("🔄 ═══════════════════════════════════════")
-            print("🔄 STEP 4: Creating ALL Snapshots")
-            print("🔄 ═══════════════════════════════════════")
-            await createAllSnapshotsComprehensive()
+            await executeStep("Snapshots Creation") {
+                print("🔄 ═══════════════════════════════════════")
+                print("🔄 STEP 4: Creating ALL Snapshots")
+                print("🔄 ═══════════════════════════════════════")
+                await self.createAllSnapshotsComprehensive()
+            }
             
-            print("🔄 ═══════════════════════════════════════")
-            print("🔄 STEP 5: Waiting for ALL Artwork Downloads")
-            print("🔄 ═══════════════════════════════════════")
-            await waitForAllArtworkDownloadsComplete()
+            await executeStep("Artwork Downloads") {
+                print("🔄 ═══════════════════════════════════════")
+                print("🔄 STEP 5: Waiting for ALL Artwork Downloads")
+                print("🔄 ═══════════════════════════════════════")
+                await self.waitForAllArtworkDownloadsComplete()
+            }
             
-            print("🔄 ═══════════════════════════════════════")
-            print("🔄 STEP 6: User Preferences Sync")
-            print("🔄 ═══════════════════════════════════════")
-            await syncUserPreferences()
+            await executeStep("User Preferences Sync") {
+                print("🔄 ═══════════════════════════════════════")
+                print("🔄 STEP 6: User Preferences Sync")
+                print("🔄 ═══════════════════════════════════════")
+                await self.syncUserPreferences()
+            }
             
-            // ⚡ STEP 7: Disable fresh install mode
-            print("🔄 STEP 7: Disabling fresh install mode...")
-            EpisodeStateManager.shared.disableFreshInstallMode()
+            await executeStep("Fresh Install Mode Disable") {
+                // ⚡ STEP 7: Disable fresh install mode
+                print("🔄 STEP 7: Disabling fresh install mode...")
+                EpisodeStateManager.shared.disableFreshInstallMode()
+            }
             
-            // ⚡ STEP 8: Final verification and completion
-            print("🔄 ═══════════════════════════════════════")
-            print("🔄 STEP 8: Final Verification & Completion")
-            print("🔄 ═══════════════════════════════════════")
-            await completeSynchronizationComprehensive()
+            await executeStep("Final Verification & Completion") {
+                // ⚡ STEP 8: Final verification and completion
+                print("🔄 ═══════════════════════════════════════")
+                print("🔄 STEP 8: Final Verification & Completion")
+                print("🔄 ═══════════════════════════════════════")
+                await self.completeSynchronizationComprehensive()
+            }
         }
     }
     
@@ -699,15 +771,22 @@ class DataSyncManager: ObservableObject {
     
     /// Update episode state synchronization progress
     @MainActor
-    func updateEpisodeStateProgress(currentCount: Int, operation: String = "") {
+    func updateEpisodeStateProgress(currentCount: Int, operation: String) async {
         episodeStatesCurrentCount = currentCount
+        episodeStatesOperation = operation
+        
         if episodeStatesTotalCount > 0 {
             episodeStatesProgress = Double(currentCount) / Double(episodeStatesTotalCount)
         }
-        if !operation.isEmpty {
-            episodeStatesOperation = operation
-        }
-        // print("📊 Episode sync progress: \(currentCount)/\(episodeStatesTotalCount) (\(Int(episodeStatesProgress * 100))%)")
+    }
+    
+    @MainActor
+    func updatePodcastFeedProgress(currentCount: Int, totalCount: Int, progress: Double, operation: String) async {
+        podcastFeedsCurrentCount = currentCount
+        podcastFeedsTotalCount = totalCount
+        podcastFeedsProgress = progress
+        podcastFeedsOperation = operation
+        print("🔍 PROGRESS UPDATE: Podcast feeds - \(currentCount)/\(totalCount) (\(Int(progress * 100))%) - \(operation)")
     }
     
     /// Complete episode state synchronization
@@ -1624,125 +1703,60 @@ class DataSyncManager: ObservableObject {
         }
     }
     
-    /// Sync from CloudKit with retry logic and timeout
+    /// Sync from CloudKit - AF75B2 simple approach (no retries, no timeouts)
     private func syncFromCloudKitWithRetry() async throws -> [PodcastFeed] {
-        // ⚡ OPTIMIZATION: For fresh installs, only try once with reduced timeout
-        let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-        let maxRetries = isFreshInstall ? 1 : 3  // Only 1 attempt for fresh install
-        var retryCount = 0
+        print("☁️ AF75B2 RESTORATION: Direct CloudKit sync without retries or timeouts")
+        print("🔍 DETAILED LOG: syncFromCloudKitWithRetry() - About to call PodcastCloudKitManager.shared.syncFromCloudKit()")
         
-        while retryCount < maxRetries {
-            do {
-                print("☁️ FRESH INSTALL: Attempting CloudKit sync (attempt \(retryCount + 1)/\(maxRetries))")
-                
-                // ⚡ OPTIMIZED: Generous timeout for fresh install (CloudKit can be slow, especially with many feeds)
-                let timeoutSeconds: TimeInterval = isFreshInstall ? 60.0 : 45.0
-                print("⏱️ TIMEOUT: Starting \(Int(timeoutSeconds))s timeout wrapper (fresh install: \(isFreshInstall))")
-                
-                let result = try await withTimeout(seconds: timeoutSeconds) {
-                    return try await PodcastCloudKitManager.shared.syncFromCloudKit()
-                }
-                
-                print("⏱️ TIMEOUT: withTimeout returned, checking result...")
-                
-                if let feeds = result {
-                    print("✅ FRESH INSTALL: CloudKit sync succeeded with \(feeds.count) feeds")
-                    return feeds
-                } else {
-                    // Timeout occurred
-                    print("⚠️ ⚠️ ⚠️ FRESH INSTALL: CloudKit sync TIMED OUT after \(Int(timeoutSeconds))s")
-                    
-                    // For fresh install, fail fast - don't retry
-                    if isFreshInstall {
-                        print("⚡ FRESH INSTALL: Skipping retries, using fallback immediately")
-                        throw NSError(domain: "DataSyncManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "CloudKit sync timeout - using fallback"])
-                    }
-                    
-                    print("⚠️ THROWING TIMEOUT ERROR to trigger retry...")
-                    throw NSError(domain: "DataSyncManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "CloudKit sync timeout"])
-                }
-            } catch {
-                retryCount += 1
-                print("⚠️ FRESH INSTALL: CloudKit sync error caught (attempt \(retryCount)/\(maxRetries)): \(error.localizedDescription)")
-                print("⚠️ ERROR TYPE: \(type(of: error))")
-                
-                // Check if it's a rate limiting error
-                if let ckError = error as? CKError, ckError.code == .requestRateLimited {
-                    let retryAfter = ckError.retryAfterSeconds ?? 10.0
-                    print("⏱️ FRESH INSTALL: Rate limited, waiting \(Int(retryAfter))s before retry")
-                    
-                    if retryCount < maxRetries {
-                        Task { @MainActor in
-                            podcastFeedsOperation = "Rate limited, waiting \(Int(retryAfter))s..."
-                        }
-                        
-                        try await Task.sleep(nanoseconds: UInt64(retryAfter * 1_000_000_000))
-                        
-                        Task { @MainActor in
-                            podcastFeedsOperation = "Retrying podcast feeds from iCloud..."
-                        }
-                    }
-                } else if retryCount >= maxRetries {
-                    // Max retries exceeded
-                    print("❌ FRESH INSTALL: Max retries exceeded - giving up on attempt \(retryCount)")
-                    throw error
-                } else {
-                    // Other error - wait briefly before retry
-                    print("⏱️ FRESH INSTALL: Error on attempt \(retryCount), waiting 3s before retry \(retryCount + 1)...")
-                    try await Task.sleep(nanoseconds: 3_000_000_000)
-                    print("⏱️ FRESH INSTALL: Retrying now...")
-                }
-            }
-        }
+        let cloudKitStartTime = CFAbsoluteTimeGetCurrent()
         
-        throw NSError(domain: "DataSyncManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "CloudKit sync failed after all retries"])
+        // Simple direct call like in af75b2 - let CloudKit complete naturally
+        let feeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
+        
+        let cloudKitEndTime = CFAbsoluteTimeGetCurrent()
+        let cloudKitDuration = cloudKitEndTime - cloudKitStartTime
+        
+        print("✅ AF75B2 RESTORATION: CloudKit sync succeeded with \(feeds.count) feeds")
+        print("🔍 DETAILED LOG: PodcastCloudKitManager.syncFromCloudKit() took \(String(format: "%.2f", cloudKitDuration))s")
+        
+        return feeds
     }
     
     /// Helper for timeout operations with return value
     /// CRITICAL: Returns nil immediately after timeout to avoid hanging
+    /// FIXED: Uses TaskGroup to avoid unsafe pointer race conditions
     private func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T? {
         print("⏱️ TIMEOUT WRAPPER: Starting with \(Int(seconds))s timeout")
         
-        // Use a detached task to avoid blocking on task group completion
-        let resultRef = UnsafeMutablePointer<T?>.allocate(capacity: 1)
-        resultRef.initialize(to: nil)
-        defer { 
-            resultRef.deinitialize(count: 1)
-            resultRef.deallocate() 
-        }
-        
-        let completed = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-        completed.initialize(to: false)
-        defer {
-            completed.deinitialize(count: 1)
-            completed.deallocate()
-        }
-        
-        // Start operation in background
-        Task {
-            do {
-                let result = try await operation()
-                if !completed.pointee {
-                    resultRef.pointee = result
+        return try await withThrowingTaskGroup(of: T?.self) { group in
+            // Add the actual operation
+            group.addTask {
+                do {
+                    let result = try await operation()
                     print("⏱️ TIMEOUT WRAPPER: Operation completed successfully")
+                    return result
+                } catch {
+                    print("⏱️ TIMEOUT WRAPPER: Operation threw error: \(error.localizedDescription)")
+                    return nil
                 }
-            } catch {
-                print("⏱️ TIMEOUT WRAPPER: Operation threw error: \(error.localizedDescription)")
             }
-        }
-        
-        // Wait for timeout or operation completion
-        print("⏱️ TIMEOUT WRAPPER: Waiting for timeout or completion...")
-        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        
-        completed.pointee = true
-        
-        if let result = resultRef.pointee {
-            print("⏱️ TIMEOUT WRAPPER: Operation completed before timeout - returning result")
+            
+            // Add timeout task
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                print("⏱️ TIMEOUT WRAPPER: Timeout reached - returning nil")
+                return nil
+            }
+            
+            // Wait for first to complete
+            guard let result = try await group.next() else {
+                return nil
+            }
+            
+            // Cancel remaining tasks
+            group.cancelAll()
+            
             return result
-        } else {
-            print("⏱️ TIMEOUT WRAPPER: Timeout reached - returning nil")
-            return nil
         }
     }
     
@@ -1751,49 +1765,31 @@ class DataSyncManager: ObservableObject {
     private func initializeCloudKitFeedsForFreshInstall(_ podcastViewModel: PodcastViewModel) async {
         print("🚀 Initializing CloudKit feeds for fresh install...")
         
-        // ⚡ ALWAYS CHECK CLOUDKIT: User may have data from another device/reinstall
-        // Use 20s timeout - fast fail if CloudKit is hung or rate limited
+        // ⚡ AF75B2 RESTORATION: Direct CloudKit check without timeout
         print("🔄 Checking CloudKit for existing podcast feeds...")
-        print("⚡ FRESH INSTALL: Using 20s timeout for CloudKit sync (inner batch: 10s)")
+        print("☁️ AF75B2 RESTORATION: Direct CloudKit call (no timeout wrapper)")
+        print("🔍 DETAILED LOG: initializeCloudKitFeedsForFreshInstall - Setting operation to 'Checking iCloud...'")
         podcastFeedsOperation = "Checking iCloud..."
         podcastFeedsProgress = 0.2
-        
-        // ⚡ CLOUDKIT HUNG FIX: Use 20s outer timeout (inner batch timeout is 10s)
-        // If CloudKit doesn't respond in 10s, it's likely rate-limited or network issue
-        // Quick fallback to local storage prevents app from hanging
-        let quickTimeoutSeconds: TimeInterval = 20.0
-        print("⏱️ Using 20s timeout for CloudKit fetch (inner batch: 10s)")
-        print("⏱️ If timeout occurs, falling back to local storage immediately")
+        print("🔍 DETAILED LOG: Set progress to 0.2, operation: '\(podcastFeedsOperation)'")
         
         let cloudKitFeeds: [PodcastFeed]
         do {
-            print("🔍 [PODCAST-SYNC-1] About to call syncFromCloudKitWithRetry()...")
+            print("🔍 [PODCAST-SYNC-1] Calling CloudKit directly (af75b2 approach)...")
+            print("🔍 DETAILED LOG: About to call PodcastCloudKitManager.shared.syncFromCloudKit() from initializeCloudKitFeedsForFreshInstall")
             
-            // Try with timeout
-            print("🔍 [PODCAST-SYNC-1.5] Calling withTimeout now...")
-            let result = try await withTimeout(seconds: quickTimeoutSeconds) {
-                return try await PodcastCloudKitManager.shared.syncFromCloudKit()
-            }
+            let freshInstallSyncStartTime = CFAbsoluteTimeGetCurrent()
             
-            print("🔍 [PODCAST-SYNC-1.75] withTimeout returned! Result is nil: \(result == nil)")
+            // Direct call without timeout wrapper - like af75b2
+            let feeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
             
-            if let feeds = result {
-                print("🔍 [PODCAST-SYNC-2] syncFromCloudKit() returned successfully!")
-                print("✅ Successfully fetched \(feeds.count) feeds from CloudKit")
-                cloudKitFeeds = feeds
-            } else {
-                // Timeout - use local data immediately
-                print("⏱️ CloudKit fetch timed out after \(Int(quickTimeoutSeconds))s - using local data")
-                print("⚠️ FRESH INSTALL TIMEOUT: CloudKit hung or rate-limited - falling back to local defaults")
-                print("⚠️ This is usually caused by rate limiting or network issues")
-                print("⚠️ User's data is safe and will sync automatically when CloudKit is available")
-                
-                // Do NOT start background sync on fresh install timeout
-                // It will also hang and waste resources
-                
-                cloudKitFeeds = []
-                print("🔍 [PODCAST-SYNC-2.5] Set cloudKitFeeds to empty array")
-            }
+            let freshInstallSyncTime = CFAbsoluteTimeGetCurrent() - freshInstallSyncStartTime
+            print("🔍 [PODCAST-SYNC-1.5] CloudKit sync completed successfully!")
+            print("🔍 DETAILED LOG: Fresh install CloudKit sync took \(String(format: "%.2f", freshInstallSyncTime))s")
+            
+            print("🔍 [PODCAST-SYNC-2] syncFromCloudKit() returned successfully!")
+            print("✅ Successfully fetched \(feeds.count) feeds from CloudKit")
+            cloudKitFeeds = feeds
         } catch {
             print("⚠️ CloudKit sync failed: \(error.localizedDescription)")
             print("🔄 [FALLBACK-START] Loading from local Core Data instead...")
@@ -2100,20 +2096,22 @@ class DataSyncManager: ObservableObject {
         var batchCount = 0
         let maxBatches = 5 // Safety limit
         
-        // ⚡ CRITICAL: Only fetch manual stations from CloudKit
-        let manualStationPredicate = NSPredicate(format: "id BEGINSWITH %@", "manual_")
-        let query = CKQuery(recordType: "streamingRadios", predicate: manualStationPredicate)
+        // ⚡ CRITICAL FIX: CloudKit doesn't have 'id' field - station ID is in recordID.recordName
+        // Fetch all stations and filter locally by recordName
+        let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
         
         repeat {
             batchCount += 1
             print("📡 MODERN API: Fetching batch \(batchCount)/\(maxBatches)...")
             
             // Add per-batch timeout
-            // ⚡ PERFORMANCE: Use aggressive 5s timeout for fast fallback
-            let batchTimeoutSeconds: TimeInterval = 5.0
+            // ⚡ PERFORMANCE: Use reasonable timeout for fresh installs
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let batchTimeoutSeconds: TimeInterval = isFreshInstall ? 15.0 : 5.0
+            print("⏱️ MODERN API: Using \(Int(batchTimeoutSeconds))s timeout (fresh install: \(isFreshInstall))")
             let batchResult = try await withTimeout(seconds: batchTimeoutSeconds) {
                 return try await (cursor == nil
-                    ? privateDatabase.records(matching: query, resultsLimit: 400) // Reduced batch size
+                    ? privateDatabase.records(matching: query, resultsLimit: 400)
                     : privateDatabase.records(continuingMatchFrom: cursor!))
             }
             
@@ -2131,6 +2129,11 @@ class DataSyncManager: ObservableObject {
             
             // Parse stations from this batch
             for (recordID, result) in matchResults {
+                // ⚡ CRITICAL: Filter manual stations by recordName (station ID is in recordID.recordName)
+                guard recordID.recordName.hasPrefix("manual_") else {
+                    continue // Skip API stations
+                }
+                
                 switch result {
                 case .success(let record):
                     if let station = parseRadioStation(from: record) {
@@ -2205,6 +2208,33 @@ class DataSyncManager: ObservableObject {
         viewModel.loadStationsFromCoreData()
         
         let localCount = viewModel.stations.count
+        
+        // ⚡ CRITICAL FIX: On fresh install, if Core Data is empty, use default stations
+        if localCount == 0 {
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            if isFreshInstall {
+                print("⚡ FRESH INSTALL FALLBACK: Core Data empty, loading default stations")
+                radioStationsOperation = "Loading default stations..."
+                
+                // Load all manual stations
+                let allManualStations = ManualStationManager.shared.getAllManualStations()
+                if !allManualStations.isEmpty {
+                    viewModel.stations = allManualStations
+                    viewModel.saveStationsToCoreData()
+                    
+                    radioStationsCurrentCount = allManualStations.count
+                    radioStationsTotalCount = allManualStations.count
+                    radioStationsProgress = 1.0
+                    radioStationsOperation = "✅ \(allManualStations.count) default stations loaded"
+                    print("✅ Loaded \(allManualStations.count) default radio stations")
+                } else {
+                    radioStationsOperation = "⚠️ No default stations available"
+                    print("⚠️ No default stations available")
+                }
+                return
+            }
+        }
+        
         radioStationsCurrentCount = localCount
         radioStationsTotalCount = localCount
         radioStationsProgress = 1.0
@@ -2783,12 +2813,26 @@ class DataSyncManager: ObservableObject {
         do {
             let podcastViewModel = PodcastViewModel.shared
             
-            // Fetch feeds from CloudKit
+            // Fetch feeds from CloudKit with optimized query
             print("🔄 📻 Fetching ALL podcast feeds from CloudKit...")
+            print("🔍 DETAILED LOG: Setting podcastFeedsOperation to 'Fetching feeds from iCloud...'")
             podcastFeedsOperation = "Fetching feeds from iCloud..."
             podcastFeedsProgress = 0.1
+            print("🔍 DETAILED LOG: Set progress to 0.1, operation: '\(podcastFeedsOperation)'")
+            
+            // ⚡ PERFORMANCE: CloudKit query optimized for speed:
+            // - No server-side sorting (sort locally)
+            // - Larger batch size (400 vs 50)
+            // - Skip artwork loading during sync
+            print("🔍 DETAILED LOG: About to call syncFromCloudKitWithRetry()...")
+            let syncStartTime = CFAbsoluteTimeGetCurrent()
             
             let cloudKitFeeds = try await syncFromCloudKitWithRetry()
+            
+            let syncEndTime = CFAbsoluteTimeGetCurrent()
+            let syncDuration = syncEndTime - syncStartTime
+            print("🔍 DETAILED LOG: syncFromCloudKitWithRetry() completed in \(String(format: "%.2f", syncDuration))s")
+            print("🔍 DETAILED LOG: Received \(cloudKitFeeds.count) feeds from CloudKit")
             
             if cloudKitFeeds.isEmpty {
                 print("⚠️ 📻 No podcast feeds found in CloudKit - starting with empty library")

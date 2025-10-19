@@ -1,296 +1,285 @@
 import SwiftUI
 import Combine
 
+/// Clean, modern data sync progress view for fresh install setup
 struct DataSyncProgressView: View {
     @StateObject private var syncManager = DataSyncManager.shared
     @State private var isVisible = false
-    @State private var animateProgress = false
+    @State private var animateIcon = false
     
     var body: some View {
-        // Debug logging for sync states
-        let _ = print("🎭 DataSyncProgressView: isSyncing=\(syncManager.isSyncing), isFreshInstallUIReady=\(syncManager.isFreshInstallUIReady)")
-        
-        if syncManager.isSyncing && !syncManager.isFreshInstallUIReady {
+        if shouldShowProgressView {
             ZStack {
-                // Background overlay
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea(.all)
+                // Semi-transparent background
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
                 
-                // Main progress container with reduced height
-                VStack(spacing: 16) {
-                    // App icon or logo (smaller)
-                    Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                        .font(.title)
-                        .foregroundColor(.blue)
-                        .rotationEffect(.degrees(animateProgress ? 360 : 0))
-                        .animation(
-                            Animation.linear(duration: 2.0)
-                                .repeatForever(autoreverses: false),
-                            value: animateProgress
-                        )
-                    
-                    VStack(spacing: 8) {
-                        // Title (smaller)
-                        Text("Setting Up Your App")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                        
-                        Text("Syncing your data from iCloud...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    
-                    // Overall progress bar (more compact)
-                    VStack(spacing: 4) {
-                        HStack {
-                            Text("Overall Progress")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("\(Int(syncManager.overallProgress * 100))%")
-                                .font(.caption2)
-                                .fontWeight(.medium)
-                                .foregroundColor(.primary)
-                        }
-                        
-                        ProgressView(value: syncManager.overallProgress)
-                            .progressViewStyle(CustomProgressViewStyle())
-                            .frame(height: 8)
-                    }
-                    
-                    // Individual sync status items with detailed progress - FIXED HEIGHT CONTAINER (more compact)
-                    VStack(spacing: 8) {
-                        DetailedSyncStatusItem(
-                            title: "Radio Stations",
-                            status: syncManager.radioStationsStatus,
-                            progress: syncManager.radioStationsProgress,
-                            operation: syncManager.radioStationsOperation,
-                            currentCount: syncManager.radioStationsCurrentCount,
-                            totalCount: syncManager.radioStationsTotalCount
-                        )
-                        
-                        DetailedSyncStatusItem(
-                            title: "Podcast Feeds",
-                            status: syncManager.podcastFeedsStatus,
-                            progress: syncManager.podcastFeedsProgress,
-                            operation: syncManager.podcastFeedsOperation,
-                            currentCount: syncManager.podcastFeedsCurrentCount,
-                            totalCount: syncManager.podcastFeedsTotalCount
-                        )
-                        
-                        DetailedSyncStatusItem(
-                            title: "Artwork Downloads",
-                            status: syncManager.artworkDownloadsStatus,
-                            progress: syncManager.artworkDownloadsProgress,
-                            operation: syncManager.artworkDownloadsOperation,
-                            currentCount: syncManager.artworkDownloadsCurrentCount,
-                            totalCount: syncManager.artworkDownloadsTotalCount
-                        )
-                        
-                        DetailedSyncStatusItem(
-                            title: "Episode States & Snapshots",
-                            status: syncManager.episodeStatesStatus,
-                            progress: syncManager.episodeStatesProgress,
-                            operation: syncManager.episodeStatesOperation,
-                            currentCount: syncManager.feedsWithSnapshots,
-                            totalCount: syncManager.totalFeedsRequiringSnapshots > 0 ? syncManager.totalFeedsRequiringSnapshots : syncManager.episodeStatesTotalCount
-                        )
-                        
-                        DetailedSyncStatusItem(
-                            title: "Station Snapshots",
-                            status: syncManager.stationSnapshotsReady ? .completed : .pending,
-                            progress: syncManager.totalCountriesRequiringSnapshots > 0 ? Double(syncManager.countriesWithSnapshots) / Double(syncManager.totalCountriesRequiringSnapshots) : 0.0,
-                            operation: syncManager.totalCountriesRequiringSnapshots > 0 ? "Creating snapshots for \(syncManager.totalCountriesRequiringSnapshots) countries..." : "Preparing station snapshots...",
-                            currentCount: syncManager.countriesWithSnapshots,
-                            totalCount: syncManager.totalCountriesRequiringSnapshots
-                        )
-                        
-                        SyncStatusItem(
-                            title: "User Preferences",
-                            status: syncManager.userPreferencesStatus,
-                            progress: syncManager.userPreferencesProgress
-                        )
-                        
-                        // FIXED HEIGHT: Compact feed parsing progress (reduced height)
-                        Group {
-                            if syncManager.isParsingFeeds {
-                                FeedParsingProgressItem(
-                                    progress: syncManager.feedParsingProgress,
-                                    message: syncManager.feedParsingMessage
-                                )
-                                .scaleEffect(0.85)
-                            } else {
-                                // Invisible placeholder with minimal height
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .frame(height: 1)
-                                    .opacity(0)
-                            }
-                        }
-                        .frame(height: 32) // Reduced height for feed parsing section
-                        
-                        // FIXED HEIGHT: Compact cross-device progress (reduced to 1 item max)
-                        Group {
-                            if syncManager.isReceivingCrossDeviceProgress {
-                                let feedProgressItems = Array(syncManager.crossDeviceFeedProgress.values)
-                                if !feedProgressItems.isEmpty {
-                                    CrossDeviceFeedProgressItem(feedProgress: feedProgressItems[0])
-                                        .scaleEffect(0.85)
-                                } else {
-                                    Rectangle()
-                                        .fill(Color.clear)
-                                        .frame(height: 1)
-                                        .opacity(0)
-                                }
-                            } else {
-                                // Minimal invisible placeholder
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .frame(height: 1)
-                                    .opacity(0)
-                            }
-                        }
-                        .frame(height: 40) // Reduced height for cross-device section (1 item max)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    // FIXED HEIGHT: Compact active operation text
-                    Group {
-                        if syncManager.isSyncing {
-                            let activeOperation = getActiveOperation()
-                            if !activeOperation.isEmpty {
-                                Text(activeOperation)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 12)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                            } else {
-                                // Minimal invisible placeholder
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .frame(height: 1)
-                                    .opacity(0)
-                            }
-                        } else {
-                            // Minimal invisible placeholder
-                            Rectangle()
-                                .fill(Color.clear)
-                                .frame(height: 1)
-                                .opacity(0)
-                        }
-                    }
-                    .frame(minHeight: 16, maxHeight: 32) // Allow text expansion for longer messages
+                // Main content card
+                VStack(spacing: 20) {
+                    headerSection
+                    overallProgressSection
+                    syncItemsSection
+                    activeOperationSection
                 }
-                .padding(16)
+                .padding(24)
                 .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(.regularMaterial)
-                        .shadow(radius: 8)
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: 10)
                 )
-                .padding(.horizontal, 32)
-                .scaleEffect(isVisible ? 1.0 : 0.8)
+                .padding(.horizontal, 40)
+                .scaleEffect(isVisible ? 1.0 : 0.9)
                 .opacity(isVisible ? 1.0 : 0.0)
-                .animation(.spring(response: 0.6, dampingFraction: 0.8), value: isVisible)
             }
-            .onAppear {
+            .animation(.spring(response: 0.5, dampingFraction: 0.8), value: isVisible)
+            .onAppear { 
                 isVisible = true
-                animateProgress = true
+                animateIcon = true
             }
-            .onDisappear {
+            .onDisappear { 
                 isVisible = false
-                animateProgress = false
+                animateIcon = false
             }
         }
-    }
-    
-    private func getActiveOperation() -> String {
-        // Return the most relevant active operation message
-        if syncManager.radioStationsStatus == .inProgress && !syncManager.radioStationsOperation.isEmpty {
-            return syncManager.radioStationsOperation
-        } else if syncManager.podcastFeedsStatus == .inProgress && !syncManager.podcastFeedsOperation.isEmpty {
-            return syncManager.podcastFeedsOperation
-        } else if syncManager.episodeStatesStatus == .inProgress && !syncManager.episodeStatesOperation.isEmpty {
-            return syncManager.episodeStatesOperation
-        } else if syncManager.artworkDownloadsStatus == .inProgress && !syncManager.artworkDownloadsOperation.isEmpty {
-            return syncManager.artworkDownloadsOperation
-        } else if syncManager.userPreferencesStatus == .inProgress && !syncManager.userPreferencesOperation.isEmpty {
-            return syncManager.userPreferencesOperation
-        }
-        return ""
     }
 }
 
-// MARK: - Feed Parsing Progress Item
+// MARK: - View Components
 
-struct FeedParsingProgressItem: View {
-    let progress: Double
-    let message: String
+extension DataSyncProgressView {
     
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .foregroundColor(.blue)
-                    .font(.subheadline)
-                    .frame(width: 20)
-                
-                Text("Feed Parsing")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+    /// Determines if the progress view should be shown
+    private var shouldShowProgressView: Bool {
+        syncManager.isSyncing && !syncManager.isFreshInstallUIReady
+    }
+    
+    /// Header section with app icon and title
+    private var headerSection: some View {
+        VStack(spacing: 12) {
+            // Animated sync icon
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(.blue.gradient)
+                .rotationEffect(.degrees(animateIcon ? 360 : 0))
+                .animation(
+                    .linear(duration: 2.0).repeatForever(autoreverses: false),
+                    value: animateIcon
+                )
+            
+            VStack(spacing: 4) {
+                Text("Setting Up Your App")
+                    .font(.title2)
+                    .fontWeight(.semibold)
                     .foregroundColor(.primary)
                 
-                Spacer()
-                
-                Text("\(Int(progress * 100))%")
+                Text("Syncing your data from iCloud...")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    /// Overall progress section
+    private var overallProgressSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("Overall Progress")
                     .font(.caption)
                     .fontWeight(.medium)
                     .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Text("\(Int(syncManager.overallProgress * 100))%")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
             }
             
-            // Progress bar
-            ProgressView(value: progress)
-                .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                .frame(height: 4)
+            ModernProgressBar(progress: syncManager.overallProgress)
+                .frame(height: 6)
+        }
+    }
+    
+    /// All sync items section
+    private var syncItemsSection: some View {
+        VStack(spacing: 12) {
+            // Core sync items
+            SyncItem(
+                title: "Radio Stations",
+                icon: "radio",
+                status: syncManager.radioStationsStatus,
+                progress: syncManager.radioStationsProgress,
+                operation: syncManager.radioStationsOperation,
+                currentCount: syncManager.radioStationsCurrentCount,
+                totalCount: syncManager.radioStationsTotalCount
+            )
             
-            // Parsing message
-            if !message.isEmpty {
-                Text(message)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            SyncItem(
+                title: "Podcast Feeds",
+                icon: "podcast",
+                status: syncManager.podcastFeedsStatus,
+                progress: syncManager.podcastFeedsProgress,
+                operation: syncManager.podcastFeedsOperation,
+                currentCount: syncManager.podcastFeedsCurrentCount,
+                totalCount: syncManager.podcastFeedsTotalCount
+            )
+            
+            SyncItem(
+                title: "Episode States",
+                icon: "doc.text",
+                status: syncManager.episodeStatesStatus,
+                progress: syncManager.episodeStatesProgress,
+                operation: syncManager.episodeStatesOperation,
+                currentCount: syncManager.feedsWithSnapshots,
+                totalCount: max(syncManager.totalFeedsRequiringSnapshots, syncManager.episodeStatesTotalCount)
+            )
+            
+            SyncItem(
+                title: "Station Snapshots",
+                icon: "photo.stack",
+                status: syncManager.stationSnapshotsReady ? .completed : .pending,
+                progress: calculateSnapshotProgress(),
+                operation: getSnapshotOperation(),
+                currentCount: syncManager.countriesWithSnapshots,
+                totalCount: syncManager.totalCountriesRequiringSnapshots
+            )
+            
+            SyncItem(
+                title: "Artwork Downloads",
+                icon: "photo",
+                status: syncManager.artworkDownloadsStatus,
+                progress: syncManager.artworkDownloadsProgress,
+                operation: syncManager.artworkDownloadsOperation,
+                currentCount: syncManager.artworkDownloadsCurrentCount,
+                totalCount: syncManager.artworkDownloadsTotalCount
+            )
+            
+            SyncItem(
+                title: "User Preferences",
+                icon: "gear",
+                status: syncManager.userPreferencesStatus,
+                progress: syncManager.userPreferencesProgress,
+                operation: syncManager.userPreferencesOperation
+            )
+            
+            // Dynamic items
+            if syncManager.isParsingFeeds {
+                FeedParsingItem(
+                    progress: syncManager.feedParsingProgress,
+                    message: syncManager.feedParsingMessage
+                )
+            }
+            
+            if syncManager.isReceivingCrossDeviceProgress {
+                CrossDeviceItem(feedProgress: Array(syncManager.crossDeviceFeedProgress.values).first)
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.blue.opacity(0.1))
-        )
+    }
+    
+    /// Active operation section
+    private var activeOperationSection: some View {
+        Group {
+            if let activeOp = getActiveOperation(), !activeOp.isEmpty {
+                Text(activeOp)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 8)
+            }
+        }
     }
 }
 
-struct DetailedSyncStatusItem: View {
+// MARK: - Helper Methods
+
+extension DataSyncProgressView {
+    
+    private func calculateSnapshotProgress() -> Double {
+        guard syncManager.totalCountriesRequiringSnapshots > 0 else { return 0.0 }
+        return Double(syncManager.countriesWithSnapshots) / Double(syncManager.totalCountriesRequiringSnapshots)
+    }
+    
+    private func getSnapshotOperation() -> String {
+        if syncManager.totalCountriesRequiringSnapshots > 0 {
+            return "Creating snapshots for \(syncManager.totalCountriesRequiringSnapshots) countries..."
+        }
+        return "Preparing station snapshots..."
+    }
+    
+    private func getActiveOperation() -> String? {
+        let operations = [
+            (syncManager.radioStationsStatus, syncManager.radioStationsOperation),
+            (syncManager.podcastFeedsStatus, syncManager.podcastFeedsOperation),
+            (syncManager.episodeStatesStatus, syncManager.episodeStatesOperation),
+            (syncManager.artworkDownloadsStatus, syncManager.artworkDownloadsOperation),
+            (syncManager.userPreferencesStatus, syncManager.userPreferencesOperation)
+        ]
+        
+        return operations
+            .first { $0.0 == .inProgress && !$0.1.isEmpty }?
+            .1
+    }
+}
+
+// MARK: - Supporting Views
+
+/// Modern progress bar with gradient fill
+struct ModernProgressBar: View {
+    let progress: Double
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                // Background track
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.secondary.opacity(0.2))
+                
+                // Progress fill with gradient
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue, .purple],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: geometry.size.width * max(0, min(1, progress)))
+                    .animation(.easeInOut(duration: 0.3), value: progress)
+            }
+        }
+    }
+}
+
+/// Individual sync item component
+struct SyncItem: View {
     let title: String
+    let icon: String
     let status: DataSyncStatus
     let progress: Double
     let operation: String
-    let currentCount: Int
-    let totalCount: Int
+    let currentCount: Int?
+    let totalCount: Int?
+    
+    init(title: String, icon: String, status: DataSyncStatus, progress: Double, operation: String = "", currentCount: Int? = nil, totalCount: Int? = nil) {
+        self.title = title
+        self.icon = icon
+        self.status = status
+        self.progress = progress
+        self.operation = operation
+        self.currentCount = currentCount
+        self.totalCount = totalCount
+    }
     
     var body: some View {
         VStack(spacing: 8) {
+            // Header row
             HStack(spacing: 12) {
-                // Status icon
-                statusIcon
-                    .font(.body)
+                // Icon
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(iconColor)
                     .frame(width: 20)
                 
                 // Title
@@ -301,213 +290,187 @@ struct DetailedSyncStatusItem: View {
                 
                 Spacer()
                 
-                // Count indicator
-                if totalCount > 0 {
-                    Text("\(currentCount)/\(totalCount)")
-                        .font(.caption)
+                // Count badge
+                if let current = currentCount, let total = totalCount, total > 0 {
+                    Text("\(current)/\(total)")
+                        .font(.caption2)
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(4)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 
-                // Progress indicator
-                Group {
-                    switch status {
-                    case .none:
-                        Text("Ready")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    case .pending:
-                        Text("Pending")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    case .inProgress:
-                        HStack(spacing: 4) {
-                            Text("\(Int(progress * 100))%")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                            ProgressView()
-                                .scaleEffect(0.6)
-                        }
-                    case .completed:
-                        Text("Done")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.green)
-                    case .failed:
-                        Text("Error")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.red)
-                    }
-                }
+                // Status indicator
+                statusIndicator
             }
             
-            // FIXED HEIGHT: Progress bar (always reserve space)
-            Group {
-                if status == .inProgress {
-                    ProgressView(value: progress)
-                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                        .frame(height: 4)
-                } else {
-                    Rectangle()
-                        .fill(Color.clear)
-                        .frame(height: 4)
-                        .opacity(0)
-                }
+            // Progress bar (only show when in progress)
+            if status == .inProgress {
+                ModernProgressBar(progress: progress)
+                    .frame(height: 3)
             }
             
-            // FIXED HEIGHT: Operation description (always reserve space)
-            Group {
-                if !operation.isEmpty {
-                    Text(operation)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                } else {
-                    Rectangle()
-                        .fill(Color.clear)
-                        .frame(height: 16)
-                        .opacity(0)
-                }
+            // Operation text (only show when not empty)
+            if !operation.isEmpty {
+                Text(operation)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(minHeight: 16, maxHeight: 32)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+    }
+    
+    private var iconColor: Color {
+        switch status {
+        case .completed: return .green
+        case .inProgress: return .blue
+        case .failed: return .red
+        default: return .secondary
+        }
     }
     
     @ViewBuilder
-    private var statusIcon: some View {
+    private var statusIndicator: some View {
         switch status {
-        case .none:
-            Image(systemName: "checkmark.circle")
-                .foregroundColor(.green)
-        case .pending:
-            Image(systemName: "clock")
+        case .none, .pending:
+            Text("Pending")
+                .font(.caption2)
                 .foregroundColor(.secondary)
+                
         case .inProgress:
-            Image(systemName: "arrow.2.circlepath")
-                .foregroundColor(.blue)
-                .rotationEffect(.degrees(Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 2) * 180))
-                .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: status)
+            HStack(spacing: 4) {
+                Text("\(Int(progress * 100))%")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                
+                ProgressView()
+                    .scaleEffect(0.7)
+            }
+            
         case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.green)
+                
+                Text("Done")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.green)
+            }
+            
         case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.red)
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.caption2)
+                    .foregroundColor(.red)
+                
+                Text("Error")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.red)
+            }
         }
     }
 }
 
-struct SyncStatusItem: View {
-    let title: String
-    let status: DataSyncStatus
+/// Feed parsing progress item
+struct FeedParsingItem: View {
     let progress: Double
+    let message: String
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Status icon
-            statusIcon
-                .font(.body)
-                .frame(width: 20)
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.orange)
+                    .frame(width: 20)
+                
+                Text("Feed Parsing")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                Text("\(Int(progress * 100))%")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+            }
             
-            // Title
-            Text(title)
-                .font(.subheadline)
-                .foregroundColor(.primary)
+            ModernProgressBar(progress: progress)
+                .frame(height: 3)
             
-            Spacer()
-            
-            // Progress indicator
-            Group {
-                                switch status {
-                    case .none:
-                        Text("Ready")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    case .pending:
-                    Text("Pending")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                case .inProgress:
-                    HStack(spacing: 4) {
-                        Text("\(Int(progress * 100))%")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                        ProgressView()
-                            .scaleEffect(0.6)
-                    }
-                case .completed:
-                    Text("Done")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.green)
-                case .failed:
-                    Text("Error")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.red)
-                }
+            if !message.isEmpty {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
     }
+}
+
+/// Cross-device sync progress item
+struct CrossDeviceItem: View {
+    let feedProgress: CrossDeviceFeedProgress?
     
-    @ViewBuilder
-    private var statusIcon: some View {
-        switch status {
-        case .none:
-            Image(systemName: "checkmark.circle")
-                .foregroundColor(.green)
-        case .pending:
-            Image(systemName: "clock")
-                .foregroundColor(.secondary)
-        case .inProgress:
-            Image(systemName: "arrow.2.circlepath")
-                .foregroundColor(.blue)
-                .rotationEffect(.degrees(Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 2) * 180))
-                .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: status)
-        case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-        case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.red)
+    var body: some View {
+        if let progress = feedProgress {
+            VStack(spacing: 8) {
+                HStack {
+                    Image(systemName: "icloud.and.arrow.down")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.purple)
+                        .frame(width: 20)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Cross-Device Sync")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                        
+                        Text(progress.feedTitle)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    
+                    Spacer()
+                    
+                    Text("\(Int(progress.progress * 100))%")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                }
+                
+                ModernProgressBar(progress: progress.progress)
+                    .frame(height: 3)
+                
+                Text(progress.message)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 4)
         }
     }
 }
 
-struct CustomProgressViewStyle: ProgressViewStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                // Background
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.secondary.opacity(0.2))
-                
-                // Progress fill
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue, .purple],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: geometry.size.width * (configuration.fractionCompleted ?? 0))
-                    .animation(.easeInOut(duration: 0.3), value: configuration.fractionCompleted)
-            }
-        }
-    }
-}
+// MARK: - Data Types
 
 enum DataSyncStatus {
     case none
@@ -517,78 +480,16 @@ enum DataSyncStatus {
     case failed
 }
 
-// MARK: - Cross-Device Progress Item
-
-struct CrossDeviceFeedProgressItem: View {
-    let feedProgress: CrossDeviceFeedProgress
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "icloud.and.arrow.down")
-                    .foregroundColor(.purple)
-                    .font(.subheadline)
-                    .frame(width: 20)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("📡 Cross-Device Sync")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-                    
-                    Text(feedProgress.feedTitle)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-                
-                Spacer()
-                
-                Text("\(Int(feedProgress.progress * 100))%")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-            }
-            
-            ProgressView(value: feedProgress.progress)
-                .progressViewStyle(LinearProgressViewStyle(tint: .purple))
-                .frame(height: 6)
-                .cornerRadius(3)
-            
-            Text(feedProgress.message)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.purple.opacity(0.1))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.purple.opacity(0.3), lineWidth: 1)
-        )
-    }
-}
-
 // MARK: - Preview
+
 struct DataSyncProgressView_Previews: PreviewProvider {
     static var previews: some View {
-        Group {
-            // Light mode preview
-            DataSyncProgressView()
-                .preferredColorScheme(.light)
-                .previewDisplayName("Light Mode")
-            
-            // Dark mode preview
-            DataSyncProgressView()
-                .preferredColorScheme(.dark)
-                .previewDisplayName("Dark Mode")
-        }
+        DataSyncProgressView()
+            .preferredColorScheme(.light)
+            .previewDisplayName("Light Mode")
+        
+        DataSyncProgressView()
+            .preferredColorScheme(.dark)
+            .previewDisplayName("Dark Mode")
     }
 } 

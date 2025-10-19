@@ -2434,7 +2434,8 @@ class PodcastCloudKitManager: ObservableObject {
         os_log("🔄 Fetching all episode states from CloudKit in batches of 200", log: log, type: .info)
         
         let query = CKQuery(recordType: RecordType.episodeState, predicate: NSPredicate(value: true))
-        query.sortDescriptors = [NSSortDescriptor(key: "lastUpdated", ascending: false)]
+        // ⚡ CRITICAL FIX: Remove server-side sorting to prevent CloudKit query hang
+        query.sortDescriptors = nil
         
         var episodeStates: [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool, feedId: String?)] = [:]
         var cursor: CKQueryOperation.Cursor? = nil
@@ -2521,101 +2522,112 @@ class PodcastCloudKitManager: ObservableObject {
     
     // MARK: - Podcast Feed CloudKit Sync
     
-    /// Sync from CloudKit to local storage - fetch all podcast feeds with batching
+    /// Sync from CloudKit to local storage - fetch all podcast feeds (af75b2 working version)
     func syncFromCloudKit() async throws -> [PodcastFeed] {
+        let startTime = CFAbsoluteTimeGetCurrent()
         os_log("🔄 Starting CloudKit sync for podcast feeds", log: log, type: .info)
-        print("🔄 CLOUDKIT: Starting CloudKit sync for podcast feeds (batched)")
-        
-        // ⚡ SKIP PRE-CHECK on fresh install to avoid rate limiting issues
-        // Pre-check can timeout after manual station save, causing unnecessary delays
-        print("⚡ CLOUDKIT: Skipping pre-check query (causes rate limiting on fresh install)")
-        print("⚡ CLOUDKIT: Proceeding directly to batched feed fetch")
-        os_log("⚡ Skipping pre-check - proceeding with full sync", log: log, type: .info)
-        
-        var allFeeds: [PodcastFeed] = []
-        var cursor: CKQueryOperation.Cursor? = nil
-        var batchCount = 0
+        print("⚡ TIMING: CloudKit sync started")
+        print("🔍 DETAILED LOG: PodcastCloudKitManager.syncFromCloudKit() - Creating CloudKit query")
         
         let query = CKQuery(recordType: RecordType.podcastFeed, predicate: NSPredicate(value: true))
-        query.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
+        // ⚡ CRITICAL FIX: Remove server-side sorting to prevent CloudKit query hang
+        // Server-side sorting can cause indefinite hangs - we'll sort locally instead
+        query.sortDescriptors = nil
+        print("🔍 DETAILED LOG: Created query for recordType: \(RecordType.podcastFeed)")
+        print("🔍 DETAILED LOG: Query predicate: \(query.predicate)")
+        print("🔍 DETAILED LOG: ⚡ HANG FIX: Removed server-side sorting to prevent query hang")
+        print("🔍 DETAILED LOG: Query sort descriptors: \(query.sortDescriptors ?? []) (should be empty)")
         
-        repeat {
-            batchCount += 1
-            print("🔄 CLOUDKIT: Fetching batch \(batchCount)...")
+        do {
+            print("🔍 DETAILED LOG: About to execute privateDatabase.records(matching: query)")
             
-            // Use withTimeout for better cancellation handling
-            do {
-                // ⚡ CRITICAL: Use MUCH longer timeout for fresh installs (user may have actual data in CloudKit)
-                // Fresh install needs 60s per batch to fetch data from other devices
-                // Regular sync can use 10s timeout (data should be cached)
-                let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-                let timeoutSeconds: TimeInterval = isFreshInstall ? 60.0 : 10.0
-                print("⏱️ CLOUDKIT: Executing CloudKit query for batch \(batchCount) with \(Int(timeoutSeconds))s timeout (fresh install: \(isFreshInstall))...")
-                let result: ([(CKRecord.ID, Result<CKRecord, Error>)], CKQueryOperation.Cursor?)? = try await withTimeout(seconds: timeoutSeconds) {
-                    if cursor == nil {
-                        return try await self.privateDatabase.records(matching: query, resultsLimit: 50)
-                    } else {
-                        return try await self.privateDatabase.records(continuingMatchFrom: cursor!)
-                    }
-                }
-                
-                guard let (matchResults, nextCursor) = result else {
-                    print("⚠️ CLOUDKIT: Query returned nil - should not happen")
-                    if allFeeds.isEmpty {
-                        return []
-                    }
-                    break
-                }
-                
-                print("✅ CLOUDKIT: Batch \(batchCount) completed, got \(matchResults.count) results")
-                
-                var batchFeeds: [PodcastFeed] = []
-                
-                // Process records in this batch
-                for (recordID, recordResult) in matchResults {
-                    switch recordResult {
-                    case .success(let record):
-                        if let feed = try? await parsePodcastFeedRecord(record) {
-                            batchFeeds.append(feed)
-                            os_log("✅ Parsed feed: %@", log: log, type: .debug, feed.title)
-                        } else {
-                            os_log("⚠️ Failed to parse feed record: %@", log: log, type: .default, recordID.recordName)
-                        }
-                    case .failure(let error):
-                        os_log("❌ Failed to fetch record %@: %@", log: log, type: .error, recordID.recordName, error.localizedDescription)
-                    }
-                }
-                
-                allFeeds.append(contentsOf: batchFeeds)
-                print("🔄 CLOUDKIT: Batch \(batchCount): Parsed \(batchFeeds.count) feeds (total: \(allFeeds.count))")
-                
-                cursor = nextCursor
-                
-            } catch is TimeoutError {
-                let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-                let timeoutUsed = isFreshInstall ? 60 : 10
-                print("⚠️ CLOUDKIT: Batch \(batchCount) timed out after \(timeoutUsed)s")
-                print("⚠️ CLOUDKIT: This usually indicates rate limiting or network issues")
-                if allFeeds.isEmpty {
-                    print("⚠️ CLOUDKIT: No feeds fetched - returning empty to trigger local fallback")
-                    return []
-                }
-                print("⚡ CLOUDKIT: Returning \(allFeeds.count) feeds from \(batchCount - 1) completed batches")
-                break
-            } catch {
-                print("❌ CLOUDKIT: Batch \(batchCount) failed: \(error.localizedDescription)")
-                if allFeeds.isEmpty {
-                    throw error
-                }
-                print("⚡ CLOUDKIT: Returning \(allFeeds.count) feeds from partial sync")
-                break
+            // Update progress to show CloudKit query is starting
+            Task { @MainActor in
+                await DataSyncManager.shared.updatePodcastFeedProgress(
+                    currentCount: 0,
+                    totalCount: 1,
+                    progress: 0.15,
+                    operation: "Executing CloudKit query..."
+                )
             }
             
-        } while cursor != nil
-        
-        print("🌟 CLOUDKIT: Successfully synced \(allFeeds.count) podcast feeds in \(batchCount) batch(es)")
-        os_log("🌟 Successfully synced %d podcast feeds from CloudKit in %d batches", log: log, type: .info, allFeeds.count, batchCount)
-        return allFeeds
+            let queryStartTime = CFAbsoluteTimeGetCurrent()
+            
+            let (matchResults, _) = try await privateDatabase.records(matching: query)
+            
+            let queryTime = CFAbsoluteTimeGetCurrent() - queryStartTime
+            print("⚡ TIMING: CloudKit query completed in \(String(format: "%.2f", queryTime))s - found \(matchResults.count) records")
+            print("🔍 DETAILED LOG: CloudKit query returned \(matchResults.count) results")
+            
+            // Update progress to show query completed
+            Task { @MainActor in
+                await DataSyncManager.shared.updatePodcastFeedProgress(
+                    currentCount: 0,
+                    totalCount: matchResults.count,
+                    progress: 0.25,
+                    operation: "Processing \(matchResults.count) feed records..."
+                )
+            }
+            
+            var feeds: [PodcastFeed] = []
+            let parseStartTime = CFAbsoluteTimeGetCurrent()
+            print("🔍 DETAILED LOG: Starting to parse \(matchResults.count) records")
+            
+            for (index, (recordID, recordResult)) in matchResults.enumerated() {
+                print("🔍 DETAILED LOG: Processing record \(index + 1)/\(matchResults.count) - ID: \(recordID.recordName)")
+                
+                // Update progress every record to show activity
+                let progress = 0.25 + (Double(index) / Double(matchResults.count)) * 0.5 // 0.25 to 0.75
+                Task { @MainActor in
+                    await DataSyncManager.shared.updatePodcastFeedProgress(
+                        currentCount: index,
+                        totalCount: matchResults.count,
+                        progress: progress,
+                        operation: "Processing feed \(index + 1)/\(matchResults.count)..."
+                    )
+                }
+                
+                switch recordResult {
+                case .success(let record):
+                    let recordParseStartTime = CFAbsoluteTimeGetCurrent()
+                    
+                    if let feed = try? await parsePodcastFeedRecord(record) {
+                        let recordParseTime = CFAbsoluteTimeGetCurrent() - recordParseStartTime
+                        feeds.append(feed)
+                        print("🔍 DETAILED LOG: ✅ Parsed feed '\(feed.title)' in \(String(format: "%.3f", recordParseTime))s")
+                        os_log("✅ Parsed feed: %@", log: log, type: .debug, feed.title)
+                    } else {
+                        let recordParseTime = CFAbsoluteTimeGetCurrent() - recordParseStartTime
+                        print("🔍 DETAILED LOG: ⚠️ Failed to parse record \(recordID.recordName) in \(String(format: "%.3f", recordParseTime))s")
+                        os_log("⚠️ Failed to parse feed record: %@", log: log, type: .default, recordID.recordName)
+                    }
+                case .failure(let error):
+                    print("🔍 DETAILED LOG: ❌ Record \(recordID.recordName) failed with error: \(error.localizedDescription)")
+                    os_log("❌ Failed to fetch record %@: %@", log: log, type: .error, recordID.recordName, error.localizedDescription)
+                }
+            }
+            
+            let parseTime = CFAbsoluteTimeGetCurrent() - parseStartTime
+            print("⚡ TIMING: Parsing completed in \(String(format: "%.2f", parseTime))s")
+            
+            // ⚡ LOCAL SORTING: Sort feeds by order since we removed server-side sorting
+            let sortStartTime = CFAbsoluteTimeGetCurrent()
+            let sortedFeeds = feeds.sorted { $0.order < $1.order }
+            let sortTime = CFAbsoluteTimeGetCurrent() - sortStartTime
+            print("⚡ TIMING: Local sorting completed in \(String(format: "%.3f", sortTime))s")
+            
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            print("⚡ TIMING: Total CloudKit sync completed in \(String(format: "%.2f", totalTime))s")
+            
+            os_log("🌟 Successfully synced %d podcast feeds from CloudKit in %.2fs", log: log, type: .info, sortedFeeds.count, totalTime)
+            return sortedFeeds
+            
+        } catch {
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            print("⚡ TIMING: CloudKit sync failed after \(String(format: "%.2f", totalTime))s")
+            os_log("❌ CloudKit sync failed: %@", log: log, type: .error, error.localizedDescription)
+            throw error
+        }
     }
     
     /// Parse a CloudKit record into a PodcastFeed
@@ -2630,21 +2642,10 @@ class PodcastCloudKitManager: ObservableObject {
         let descriptionText = record["descriptionText"] as? String
         let order = record["order"] as? Int ?? 0
         
-        // Handle artwork/icon data
-        var iconData: String?
-        var imageData: Data?
-        
-        if let iconAsset = record["iconData"] as? CKAsset,
-           let iconURL = iconAsset.fileURL {
-            imageData = try? Data(contentsOf: iconURL)
-            iconData = imageData?.base64EncodedString()
-        }
-        
-        if let imageAsset = record["image"] as? CKAsset,
-           let imageURL = imageAsset.fileURL,
-           imageData == nil { // Only use if iconData wasn't found
-            imageData = try? Data(contentsOf: imageURL)
-        }
+        // ⚡ PERFORMANCE: Skip artwork loading during sync for instant CloudKit fetch
+        // Artwork will be loaded lazily when feeds are displayed in the UI
+        // This makes CloudKit sync with 4 feeds nearly instantaneous
+        print("⚡ FAST SYNC: Skipping artwork loading for '\(title)' - will load lazily")
         
         return PodcastFeed(
             id: record.recordID.recordName,
@@ -2652,8 +2653,8 @@ class PodcastCloudKitManager: ObservableObject {
             url: url,
             artworkUrl: artworkUrl,
             description: descriptionText,
-            iconData: iconData,
-            imageData: imageData,
+            iconData: nil, // Will be loaded lazily
+            imageData: nil, // Will be loaded lazily
             episodes: [], // Episodes will be loaded separately via RSS
             order: order
         )

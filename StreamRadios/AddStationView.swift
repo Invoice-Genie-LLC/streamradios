@@ -321,10 +321,12 @@ struct AddStationView: View {
         let success = viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
         
         if success {
-            // CoreData persisted inside addStation; refresh UI and dismiss
-            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
-            presentedSheet = nil
-            onSave?(selectedCountry)
+            // CRITICAL FIX: Give UI a moment to update before dismissing sheet
+            // This ensures the new station appears in RadioStationListView immediately
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                presentedSheet = nil
+                onSave?(selectedCountry)
+            }
         } else {
             alertMessage = "A station with this URL has already been added. Please use a different URL."
             showAlert = true

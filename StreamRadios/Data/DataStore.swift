@@ -604,7 +604,11 @@ class DataStore {
     
     // Add a method to fetch existing station URLs from CloudKit using modern API with pagination
     private func fetchExistingStationURLs(completion: @escaping (Set<String>, Error?) -> Void) {
-        Task {
+        // CRITICAL FIX: Capture privateDatabase before detached task
+        let database = self.privateDatabase
+        
+        // CRITICAL FIX: Use Task.detached to run on background thread (not main thread)
+        Task.detached(priority: .userInitiated) {
             do {
                 print("📡 🔍 URL CHECK: Starting paginated fetch of ALL existing station URLs from CloudKit...")
                 let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
@@ -620,10 +624,10 @@ class DataStore {
                     
                     if let currentCursor = currentCursor {
                         // Continue from cursor
-                        (matchResults, cursor) = try await privateDatabase.records(continuingMatchFrom: currentCursor)
+                        (matchResults, cursor) = try await database.records(continuingMatchFrom: currentCursor)
                     } else {
                         // Initial query
-                        (matchResults, cursor) = try await privateDatabase.records(matching: query)
+                        (matchResults, cursor) = try await database.records(matching: query)
                     }
                     
                     allMatchResults.append(contentsOf: matchResults)
@@ -651,14 +655,13 @@ class DataStore {
                     print("📡 📋 Sample existing URLs: \(Array(existingUrls.prefix(3)).joined(separator: ", "))")
                 }
                 
-                await MainActor.run {
-                    completion(existingUrls, nil)
-                }
+                // CRITICAL FIX: Don't force completion onto main thread
+                // Let the caller decide which thread to use
+                completion(existingUrls, nil)
             } catch {
                 print("📡 ❌ URL ERROR: Failed to fetch existing station URLs: \(error.localizedDescription)")
-                await MainActor.run {
-                    completion([], error)
-                }
+                // CRITICAL FIX: Don't force completion onto main thread
+                completion([], error)
             }
         }
     }
@@ -677,52 +680,48 @@ class DataStore {
         
         // Fetch existing station URLs to prevent duplicates
         fetchExistingStationURLs { existingURLs, error in
+            // CRITICAL FIX: This closure now runs OFF main thread (fetchExistingStationURLs doesn't force MainActor)
             guard error == nil else {
                 print("⚠️ Error fetching existing station URLs, proceeding with save anyway: \(error?.localizedDescription ?? "Unknown error")")
-                self.processAllStations(stations, completion: completion)
+                DispatchQueue.main.async {
+                    self.processAllStations(stations, completion: completion)
+                }
                 return
             }
             
             print("📡 🔍 Found \(existingURLs.count) existing station URLs in CloudKit")
+            print("📡 🧵 THREAD CHECK: Filtering on thread: \(Thread.current)")
+            print("📡 🧵 Is main thread: \(Thread.isMainThread)")
             
-            // Filter out stations that already exist by URL
-            let newStations = stations.filter { station in
-                // Normalize URLs for comparison
-                let normalizedURL = station.url.lowercased()
-                let normalizedExistingURLs = existingURLs.map { $0.lowercased() }
+            // ⚡ PERFORMANCE: Move filtering to background thread to prevent main thread blocking
+            Task.detached(priority: .userInitiated) {
+                // Pre-normalize existing URLs once for efficiency
+                let normalizedExistingURLs = Set(existingURLs.map { $0.lowercased() })
                 
-                // Also check for protocol variations (http vs https)
-                let urlWithoutProtocol = normalizedURL
-                    .replacingOccurrences(of: "https://", with: "")
-                    .replacingOccurrences(of: "http://", with: "")
-                
-                let hasURLDuplicate = normalizedExistingURLs.contains(normalizedURL) ||
-                                    normalizedExistingURLs.contains { existingURL in
-                                        let existingWithoutProtocol = existingURL
-                                            .replacingOccurrences(of: "https://", with: "")
-                                            .replacingOccurrences(of: "http://", with: "")
-                                        return existingWithoutProtocol == urlWithoutProtocol
-                                    }
-                
-                if hasURLDuplicate {
-                    print("📻 🚫 DUPLICATE PREVENTED: Manual station '\(station.name)' (URL: \(station.url)) already exists in CloudKit, skipping")
-                    return false
+                // Filter out stations that already exist by URL (simplified for performance)
+                let newStations = stations.filter { station in
+                    let normalizedURL = station.url.lowercased()
+                    let isDuplicate = normalizedExistingURLs.contains(normalizedURL)
+                    
+                    if isDuplicate {
+                        print("📻 🚫 DUPLICATE PREVENTED: Manual station '\(station.name)' already exists in CloudKit, skipping")
+                    }
+                    
+                    return !isDuplicate
                 }
                 
-                return true
+                let duplicatesFiltered = stations.count - newStations.count
+                print("📡 📊 DUPLICATE SUMMARY: Filtered \(duplicatesFiltered) duplicate stations, will save \(newStations.count) new stations")
+                
+                if newStations.isEmpty {
+                    print("📡 ✅ ALL DUPLICATES: All \(stations.count) manual stations already exist in CloudKit")
+                    completion(true, [])
+                    return
+                }
+                
+                // Save only the non-duplicate stations
+                self.processAllStations(newStations, completion: completion)
             }
-            
-            let duplicatesFiltered = stations.count - newStations.count
-            print("📡 📊 DUPLICATE SUMMARY: Filtered \(duplicatesFiltered) duplicate manual stations, will save \(newStations.count) new stations")
-            
-            if newStations.isEmpty {
-                print("📡 ✅ ALL DUPLICATES: All \(stations.count) manual stations already exist in CloudKit (duplicates prevented)")
-                completion(true, [])
-                return
-            }
-            
-            print("📡 🆕 SAVING NEW STATIONS: Saving \(newStations.count) unique manual stations to CloudKit")
-            self.processAllStations(newStations, completion: completion)
         }
     }
     
