@@ -17,6 +17,7 @@ struct DataSyncProgressView: View {
                 // Main content card
                 VStack(spacing: 20) {
                     headerSection
+                    userGuidanceSection
                     overallProgressSection
                     syncItemsSection
                     activeOperationSection
@@ -77,6 +78,43 @@ extension DataSyncProgressView {
                     .foregroundColor(.secondary)
             }
         }
+    }
+    
+    /// User guidance section with important sync information
+    private var userGuidanceSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.blue)
+                
+                Text("Please Wait")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("• Keep the app open during sync")
+                Text("• Don't close or switch apps")
+                Text("• Sync time depends on your feed count")
+                Text("• Large collections may take several minutes")
+            }
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.blue.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                )
+        )
     }
     
     /// Overall progress section
