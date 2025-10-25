@@ -1680,7 +1680,12 @@ class PodcastViewModel: ObservableObject {
             }
             
             // Update UI for this chunk
-            var currentEpisodesMap = Dictionary(uniqueKeysWithValues: currentEpisodes.enumerated().map { ($1.id, $0) })
+            // 🛡️ DUPLICATE PROTECTION: Handle duplicate episode IDs gracefully
+            var currentEpisodesMap: [String: Int] = [:]
+            for (index, episode) in currentEpisodes.enumerated() {
+                // Use the latest occurrence (overwrites previous if duplicate)
+                currentEpisodesMap[episode.id] = index
+            }
             var updatedCurrentEpisodes = currentEpisodes
             
             // Process updates efficiently (reduced operations for performance)
@@ -7811,6 +7816,11 @@ class PodcastViewModel: ObservableObject {
                 print("⚠️ Failed to cleanup duplicate episodes: \(error)")
             }
             
+            // 🛡️ DUPLICATE PROTECTION: Remove duplicate episodes from Core Data
+            // This prevents crashes when creating dictionaries with duplicate keys
+            await PodcastCoreDataManager.shared.removeDuplicateEpisodes()
+            print("✅ Removed duplicate episodes from Core Data")
+            
             // After CloudKit sync, check if any feeds need episode refreshing
             await refreshFeedsWithoutEpisodes()
             
@@ -9250,7 +9260,11 @@ extension PodcastViewModel {
         podcastFeedOrder = newOrder
         
         // Reorder the podcastFeeds array to match the new order
-        let feedLookup = Dictionary(uniqueKeysWithValues: podcastFeeds.map { ($0.id, $0) })
+        // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs
+        var feedLookup: [String: PodcastFeed] = [:]
+        for feed in podcastFeeds {
+            feedLookup[feed.id] = feed
+        }
         var reorderedFeeds: [PodcastFeed] = []
         
         for feedId in newOrder {
@@ -9486,7 +9500,13 @@ extension PodcastViewModel {
         
         do {
             let existingFeeds = try context.fetch(fetchRequest)
-            let existingDict = Dictionary(uniqueKeysWithValues: existingFeeds.map { ($0.id!, $0) })
+            // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs in Core Data
+            var existingDict: [String: FeedModel] = [:]
+            for feed in existingFeeds {
+                if let feedId = feed.id {
+                    existingDict[feedId] = feed
+                }
+            }
             
             for (index, feed) in podcastFeeds.enumerated() {
                 if let existingFeed = existingDict[feed.id] {

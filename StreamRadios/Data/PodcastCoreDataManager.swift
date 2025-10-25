@@ -907,6 +907,62 @@ class PodcastCoreDataManager {
         }
     }
     
+    /// Remove duplicate episodes from Core Data (keeps the most recent one)
+    func removeDuplicateEpisodes() async {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        await backgroundContext.perform {
+            do {
+                os_log("🧹 DUPLICATE CLEANUP: Starting duplicate episode removal", log: self.log, type: .info)
+                
+                // Fetch all episodes
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                let allEpisodes = try backgroundContext.fetch(fetchRequest)
+                
+                // Group episodes by ID
+                var episodesByID: [String: [PodcastModel]] = [:]
+                for episode in allEpisodes {
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    
+                    if episodesByID[episodeId] == nil {
+                        episodesByID[episodeId] = []
+                    }
+                    episodesByID[episodeId]?.append(episode)
+                }
+                
+                // Find and remove duplicates
+                var deletedCount = 0
+                for (episodeId, episodes) in episodesByID {
+                    if episodes.count > 1 {
+                        os_log("🚨 DUPLICATE FOUND: Episode ID '%@' has %d duplicates", log: self.log, type: .info, episodeId, episodes.count)
+                        
+                        // Sort by object ID to keep the most recent one (deterministic)
+                        let sortedEpisodes = episodes.sorted { $0.objectID.uriRepresentation().absoluteString > $1.objectID.uriRepresentation().absoluteString }
+                        
+                        // Keep the first one (most recent), delete the rest
+                        for index in 1..<sortedEpisodes.count {
+                            let episodeToDelete = sortedEpisodes[index]
+                            os_log("🧹 DUPLICATE CLEANUP: Deleting duplicate episode ID '%@' (keeping most recent)", log: self.log, type: .info, episodeId)
+                            backgroundContext.delete(episodeToDelete)
+                            deletedCount += 1
+                        }
+                    }
+                }
+                
+                // Save the deletions
+                if backgroundContext.hasChanges {
+                    try backgroundContext.save()
+                    os_log("✅ DUPLICATE CLEANUP: Successfully removed %d duplicate episodes from Core Data", log: self.log, type: .info, deletedCount)
+                } else {
+                    os_log("✅ DUPLICATE CLEANUP: No duplicates found", log: self.log, type: .info)
+                }
+                
+            } catch {
+                os_log("❌ DUPLICATE CLEANUP ERROR: Failed to remove duplicates: %@", log: self.log, type: .error, error.localizedDescription)
+            }
+        }
+    }
+    
 }
 
 // MARK: - Error Types

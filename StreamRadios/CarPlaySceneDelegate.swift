@@ -1373,7 +1373,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Order feeds the same way as PodcastListView using podcastFeedOrder
         let orderedFeedIds = podcastViewModel.podcastFeedOrder
-        let feedsById = Dictionary(uniqueKeysWithValues: allPodcastFeeds.map { ($0.id, $0) })
+        // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs
+        var feedsById: [String: PodcastFeed] = [:]
+        for feed in allPodcastFeeds {
+            feedsById[feed.id] = feed
+        }
         
         // First add feeds in the user's custom order
         var orderedFeeds: [PodcastFeed] = []
@@ -3197,7 +3201,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Order feeds the same way as PodcastListView using podcastFeedOrder
         let orderedFeedIds = podcastViewModel.podcastFeedOrder
-        let feedsById = Dictionary(uniqueKeysWithValues: allPodcastFeeds.map { ($0.id, $0) })
+        // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs
+        var feedsById: [String: PodcastFeed] = [:]
+        for feed in allPodcastFeeds {
+            feedsById[feed.id] = feed
+        }
         
         // First add feeds in the user's custom order
         var orderedFeeds: [PodcastFeed] = []

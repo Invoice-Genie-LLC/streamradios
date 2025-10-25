@@ -1042,8 +1042,26 @@ class EpisodeStateManager: ObservableObject {
                 let existingEpisodes = try context.fetch(fetchRequest)
                 print("⚡ BATCH FETCH: Found \(existingEpisodes.count) existing episodes in Core Data")
                 
-                // Create a dictionary for O(1) lookup
-                let episodeDict = Dictionary(uniqueKeysWithValues: existingEpisodes.map { ($0.id ?? "", $0) })
+                // 🛡️ DUPLICATE PROTECTION: Handle duplicate episode IDs in Core Data
+                // Create a dictionary for O(1) lookup, using reduce to handle duplicates gracefully
+                var episodeDict: [String: PodcastModel] = [:]
+                var duplicateCount = 0
+                
+                for episode in existingEpisodes {
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    
+                    if episodeDict[episodeId] != nil {
+                        duplicateCount += 1
+                        print("🚨 DUPLICATE EPISODE: Found duplicate episode ID '\(episodeId)' in Core Data - using latest occurrence")
+                    }
+                    
+                    // Use the latest occurrence (overwrites previous if duplicate)
+                    episodeDict[episodeId] = episode
+                }
+                
+                if duplicateCount > 0 {
+                    print("🚨 DUPLICATE CLEANUP: Found \(duplicateCount) duplicate episode IDs in Core Data")
+                }
                 
                 // ⚡ OPTIMIZATION 3: Only update episodes that exist in Core Data
                 for episodeId in validEpisodeIds {

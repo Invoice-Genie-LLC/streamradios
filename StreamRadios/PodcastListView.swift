@@ -1310,7 +1310,11 @@ struct PodcastListView: View {
     // PERFORMANCE: Initialize all caches for fast rendering
     private func initializeCaches() {
         // Initialize feed lookup cache
-        feedLookupCache = Dictionary(uniqueKeysWithValues: viewModel.podcastFeeds.map { ($0.id, $0) })
+        // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs
+        feedLookupCache = [:]
+        for feed in viewModel.podcastFeeds {
+            feedLookupCache[feed.id] = feed
+        }
         
         // Initialize filtered caches
         cachedFilteredPodcasts = viewModel.podcastFeeds
@@ -1323,7 +1327,11 @@ struct PodcastListView: View {
     private func getFeedById(_ feedId: String) -> PodcastFeed? {
         // Update cache if needed
         if feedLookupCache.count != viewModel.podcastFeeds.count {
-            feedLookupCache = Dictionary(uniqueKeysWithValues: viewModel.podcastFeeds.map { ($0.id, $0) })
+            // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs
+            feedLookupCache = [:]
+            for feed in viewModel.podcastFeeds {
+                feedLookupCache[feed.id] = feed
+            }
         }
         return feedLookupCache[feedId]
     }

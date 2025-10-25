@@ -186,7 +186,11 @@ class CarPlayManager: ObservableObject {
         let feedOrder = podcastFeedOrder
         
         // Create a lookup dictionary for fast access
-        let feedLookup = Dictionary(uniqueKeysWithValues: podcastFeeds.map { ($0.id, $0) })
+        // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs
+        var feedLookup: [String: PodcastFeed] = [:]
+        for feed in podcastFeeds {
+            feedLookup[feed.id] = feed
+        }
         
         // Return feeds in the same order as the main app
         var orderedFeeds: [PodcastFeed] = []
