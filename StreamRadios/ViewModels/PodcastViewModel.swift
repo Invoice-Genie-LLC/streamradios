@@ -2467,28 +2467,37 @@ class PodcastViewModel: ObservableObject {
                 
                 await MainActor.run {
                     if selectedFeedId == feedId {
-                        // Apply current filter to refreshed episodes
+                        // 🛡️ MERGE FIX: Merge new episodes with existing ones instead of replacing
+                        // This prevents newly fetched episodes from disappearing when background refresh completes
+                        let existingIds = Set(currentEpisodes.map { $0.id })
+                        let newEpisodesToAdd = refreshedEpisodes.filter { !existingIds.contains($0.id) }
+                        
+                        // Merge: new episodes + existing episodes, then sort by publication date
+                        let mergedEpisodes = (newEpisodesToAdd + currentEpisodes).sorted { $0.publicationDate > $1.publicationDate }
+                        
+                        // Apply current filter to merged episodes
                         let filter = EpisodeFilter(rawValue: currentTab) ?? .all
                         let filteredEpisodes: [PodcastEpisode]
                         switch filter {
                         case .all:
-                            filteredEpisodes = refreshedEpisodes
+                            filteredEpisodes = mergedEpisodes
                         case .favorites:
-                            filteredEpisodes = refreshedEpisodes.filter { $0.state.isFavorite }
+                            filteredEpisodes = mergedEpisodes.filter { $0.state.isFavorite }
                         case .downloads:
-                            filteredEpisodes = refreshedEpisodes.filter { $0.state.isDownloaded }
+                            filteredEpisodes = mergedEpisodes.filter { $0.state.isDownloaded }
                         }
                         
-                        // Update UI with new episodes
+                        // Update UI with merged episodes
                         currentEpisodes = filteredEpisodes
+                        print("🔄 BACKGROUND REFRESH: Merged \(newEpisodesToAdd.count) new episodes with \(existingIds.count) existing - total visible: \(filteredEpisodes.count)")
                         
-                        // Update episode counts
-                        let allCount = refreshedEpisodes.count
-                        let favoritesCount = refreshedEpisodes.filter { $0.state.isFavorite }.count
-                        let downloadsCount = refreshedEpisodes.filter { $0.state.isDownloaded }.count
+                        // Update episode counts based on merged episodes (not just Core Data)
+                        let allCount = mergedEpisodes.count
+                        let favoritesCount = mergedEpisodes.filter { $0.state.isFavorite }.count
+                        let downloadsCount = mergedEpisodes.filter { $0.state.isDownloaded }.count
                         episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
                         
-                        print("🔄 BACKGROUND REFRESH: Updated UI with \(newEpisodes.count) new episodes")
+                        print("🔄 BACKGROUND REFRESH: Updated UI with \(newEpisodesToAdd.count) new episodes - counts: all=\(allCount), favorites=\(favoritesCount), downloads=\(downloadsCount)")
                     }
                 }
             } else {

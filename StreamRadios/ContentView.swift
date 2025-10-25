@@ -1699,6 +1699,14 @@ struct UnifiedPodcastPlayerView: View {
                     isPresented: $showDetailedPlayer
                 )
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ForceTabViewVisible"))) { _ in
+                // 🏠 HOME BUTTON FIX: Close the detailed player sheet when home button is tapped
+                // This ensures only the TabView is visible when returning home
+                if showDetailedPlayer {
+                    print("🏠 PODCAST PLAYER: Closing detailed player sheet due to home button tap")
+                    showDetailedPlayer = false
+                }
+            }
         } else {
             // Fallback for earlier iOS versions
             // Compact single-row layout with center alignment for Dynamic Type support
@@ -1813,6 +1821,14 @@ struct UnifiedPodcastPlayerView: View {
                     viewModel: viewModel,
                     isPresented: $showDetailedPlayer
                 )
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ForceTabViewVisible"))) { _ in
+                // 🏠 HOME BUTTON FIX: Close the detailed player sheet when home button is tapped
+                // This ensures only the TabView is visible when returning home
+                if showDetailedPlayer {
+                    print("🏠 PODCAST PLAYER: Closing detailed player sheet due to home button tap")
+                    showDetailedPlayer = false
+                }
             }
         }
     }
