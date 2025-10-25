@@ -1379,10 +1379,22 @@ private class EpisodeBuilder {
     
     private func createShowNotesAndChapters(description: String, contentEncoded: String?, itunesSummary: String?) -> (PodcastNotes?, [PodcastChapter]) {
         // Use the richest content available: content:encoded > itunes:summary > description
-        let content = contentEncoded?.isEmpty == false ? contentEncoded! :
-                     itunesSummary?.isEmpty == false ? itunesSummary! : description
+        // 🛡️ FIX: Properly handle nil vs empty string to ensure fallback works correctly
+        let content: String
+        if let encoded = contentEncoded, !encoded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            content = encoded
+        } else if let summary = itunesSummary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            content = summary
+        } else {
+            content = description
+        }
         
-        guard !content.isEmpty else { return (nil, []) }
+        // 🛡️ FIX: Don't reject HTML content - some feeds have HTML-only descriptions
+        // Only reject if completely empty after trimming
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else {
+            return (nil, [])
+        }
         
         // Extract links from the content
         var links = extractLinksFromHTML(content)
