@@ -693,7 +693,8 @@ struct PodcastListView: View {
             }
             
             Group {
-                if viewModel.podcastFeeds.isEmpty {
+                // Show empty state if no feeds exist OR all feeds are being deleted
+                if viewModel.podcastFeeds.isEmpty || filteredPodcasts.isEmpty {
                     // Beautiful empty state
                     emptyStateView
                 } else {

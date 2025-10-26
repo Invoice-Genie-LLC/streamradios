@@ -145,17 +145,25 @@ class DataSyncManager: ObservableObject {
     private init() {
         setupProgressCalculation()
         
-        // 🔧 APP GROUP FIX: Check if Core Data is empty to detect TRUE fresh install
-        // App Group UserDefaults persist across app deletions, so we need to check Core Data instead
+        // 🔧 FRESH INSTALL DETECTION: Only reset flags if this is a TRUE first launch
+        // Core Data can be empty for two reasons:
+        // 1. TRUE fresh install - app never launched before (HasLaunchedBefore not set)
+        // 2. User deleted all feeds - NOT a fresh install (HasLaunchedBefore = true)
+        // We should only reset flags in case #1
         let coreDataIsEmpty = checkIfCoreDataIsEmpty()
-        if coreDataIsEmpty {
-            // TRUE fresh install - Core Data is empty, reset all flags
+        let hasEverLaunched = UserDefaults.standard.object(forKey: "HasLaunchedBefore") != nil
+        
+        if coreDataIsEmpty && !hasEverLaunched {
+            // TRUE fresh install - Core Data empty AND app never launched before
+            print("🎯 FRESH INSTALL: Detected true first launch - resetting sync flags")
             UserDefaults.standard.set(false, forKey: "HasLaunchedBefore")
             UserDefaults.standard.set(false, forKey: "DataSyncCompleted")
             UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
             UserDefaults.standard.set(false, forKey: "HasPodcastFeedsSynced")
             UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
-            // Note: synchronize() is deprecated and unnecessary
+        } else if coreDataIsEmpty && hasEverLaunched {
+            // User deleted all feeds - NOT a fresh install, keep existing flags
+            print("🎯 EMPTY STATE: Core Data empty but app has launched before - keeping sync flags")
         }
         
         // If this is not a fresh install, mark UI as ready immediately
