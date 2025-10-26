@@ -138,6 +138,7 @@ struct PodcastListView: View {
     @State private var currentDeletingFeedTitle: String = ""
     @State private var lastSearchText: String = ""
     @State private var lastPodcastFeedsCount: Int = 0
+    @State private var lastFeedsBeingDeletedCount: Int = 0
     
     // PERFORMANCE: Fast feed lookup cache
     @State private var feedLookupCache: [String: PodcastFeed] = [:]
@@ -340,6 +341,7 @@ struct PodcastListView: View {
     
     var body: some View {
         let _ = uiRefreshObserver // Force SwiftUI to observe uiRefreshTrigger
+        let _ = viewModel.feedsBeingDeleted // Force SwiftUI to observe deletion set changes
         return NavigationView {
                ZStack(alignment: .bottom) {
                    // Show episode list inline when a podcast is selected
@@ -1320,11 +1322,17 @@ struct PodcastListView: View {
         cachedFilteredPodcasts = viewModel.podcastFeeds
         lastSearchText = searchText
         lastPodcastFeedsCount = viewModel.podcastFeeds.count
+        lastFeedsBeingDeletedCount = viewModel.feedsBeingDeleted.count
         filteredFeedOrderCache = viewModel.podcastFeedOrder
     }
     
     // PERFORMANCE: Fast feed lookup by ID
     private func getFeedById(_ feedId: String) -> PodcastFeed? {
+        // CRITICAL: Filter out feeds being deleted
+        guard !viewModel.feedsBeingDeleted.contains(feedId) else {
+            return nil
+        }
+        
         // Update cache if needed
         if feedLookupCache.count != viewModel.podcastFeeds.count {
             // 🛡️ DUPLICATE PROTECTION: Handle potential duplicate feed IDs
@@ -1338,9 +1346,10 @@ struct PodcastListView: View {
     
     // PERFORMANCE: Get filtered feed order without expensive nested lookups
     private func getFilteredFeedOrder() -> [String] {
-        // SORTING FIX: Invalidate cache when podcastFeedOrder changes to ensure sorting updates are visible
+        // SORTING FIX: Invalidate cache when podcastFeedOrder or deletion set changes
         if searchText == lastSearchText &&
            viewModel.podcastFeeds.count == lastPodcastFeedsCount &&
+           viewModel.feedsBeingDeleted.count == lastFeedsBeingDeletedCount &&
            filteredFeedOrderCache.count == viewModel.podcastFeedOrder.count {
             
             // Additional check: verify the order hasn't changed by checking first few items
@@ -1361,6 +1370,7 @@ struct PodcastListView: View {
             self.filteredFeedOrderCache = result
             self.lastSearchText = self.searchText
             self.lastPodcastFeedsCount = self.viewModel.podcastFeeds.count
+            self.lastFeedsBeingDeletedCount = self.viewModel.feedsBeingDeleted.count
         }
         
         return result
@@ -1368,18 +1378,24 @@ struct PodcastListView: View {
     
     // PERFORMANCE: Optimized memoized filtered podcasts
     private var filteredPodcasts: [PodcastFeed] {
-        // Use cached result if search text and podcast count haven't changed
-        if searchText == lastSearchText && viewModel.podcastFeeds.count == lastPodcastFeedsCount {
+        // Use cached result if search text, podcast count, and deletion set haven't changed
+        if searchText == lastSearchText && 
+           viewModel.podcastFeeds.count == lastPodcastFeedsCount &&
+           viewModel.feedsBeingDeleted.count == lastFeedsBeingDeletedCount {
             return cachedFilteredPodcasts
         }
         
         // Update cache
         let result: [PodcastFeed]
+        
+        // First filter out feeds being deleted (instant UI response)
+        let activeFeeds = viewModel.podcastFeeds.filter { !viewModel.feedsBeingDeleted.contains($0.id) }
+        
         if searchText.isEmpty {
-            result = viewModel.podcastFeeds
+            result = activeFeeds
         } else {
             let searchLower = searchText.lowercased()
-            result = viewModel.podcastFeeds.filter { feed in
+            result = activeFeeds.filter { feed in
                 feed.title.lowercased().contains(searchLower) ||
                 (feed.descriptionText?.lowercased().contains(searchLower) ?? false)
             }
@@ -1390,6 +1406,7 @@ struct PodcastListView: View {
             self.cachedFilteredPodcasts = result
             self.lastSearchText = self.searchText
             self.lastPodcastFeedsCount = self.viewModel.podcastFeeds.count
+            self.lastFeedsBeingDeletedCount = self.viewModel.feedsBeingDeleted.count
         }
         
         return result

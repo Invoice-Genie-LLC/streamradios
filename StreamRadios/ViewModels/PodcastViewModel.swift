@@ -776,6 +776,7 @@ class PodcastViewModel: ObservableObject {
     @Published var feedDeletionMessage: String = ""
     @Published var isDeletingFeed: Bool = false
     @Published var deletingFeedId: String? = nil
+    @Published var feedsBeingDeleted: Set<String> = []  // Track feeds currently being deleted for instant UI filtering
     
     // Store progress observations to prevent deallocation
     private var progressObservations: [String: NSKeyValueObservation] = [:]
@@ -5928,188 +5929,146 @@ class PodcastViewModel: ObservableObject {
     /// Delete a podcast feed with real-time progress tracking
     @MainActor
     func deletePodcastFeed(_ feed: PodcastFeed) {
-        // Initialize progress tracking
+        print("🔄 DELETION: Marking feed for deletion - instant UI filter")
+        
+        // CRITICAL: Just add to deletion set - instant, no array manipulation
+        feedsBeingDeleted.insert(feed.id)
+        
+        // Force immediate UI update
+        objectWillChange.send()
+        
+        // Clear selected feed AND episodes if it's the one being deleted
+        // Do this NOW to avoid expensive array operations later
+        if selectedFeedId == feed.id {
+            selectedFeedId = nil
+            currentEpisodes.removeAll()  // Fast since we're clearing everything
+            print("🔄 DELETION: Cleared selected feed and episodes")
+        }
+        
+        print("🔄 DELETION: Feed marked as deleting - UI will filter it out instantly")
+        
+        // Show deletion progress to user
         isDeletingFeed = true
         deletingFeedId = feed.id
         feedDeletionProgress = 0.0
-        feedDeletionMessage = "Preparing deletion..."
+        feedDeletionMessage = "Deleting '\(feed.title)'..."
         
-        Task { [self] in
+        // Do ALL deletion work in background
+        Task.detached { [weak self] in
+            guard let self = self else { return }
+            print("🔄 BACKGROUND DELETION: Starting background deletion for \(feed.title)")
             do {
-                // Step 1: Get episode count for progress calculation
-                feedDeletionMessage = "Analyzing episodes..."
-                feedDeletionProgress = 0.05
-                
-                let episodeIds = await getEpisodeIdsForFeed(feed.id)
+                // Step 1: Get episode IDs
+                let episodeIds = await self.getEpisodeIdsForFeed(feed.id)
                 let totalEpisodes = episodeIds.count
+                print("🔄 BACKGROUND DELETION: Found \(totalEpisodes) episodes to delete")
                 
+                // Update progress
                 await MainActor.run {
-                    feedDeletionMessage = "Found \(totalEpisodes) episodes to delete"
-                    feedDeletionProgress = 0.1
+                    self.feedDeletionProgress = 0.1
+                    self.feedDeletionMessage = "Deleting \(totalEpisodes) episodes..."
                 }
                 
-                // Step 2: Clear episode states from EpisodeStateManager (BATCH OPTIMIZED)
-                await MainActor.run {
-                    feedDeletionMessage = "Clearing episode progress and states..."
-                    feedDeletionProgress = 0.2
-                }
-                
-                // Use batch deletion for much better performance
+                // Step 2: Clear episode states (batch)
                 EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
+                print("🔄 BACKGROUND DELETION: Cleared episode states")
                 
                 await MainActor.run {
-                    feedDeletionMessage = "✅ Cleared \(totalEpisodes) episode states (batch)"
-                    feedDeletionProgress = 0.4
+                    self.feedDeletionProgress = 0.2
                 }
                 
                 // Step 3: Delete downloaded files
-                await MainActor.run {
-                    feedDeletionMessage = "Deleting downloaded files..."
-                    feedDeletionProgress = 0.5
-                }
-                
-                await deleteDownloadedEpisodeFiles(episodeIds)
+                await self.deleteDownloadedEpisodeFiles(episodeIds)
+                print("🔄 BACKGROUND DELETION: Deleted downloaded files")
                 
                 await MainActor.run {
-                    feedDeletionMessage = "Downloaded files cleaned up"
-                    feedDeletionProgress = 0.6
+                    self.feedDeletionProgress = 0.4
+                    self.feedDeletionMessage = "Syncing with iCloud..."
                 }
                 
                 // Step 4: Delete from CloudKit
-                await MainActor.run {
-                    feedDeletionMessage = "Deleting from CloudKit..."
-                    feedDeletionProgress = 0.7
-                }
-                
                 var cloudKitDeletionSucceeded = false
+                print("🔄 BACKGROUND DELETION: Deleting from CloudKit...")
                 do {
-                    // Delete feed from CloudKit
-                    try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
-                    
-                    await MainActor.run {
-                        feedDeletionMessage = "CloudKit feed deletion complete"
-                        feedDeletionProgress = 0.75
+                    // Delete feed from CloudKit with 30-second timeout
+                    try await withTimeout(seconds: 30) {
+                        try await self.cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
                     }
                     
-                    // Delete episode states from CloudKit database records for this specific feed
-                    await cloudKitManager.deleteEpisodeStatesFromCloudKit(episodeIds: episodeIds)
-                    
-                    // CRITICAL: Also remove episodes from CloudKit shared collections (NSUbiquitousKeyValueStore)
-                    await MainActor.run {
-                        feedDeletionMessage = "Clearing CloudKit shared collections..."
-                        feedDeletionProgress = 0.78
-                    }
-                    
-                    cloudKitManager.removeEpisodesFromSharedCollections(episodeIds: episodeIds)
+                    await self.cloudKitManager.deleteEpisodeStatesFromCloudKit(episodeIds: episodeIds)
+                    self.cloudKitManager.removeEpisodesFromSharedCollections(episodeIds: episodeIds)
                     cloudKitDeletionSucceeded = true
+                    print("🔄 BACKGROUND DELETION: CloudKit deletion complete")
                     
                     await MainActor.run {
-                        feedDeletionMessage = "CloudKit cleanup complete"
-                        feedDeletionProgress = 0.8
+                        self.feedDeletionProgress = 0.7
                     }
                     
                 } catch {
                     cloudKitDeletionSucceeded = false
-                    print("☁️ ❌ CloudKit deletion failed: \(error)")
-                    await MainActor.run {
-                        feedDeletionMessage = "CloudKit deletion failed - continuing locally"
-                        feedDeletionProgress = 0.75
-                    }
+                    print("☁️ ❌ BACKGROUND DELETION: CloudKit deletion failed: \(error)")
                 }
                 
                 // Step 5: Delete from Core Data
+                print("🔄 BACKGROUND DELETION: Deleting from Core Data...")
+                await self.clearEpisodeStatesFromCoreData(episodeIds) { _ in }
+                try await self.deleteFeedFromCoreData(feed) { _ in }
+                
+                await self.episodeManager.clearPersistentCacheForFeed(feed.id)
+                print("🔄 BACKGROUND DELETION: Cleared persistent cache")
+                
                 await MainActor.run {
-                    feedDeletionMessage = "Deleting from local database..."
-                    feedDeletionProgress = 0.85
+                    self.feedDeletionProgress = 0.9
+                    self.feedDeletionMessage = "Finalizing..."
                 }
                 
-                // First, explicitly clear all episode state data for this feed
-                await clearEpisodeStatesFromCoreData(episodeIds)
-                
-                // Then delete the feed and episode entities
-                try await deleteFeedFromCoreData(feed)
-                
-                // PERSISTENT CACHE: Clear all cached data for deleted feed
-                await episodeManager.clearPersistentCacheForFeed(feed.id)
-                print("🧽 DELETION: Cleared persistent cache for deleted feed \(feed.title)")
-                
+                // Step 6: Clear progress UI - feed stays in deletion set until app restart
                 await MainActor.run {
-                    feedDeletionMessage = "Database cleanup complete"
-                    feedDeletionProgress = 0.9
-                }
-                
-                // Step 6: Update UI
-                await MainActor.run {
-                    feedDeletionMessage = "Updating interface..."
-                    feedDeletionProgress = 0.95
-                    
-                    // Remove from UI arrays
-                    if let index = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
-                        podcastFeeds.remove(at: index)
-                    }
-                    podcastFeedOrder.removeAll { $0 == feed.id }
-                    currentEpisodes.removeAll { $0.feedId == feed.id }
-                    
-                    // Clear selected feed if it's the one being deleted
-                    if selectedFeedId == feed.id {
-                        selectedFeedId = nil
-                    }
-                    
-                    // Clear local episode progress tracking
+                    // Clear progress tracking (dictionary operations are fast)
                     for episodeId in episodeIds {
-                        episodeProgress.removeValue(forKey: episodeId)
+                        self.episodeProgress.removeValue(forKey: episodeId)
                     }
                     
-                    // Trigger UI update
-                    throttledUIUpdate()
-                }
-                
-                // Step 7: Sync deletion to other devices (if CloudKit succeeded)
-                if cloudKitDeletionSucceeded {
-                    await MainActor.run {
-                        PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
-                            feedId: feed.id,
-                            feedTitle: feed.title,
-                            episodeIds: episodeIds
-                        )
+                    // Clear progress UI
+                    self.feedDeletionProgress = 1.0
+                    self.feedDeletionMessage = "✅ Deleted"
+                    
+                    // Dismiss after brief moment
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        self?.isDeletingFeed = false
+                        self?.deletingFeedId = nil
+                        self?.feedDeletionProgress = 0.0
+                        self?.feedDeletionMessage = ""
                     }
+                    
+                    // NOTE: Feed stays in feedsBeingDeleted (keeps it invisible)
+                    // podcastFeeds/podcastFeedOrder will clean up on next app launch via loadFeedsFromCoreData()
+                    // This avoids ANY @Published array updates that would cause UI hangs
+                    print("✅ DELETION COMPLETE: Feed invisible via filter, arrays cleanup on app restart")
                 }
+                print("🔄 BACKGROUND DELETION: Completed - feed remains filtered out until app restart")
                 
-                // Step 8: Completion
-                await MainActor.run {
-                    feedDeletionMessage = "✅ Successfully deleted '\(feed.title)' and \(totalEpisodes) episodes"
-                    feedDeletionProgress = 1.0
+                // Step 7: Sync deletion to other devices
+                if cloudKitDeletionSucceeded {
+                    PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
+                        feedId: feed.id,
+                        feedTitle: feed.title,
+                        episodeIds: episodeIds
+                    )
                 }
-                
-                // Auto-hide progress after success
-                try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                await MainActor.run {
-                    isDeletingFeed = false
-                    deletingFeedId = nil
-                    feedDeletionProgress = 0.0
-                    feedDeletionMessage = ""
-                }
+                print("🔄 BACKGROUND DELETION: Successfully deleted '\(feed.title)' (\(totalEpisodes) episodes)")
                 
             } catch {
-                print("❌ Error during feed deletion: \(error)")
+                print("❌ BACKGROUND DELETION: Error during feed deletion: \(error)")
                 await MainActor.run {
-                    feedDeletionMessage = "❌ Deletion failed: \(error.localizedDescription)"
-                    feedDeletionProgress = 1.0
+                    // Remove from deletion set on error
+                    self.feedsBeingDeleted.remove(feed.id)
                     
-                    // Keep error visible longer
-                    Task {
-                        try await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
-                        await MainActor.run {
-                            isDeletingFeed = false
-                            deletingFeedId = nil
-                            feedDeletionProgress = 0.0
-                            feedDeletionMessage = ""
-                        }
-                    }
-                    
-                    // Reload UI to show correct state
-                    loadFeedsFromCoreData()
                     self.error = "Failed to delete podcast: \(error.localizedDescription)"
+                    self.isDeletingFeed = false
+                    self.deletingFeedId = nil
+                    self.feedDeletionProgress = 0.0
+                    self.feedDeletionMessage = ""
                 }
             }
         }
@@ -8175,11 +8134,11 @@ class PodcastViewModel: ObservableObject {
     
     // MARK: - Delete Feed with CloudKit Integration
     
-    private func deleteFeedFromCoreData(_ feed: PodcastFeed) async throws {
+    private func deleteFeedFromCoreData(_ feed: PodcastFeed, progressCallback: (@Sendable (Double) -> Void)? = nil) async throws {
         print("💾 Starting safe deletion from Core Data for feed: \(feed.title)")
         
-        // Use main context with proper transaction handling to avoid merge conflicts
-        let context = CoreDataStack.shared.persistentContainer.viewContext
+        // Use background context to avoid blocking the main thread
+        let context = CoreDataStack.shared.newBackgroundContext()
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -8214,6 +8173,12 @@ class PodcastViewModel: ObservableObject {
                         
                         totalDeleted += episodes.count
                         
+                        // Report progress
+                        if episodeCount > 0 {
+                            let progress = Double(totalDeleted) / Double(episodeCount)
+                            progressCallback?(progress * 0.9) // 0-90% for episode deletion
+                        }
+                        
                         // Save periodically to prevent memory buildup
                         if totalDeleted % (batchSize * 2) == 0 {
                             try context.save()
@@ -8234,9 +8199,11 @@ class PodcastViewModel: ObservableObject {
                         context.delete(feedModel)
                     }
                     print("💾 Deleted \(feedResults.count) feed records from Core Data")
+                    progressCallback?(0.95) // 95% - feed deleted
                     
                     // Step 4: Final save
                     try context.save()
+                    progressCallback?(1.0) // 100% - complete
                     print("💾 ✅ Successfully completed safe deletion for feed: \(feed.title)")
                     continuation.resume()
                     
@@ -10025,9 +9992,10 @@ extension PodcastViewModel {
     }
     
     /// Clear all episode state data from Core Data for specific episodes
-    private func clearEpisodeStatesFromCoreData(_ episodeIds: [String]) async {
+    private func clearEpisodeStatesFromCoreData(_ episodeIds: [String], progressCallback: (@Sendable (Double) -> Void)? = nil) async {
         guard !episodeIds.isEmpty else { 
             print("💾 ⚠️ No episode IDs provided for Core Data state cleanup")
+            progressCallback?(1.0)
             return 
         }
         
@@ -10066,6 +10034,10 @@ extension PodcastViewModel {
                             episode.isPlayed = false
                             totalClearedCount += 1
                         }
+                        
+                        // Report progress
+                        let progress = Double(i + batch.count) / Double(episodeIds.count)
+                        progressCallback?(progress)
                         
                         // Save batch immediately to ensure data is persisted
                         if episodes.count > 0 {
