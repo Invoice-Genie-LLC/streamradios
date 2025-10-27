@@ -414,7 +414,7 @@ struct PodcastListView: View {
                .toolbar {
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
                        if !isEditing && selectedPodcast == nil {
-                           HStack(spacing: 8) {
+                           Group {
                                if isSearchPresented {
                                    // Cancel button when search is active
                                    Button("Cancel") {
@@ -425,38 +425,46 @@ struct PodcastListView: View {
                                        }
                                    }
                                    .foregroundColor(.blue)
+                                   .padding(.horizontal, 16)
+                                   .padding(.vertical, 8)
+                                   .background(
+                                       Capsule()
+                                           .fill(Color.clear)
+                                   )
                                } else {
-                                   // Search button
-                                   Button(action: {
-                                       withAnimation(.easeInOut(duration: 0.3)) {
-                                           isSearchPresented = true
+                                   HStack(spacing: 8) {
+                                       // Search button
+                                       Button(action: {
+                                           withAnimation(.easeInOut(duration: 0.3)) {
+                                               isSearchPresented = true
+                                           }
+                                       }) {
+                                           Image(systemName: "magnifyingglass")
+                                               .foregroundColor(.white)
+                                               .font(.system(size: 16, weight: .medium))
+                                               .frame(width: 32, height: 32)
                                        }
-                                   }) {
-                                       Image(systemName: "magnifyingglass")
-                                           .foregroundColor(.white)
-                                           .font(.system(size: 16, weight: .medium))
-                                           .frame(width: 32, height: 32)
-                                   }
-                                   
-                                   // Sort button
-                                   Button(action: {
-                                       // Show confirmation alert for podcast sorting
-                                       alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
-                                           viewModel.sortFeedsAlphabetically()
-                                       })
-                                   }) {
-                                       Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                           .foregroundColor(.white)
-                                           .font(.system(size: 16, weight: .medium))
-                                           .frame(width: 32, height: 32)
-                                   }
-                                   
-                                   // Plus button
-                                   Button(action: { showingSearchPodcasts = true }) {
-                                       Image(systemName: "plus")
-                                           .foregroundColor(.white)
-                                           .font(.system(size: 16, weight: .medium))
-                                           .frame(width: 32, height: 32)
+                                       
+                                       // Sort button
+                                       Button(action: {
+                                           // Show confirmation alert for podcast sorting
+                                           alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
+                                               viewModel.sortFeedsAlphabetically()
+                                           })
+                                       }) {
+                                           Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                               .foregroundColor(.white)
+                                               .font(.system(size: 16, weight: .medium))
+                                               .frame(width: 32, height: 32)
+                                       }
+                                       
+                                       // Plus button
+                                       Button(action: { showingSearchPodcasts = true }) {
+                                           Image(systemName: "plus")
+                                               .foregroundColor(.white)
+                                               .font(.system(size: 16, weight: .medium))
+                                               .frame(width: 32, height: 32)
+                                       }
                                    }
                                }
                            }
