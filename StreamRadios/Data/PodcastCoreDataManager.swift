@@ -375,18 +375,32 @@ class PodcastCoreDataManager {
     // MARK: - Incremental Updates
     
     /// Add new episodes to existing feed (for pull-to-refresh)
-    func addNewEpisodes(_ episodes: [PodcastEpisode], to feedId: String) async throws {
+    /// - Parameters:
+    ///   - episodes: Episodes to add
+    ///   - feedId: Feed ID
+    ///   - maxEpisodes: Optional maximum number of episodes to keep (auto-detected from RSS if nil)
+    func addNewEpisodes(_ episodes: [PodcastEpisode], to feedId: String, maxEpisodes: Int? = nil) async throws {
         guard !episodes.isEmpty else { return }
         
         let backgroundContext = coreDataStack.newBackgroundContext()
         
         try await backgroundContext.perform {
+            // AUTO-DETECT LIMIT: If no limit specified, use the RSS feed size as the natural limit
+            // This prevents accumulation by keeping total episodes at RSS feed size
+            let effectiveLimit = maxEpisodes ?? episodes.count
+            os_log("🔒 Episode limit: %d (maxEpisodes: %@, RSS provides: %d)", 
+                   log: self.log, type: .info, effectiveLimit, 
+                   maxEpisodes?.description ?? "auto", episodes.count)
+            
             // Check which episodes are actually new
             let existingEpisodeIds = try self.getExistingEpisodeIds(for: feedId, in: backgroundContext)
             let newEpisodes = episodes.filter { !existingEpisodeIds.contains($0.id) }
             
             guard !newEpisodes.isEmpty else {
                 os_log("📝 No new episodes to add for feed %@", log: self.log, type: .debug, feedId)
+                // Even if no new episodes, still enforce limit to clean up old ones
+                try self.enforceEpisodeLimit(for: feedId, maxEpisodes: effectiveLimit, in: backgroundContext)
+                try backgroundContext.save()
                 return
             }
             
@@ -425,8 +439,12 @@ class PodcastCoreDataManager {
                 managedEpisode.feedId = feedId  // Double-ensure the feedId is correct
             }
             
+            // CRITICAL: Always enforce episode limit after adding to prevent accumulation
+            // Use effectiveLimit (RSS size if no explicit limit set)
+            try self.enforceEpisodeLimit(for: feedId, maxEpisodes: effectiveLimit, in: backgroundContext)
+            
             try backgroundContext.save()
-            os_log("✅ Added %d new episodes to feed %@", log: self.log, type: .info, newEpisodes.count, feedId)
+            os_log("✅ Added %d new episodes to feed %@ (enforced limit: %d)", log: self.log, type: .info, newEpisodes.count, feedId, effectiveLimit)
         }
     }
     
@@ -443,10 +461,16 @@ class PodcastCoreDataManager {
         }
         
         // Ensure all episodes have unique IDs to prevent duplicates from the start
-        let uniqueEpisodes = removeDuplicatesFromParsedEpisodes(parsedEpisodes)
-        let totalEpisodes = uniqueEpisodes.count
-        let duplicatesFound = parsedEpisodes.count - totalEpisodes
+        var uniqueEpisodes = removeDuplicatesFromParsedEpisodes(parsedEpisodes)
+        let duplicatesFound = parsedEpisodes.count - uniqueEpisodes.count
         
+        // DON'T limit before reconciliation - let reconciliation process ALL episodes from RSS
+        // The RSS feed itself IS the natural limit
+        // Reconciliation will delete episodes not in RSS and keep only what RSS provides
+        os_log("🔄 RSS FEED LIMIT: Feed provides %d episodes - this is the natural limit", 
+               log: self.log, type: .info, uniqueEpisodes.count)
+        
+        let totalEpisodes = uniqueEpisodes.count
         os_log("🔄 Starting reconciliation for feed %@ with %d episodes (%d duplicates removed from RSS)", log: self.log, type: .info, feedId, totalEpisodes, duplicatesFound)
         
         // Log first few parsed episode titles to check formatting from RSS
@@ -600,13 +624,11 @@ class PodcastCoreDataManager {
                 deletedCount += 1
             }
             
-            // EPISODE LIMIT ENFORCEMENT: Remove excess episodes if limit is set
-            if let maxEpisodes = maxEpisodes {
-                try self.enforceEpisodeLimit(for: feedId, maxEpisodes: maxEpisodes, in: backgroundContext)
-            }
-            
-            // Final save
+            // Final save after reconciliation
             try backgroundContext.save()
+            
+            // RSS FEED IS THE LIMIT: No need for additional enforcement
+            // Reconciliation already ensured we have exactly what the RSS feed provides
             
             // Log rejection summary if any episodes were rejected
             if rejectedCount > 0 {

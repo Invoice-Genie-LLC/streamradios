@@ -1141,8 +1141,8 @@ class PodcastViewModel: ObservableObject {
                     // CRITICAL: Save feed to Core Data FIRST before adding episodes
                     try await saveFeedToCoreData(feed)
                     
-                    // Add episodes to Core Data for this feed
-                    try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id)
+                    // Add episodes to Core Data for this feed with episode limit enforcement
+                    try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id, maxEpisodes: feed.maxEpisodes)
                     
                     await MainActor.run {
                         // Final check before adding (prevents race conditions)
@@ -2013,8 +2013,8 @@ class PodcastViewModel: ObservableObject {
                 // CRITICAL: Save feed to Core Data FIRST before adding episodes
                 try await saveFeedToCoreData(feed)
                 
-                // Add episodes to Core Data for this feed
-                try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id)
+                // Add episodes to Core Data for this feed with episode limit enforcement
+                try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id, maxEpisodes: feed.maxEpisodes)
                 
                 await MainActor.run {
                     // Final check before adding (prevents race conditions)
@@ -2315,8 +2315,11 @@ class PodcastViewModel: ObservableObject {
             
             print("🆕 IMMEDIATE FETCH: Found \(newEpisodes.count) truly new episodes to add")
             
-            // Add new episodes to Core Data
-            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+            // Get feed to check maxEpisodes limit
+            let feed = await MainActor.run { self.podcastFeeds.first(where: { $0.id == feedId }) }
+            
+            // Add new episodes to Core Data with episode limit enforcement
+            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId, maxEpisodes: feed?.maxEpisodes)
             
             // Update snapshot with new episodes (prepend to maintain newest-first order)
             let updatedEpisodes = newEpisodes + currentSnapshot
@@ -2649,8 +2652,11 @@ class PodcastViewModel: ObservableObject {
             // UPDATE PERSISTENT CACHE with new episodes immediately
             await self.episodeManager.updateCacheWithNewEpisodes(newEpisodes, for: feedId)
             
-            // Add new episodes to Core Data for persistence
-            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+            // Get feed to check maxEpisodes limit
+            let feed = await MainActor.run { self.podcastFeeds.first(where: { $0.id == feedId }) }
+            
+            // Add new episodes to Core Data for persistence with episode limit enforcement
+            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId, maxEpisodes: feed?.maxEpisodes)
             
             // CRITICAL: IMMEDIATELY CREATE NEW SNAPSHOT with integrated new episodes
             // Get the complete current episode list to create a fresh snapshot
@@ -2759,10 +2765,12 @@ class PodcastViewModel: ObservableObject {
     
     /// Lightweight integration that updates snapshot without expensive operations
     private func integrateNewEpisodesLightweight(_ newEpisodes: [PodcastEpisode], feedId: String) async {
+        // Get feed's maxEpisodes limit
+        let maxEpisodes = await MainActor.run { self.podcastFeeds.first(where: { $0.id == feedId })?.maxEpisodes }
         
-        // Add to Core Data in background (non-blocking)
+        // Add to Core Data in background (non-blocking) with episode limit enforcement
         Task.detached(priority: .utility) {
-            try? await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+            try? await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId, maxEpisodes: maxEpisodes)
         }
         
         // Update episode manager cache (fast operation)
@@ -3552,6 +3560,18 @@ class PodcastViewModel: ObservableObject {
         if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feedId }) {
             podcastFeeds[feedIndex].maxEpisodes = maxEpisodes
             
+            // TEMPORARY: Save to UserDefaults until Core Data model is updated
+            if let maxEps = maxEpisodes {
+                UserDefaults.standard.set(maxEps, forKey: "maxEpisodes_\(feedId)")
+                print("💾 Saved maxEpisodes=\(maxEps) for feed \(feedId)")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "maxEpisodes_\(feedId)")
+                print("💾 Removed maxEpisodes limit for feed \(feedId)")
+            }
+            
+            // Save feed to Core Data to persist the change
+            try? await saveFeedToCoreData(podcastFeeds[feedIndex])
+            
             // If setting a limit, enforce it immediately
             if let maxEpisodes = maxEpisodes {
                 do {
@@ -3595,6 +3615,41 @@ class PodcastViewModel: ObservableObject {
         // For now, we'll just trigger a UI update to persist the change
         await MainActor.run {
             self.forceUIUpdate()
+        }
+    }
+    
+    /// Set default episode limits for all feeds (utility function)
+    func setDefaultEpisodeLimitsForAllFeeds(defaultLimit: Int = 50) async {
+        print("🔧 Setting default episode limit of \(defaultLimit) for all feeds...")
+        
+        for feed in podcastFeeds {
+            await setEpisodeLimit(for: feed.id, maxEpisodes: defaultLimit)
+            print("✅ Set limit of \(defaultLimit) episodes for feed: \(feed.title)")
+        }
+        
+        print("🎉 Completed setting episode limits for \(podcastFeeds.count) feeds")
+    }
+    
+    /// Force cleanup of accumulated episodes for all feeds (utility function)
+    func forceCleanupAllFeeds() async {
+        print("🧹 FORCE CLEANUP: Starting cleanup for all \(podcastFeeds.count) feeds...")
+        
+        // Clear all cleanup flags to force re-cleanup
+        for feed in podcastFeeds {
+            UserDefaults.standard.removeObject(forKey: "rss_cleanup_done_\(feed.id)")
+            print("🗑️ Cleared cleanup flag for feed: \(feed.title)")
+        }
+        
+        print("✅ FORCE CLEANUP: Cleared \(podcastFeeds.count) cleanup flags - feeds will be cleaned on next open")
+        print("💡 TIP: Close and reopen any feed to trigger cleanup")
+    }
+    
+    /// Reset cleanup flag for a specific feed (for testing)
+    func resetCleanupFlag(for feedId: String) {
+        UserDefaults.standard.removeObject(forKey: "rss_cleanup_done_\(feedId)")
+        if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
+            print("🗑️ Reset cleanup flag for feed: \(feed.title)")
+            print("💡 Close and reopen this feed to trigger cleanup")
         }
     }
     
@@ -3806,6 +3861,50 @@ class PodcastViewModel: ObservableObject {
         
         feedsBeingProcessed.insert(feedId)
         defer { feedsBeingProcessed.remove(feedId) }
+        
+        // RSS FEED IS THE LIMIT: One-time cleanup of accumulated episodes
+        // Check if we've already cleaned up this feed
+        let cleanupKey = "rss_cleanup_done_\(feedId)"
+        if !UserDefaults.standard.bool(forKey: cleanupKey) {
+            print("🔄 RSS SYNC: First load - MUST clean up accumulated episodes before displaying...")
+            
+            // Check current episode count
+            let currentEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+            print("📊 BEFORE CLEANUP: Feed has \(currentEpisodes.count) episodes in Core Data")
+            
+            do {
+                // CRITICAL: Wait for cleanup to complete BEFORE displaying episodes
+                let feedManager = PodcastFeedManager()
+                let (refreshedFeed, rssEpisodes) = try await feedManager.refreshFeed(feedId)
+                
+                // Get the RSS feed's episode count - this is the natural limit
+                let rssEpisodeCount = rssEpisodes.count
+                print("📊 RSS FEED LIMIT: Feed provides \(rssEpisodeCount) episodes")
+                
+                // Verify cleanup worked
+                let afterCleanup = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                print("📊 AFTER CLEANUP: Feed now has \(afterCleanup.count) episodes in Core Data")
+                
+                if afterCleanup.count > rssEpisodeCount {
+                    print("⚠️ CLEANUP INCOMPLETE: Still have \(afterCleanup.count - rssEpisodeCount) excess episodes - forcing direct cleanup...")
+                    
+                    // Force direct cleanup using the RSS episode count as limit
+                    try await PodcastCoreDataManager.shared.enforceEpisodeLimitForFeed(feedId, maxEpisodes: rssEpisodeCount)
+                    
+                    let finalCount = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                    print("✅ FORCED CLEANUP: Feed now has \(finalCount.count) episodes (limit: \(rssEpisodeCount))")
+                }
+                
+                print("✅ RSS SYNC: Completed cleanup reconciliation for feed \(feedId)")
+                
+                // Mark cleanup as done
+                UserDefaults.standard.set(true, forKey: cleanupKey)
+            } catch {
+                print("⚠️ RSS SYNC: Cleanup failed, will try again next time: \(error.localizedDescription)")
+            }
+        } else {
+            print("✅ RSS SYNC: Feed already cleaned up, using cached episodes")
+        }
         
         // INSTANT DISPLAY: Load cached episodes from Core Data FIRST for immediate UI display
         let cachedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
@@ -4810,8 +4909,8 @@ class PodcastViewModel: ObservableObject {
             // PREVENT ACCUMULATION: Use smart integration instead of simple addition
             await self.episodeManager.updateCacheWithNewEpisodes(newEpisodes, for: feedId)
             
-            // SMART INTEGRATION: Only add truly new episodes to prevent accumulation
-            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+            // SMART INTEGRATION: Only add truly new episodes to prevent accumulation with episode limit enforcement
+            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId, maxEpisodes: feed.maxEpisodes)
             
             // UPDATE UI GENTLY if this is the currently selected feed (avoid aggressive reloading)
             await MainActor.run {
@@ -5641,10 +5740,11 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 // BACKGROUND: Update Core Data asynchronously
+                let maxEpisodes = feed.maxEpisodes
                 Task.detached(priority: .background) {
                     do {
-                        // Add new episodes to Core Data
-                        try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                        // Add new episodes to Core Data with episode limit enforcement
+                        try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId, maxEpisodes: maxEpisodes)
                         print("💾 BACKGROUND: Added \(newEpisodes.count) new episodes to Core Data")
                     } catch {
                         print("❌ BACKGROUND UPDATE ERROR: \(error.localizedDescription)")
@@ -5872,8 +5972,8 @@ class PodcastViewModel: ObservableObject {
             if !newEpisodes.isEmpty {
                 print("🆕 BACKGROUND: Found \(newEpisodes.count) new episodes - creating new snapshot")
                 
-                // Update Core Data with new episodes first
-                try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                // Update Core Data with new episodes first with episode limit enforcement
+                try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId, maxEpisodes: feed.maxEpisodes)
                 
                 // CLEAN UP: Remove old episodes before creating new ones
                 let existingEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)

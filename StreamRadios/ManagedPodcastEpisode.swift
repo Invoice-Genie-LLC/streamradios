@@ -17,17 +17,32 @@ extension FeedModel {
         self.descriptionText = feed.descriptionText
         self.iconData = feed.iconData
         self.imageData = feed.imageData
+        
+        // TEMPORARY: Store maxEpisodes in UserDefaults until Core Data model is updated
+        let feedId = feed.id
+        if let maxEps = feed.maxEpisodes {
+            UserDefaults.standard.set(maxEps, forKey: "maxEpisodes_\(feedId)")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "maxEpisodes_\(feedId)")
+        }
     }
     
     func toPodcastFeed() -> PodcastFeed {
+           // TEMPORARY: Read maxEpisodes from UserDefaults until Core Data model is updated
+           let feedId = self.id ?? UUID().uuidString
+           let storedMaxEps = UserDefaults.standard.integer(forKey: "maxEpisodes_\(feedId)")
+           let maxEps = storedMaxEps > 0 ? storedMaxEps : nil
+           
            return PodcastFeed(
-               id: self.id ?? UUID().uuidString,
+               id: feedId,
                title: self.title ?? "",
                url: self.url ?? "",
                artworkUrl: self.artworkUrl,
                description: self.descriptionText,
                iconData: self.iconData,
-               imageData: self.imageData
+               imageData: self.imageData,
+               episodes: [],
+               maxEpisodes: maxEps
            )
        }
 }

@@ -23,11 +23,14 @@ class FeedIsolationManager: ObservableObject {
         }
         
         /// Thread-safe episode access with absolute contamination prevention
+        /// Episodes are always returned sorted by publication date (newest first)
         var episodes: [PodcastEpisode] {
             get {
                 isolationLock.lock()
                 defer { isolationLock.unlock() }
-                return _episodes.filter { $0.feedId == feedId }
+                let validEpisodes = _episodes.filter { $0.feedId == feedId }
+                // CRITICAL: Always sort by publication date descending (newest first)
+                return validEpisodes.sorted { $0.publicationDate > $1.publicationDate }
             }
         }
         

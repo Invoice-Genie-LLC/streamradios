@@ -128,6 +128,10 @@ class PodcastFeedManager {
             os_log("🏷️ Using custom title: %@ (RSS title was: %@)", log: log, type: .info, customTitle, parsedFeed.title)
         }
         
+        // RSS FEED IS THE LIMIT: No need to set maxEpisodes
+        // Reconciliation will keep episodes in sync with whatever RSS provides
+        os_log("🔄 RSS provides %d episodes - reconciliation will sync Core Data to match", log: log, type: .info, episodes.count)
+        
         // Download artwork with timeout and optimization
         var feedWithArtwork = feed
         if let artworkUrlString = feed.artworkUrl, !artworkUrlString.isEmpty,
@@ -231,9 +235,10 @@ class PodcastFeedManager {
             newEpisodes: newEpisodes
         )
         
-        // Reconcile Core Data to exactly match the latest parsed feed content to prevent accumulation
-        // Use the parsed episodes from the RSS (complete set) as the source of truth
-        try await PodcastCoreDataManager.shared.reconcileEpisodes(for: existingFeed.id, parsedEpisodes: newEpisodes)
+        // Reconcile Core Data to exactly match the latest parsed feed content
+        // The RSS feed IS the limit - reconciliation will delete episodes not in RSS
+        // and keep exactly what the RSS provides (no more, no less)
+        try await PodcastCoreDataManager.shared.reconcileEpisodes(for: existingFeed.id, parsedEpisodes: newEpisodes, maxEpisodes: nil)
         
         return result
     }
@@ -407,6 +412,8 @@ class PodcastFeedManager {
                     // Save episodes using optimized batch insert for maximum performance
                     try self.saveEpisodesOptimized(episodes, for: managedFeed, in: backgroundContext)
                     
+                    // RSS FEED IS THE LIMIT: Save all episodes from RSS
+                    // Future refreshes will reconcile to keep in sync
                     try backgroundContext.save()
                     
                     // Report completion of episode saving
@@ -476,26 +483,11 @@ class PodcastFeedManager {
                         throw FeedError.feedNotFound
                     }
                     
-                    // Update feed metadata
+                    // Update feed metadata ONLY - don't touch episodes here
+                    // Reconciliation will handle ALL episode updates/adds/deletes
                     managedFeed.title = updatedFeed.title
                     managedFeed.descriptionText = updatedFeed.descriptionText
                     managedFeed.artworkUrl = updatedFeed.artworkUrl
-                    
-                    // Filter truly new episodes (not already in database)
-                    let existingEpisodeIds = try self.getExistingEpisodeIds(for: existingFeed.id, in: backgroundContext)
-                    let actuallyNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
-                    let parsedExistingEpisodes = newEpisodes.filter { existingEpisodeIds.contains($0.id) }
-                    
-                    // Save new episodes
-                    try self.saveEpisodesInBatches(actuallyNewEpisodes, for: managedFeed, in: backgroundContext)
-                    
-                    // Update existing episodes with newly parsed metadata (chapters/notes)
-                    if !parsedExistingEpisodes.isEmpty {
-                        try self.updateExistingEpisodes(parsedExistingEpisodes, feedId: existingFeed.id, in: backgroundContext)
-                    }
-                    
-                    // Clean up any duplicates that might have been created during the refresh
-                    try self.cleanupDuplicateEpisodes(in: backgroundContext)
                     
                     try backgroundContext.save()
                     
@@ -503,14 +495,15 @@ class PodcastFeedManager {
                     DispatchQueue.main.async {
                         do {
                             try CoreDataStack.shared.context.save()
-                            print("✅ Synchronized main context after feed update for: \(updatedFeed.title)")
+                            print("✅ Synchronized main context after feed metadata update for: \(updatedFeed.title)")
                         } catch {
                             print("⚠️ Failed to sync main context: \(error)")
                         }
                     }
                     
-                    os_log("🔄 Updated feed with %d new episodes and %d updated episodes", log: self.log, type: .info, actuallyNewEpisodes.count, parsedExistingEpisodes.count)
-                    continuation.resume(returning: (updatedFeed, actuallyNewEpisodes))
+                    os_log("🔄 Updated feed metadata - reconciliation will handle all episode changes", log: self.log, type: .info)
+                    // Return all episodes as "new" for reconciliation to process
+                    continuation.resume(returning: (updatedFeed, newEpisodes))
                     
                 } catch {
                     os_log("❌ Failed to update feed: %@", log: self.log, type: .error, error.localizedDescription)
@@ -978,6 +971,28 @@ extension PodcastFeedManager {
             throw FeedError.feedDataCorrupted
         } else {
             throw FeedError.retryLimitExceeded
+        }
+    }
+    
+    /// Enforce episode limit for a feed by removing oldest episodes
+    private func enforceEpisodeLimitInContext(for feedId: String, maxEpisodes: Int, in context: NSManagedObjectContext) throws {
+        // Get all episodes for this feed, sorted by publication date (newest first)
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+        
+        let allEpisodes = try context.fetch(fetchRequest)
+        
+        // If we have more episodes than the limit, delete the oldest ones
+        if allEpisodes.count > maxEpisodes {
+            let episodesToDelete = Array(allEpisodes.dropFirst(maxEpisodes))
+            
+            for episode in episodesToDelete {
+                context.delete(episode)
+            }
+            
+            os_log("🗑️ EPISODE LIMIT: Removed %d excess episodes for feed %@ (limit: %d, had: %d)", 
+                   log: self.log, type: .info, episodesToDelete.count, feedId, maxEpisodes, allEpisodes.count)
         }
     }
 }
