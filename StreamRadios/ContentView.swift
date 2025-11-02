@@ -1120,6 +1120,43 @@ struct CompactPlayerView: View {
     @Binding var isPlayerSheetPresented: Bool
     @Environment(\.colorScheme) var colorScheme
     
+    // Computed properties for adaptive colors
+    private var playbackControlIconColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var buttonGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.25),
+                Color.white.opacity(0.05),
+                Color.white.opacity(0.15)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.05),
+                Color.black.opacity(0.10)
+            ]
+        }
+    }
+    
+    private var buttonBorderColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.4),
+                Color.white.opacity(0.1),
+                Color.white.opacity(0.3)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.3),
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.25)
+            ]
+        }
+    }
+    
     var body: some View {
         if #available(iOS 26.0, *) {
             // Compact single-row layout with liquid glass effect
@@ -1201,11 +1238,7 @@ struct CompactPlayerView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -1216,27 +1249,23 @@ struct CompactPlayerView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 0.5
+                                lineWidth: 1.5
                             )
                             .frame(width: 44, height: 44)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(0.8)
-                                .tint(.white)
+                                .tint(playbackControlIconColor)
                         } else {
                             // Show pause when actually playing; show play when paused or stopped
                             Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.headline)
-                                .foregroundColor(.white)
+                                .foregroundColor(playbackControlIconColor)
                                 .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
@@ -1335,11 +1364,7 @@ struct CompactPlayerView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -1350,27 +1375,23 @@ struct CompactPlayerView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 0.5
+                                lineWidth: 1.5
                             )
                             .frame(width: 44, height: 44)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(0.8)
-                                .tint(.white)
+                                .tint(playbackControlIconColor)
                         } else {
                             // Show pause when actually playing; show play when paused or stopped
                             Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.headline)
-                                .foregroundColor(.white)
+                                .foregroundColor(playbackControlIconColor)
                                 .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
@@ -1471,6 +1492,43 @@ struct UnifiedPodcastPlayerView: View {
     
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.horizontalSizeClass) var sizeClass
+    
+    // Computed properties for adaptive colors
+    private var playbackControlIconColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var buttonGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.25),
+                Color.white.opacity(0.05),
+                Color.white.opacity(0.15)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.05),
+                Color.black.opacity(0.10)
+            ]
+        }
+    }
+    
+    private var buttonBorderColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.4),
+                Color.white.opacity(0.1),
+                Color.white.opacity(0.3)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.3),
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.25)
+            ]
+        }
+    }
     
     @State private var showChaptersNotes = false
     @State private var showAudioSettings = false
@@ -1600,11 +1658,7 @@ struct UnifiedPodcastPlayerView: View {
                                     Circle()
                                         .fill(
                                             LinearGradient(
-                                                colors: [
-                                                    Color.white.opacity(0.25),
-                                                    Color.white.opacity(0.05),
-                                                    Color.white.opacity(0.15)
-                                                ],
+                                                colors: buttonGradientColors,
                                                 startPoint: .topLeading,
                                                 endPoint: .bottomTrailing
                                             )
@@ -1615,32 +1669,28 @@ struct UnifiedPodcastPlayerView: View {
                                     Circle()
                                         .stroke(
                                             LinearGradient(
-                                                colors: [
-                                                    Color.white.opacity(0.4),
-                                                    Color.white.opacity(0.1),
-                                                    Color.white.opacity(0.3)
-                                                ],
+                                                colors: buttonBorderColors,
                                                 startPoint: .topLeading,
                                                 endPoint: .bottomTrailing
                                             ),
-                                            lineWidth: 0.5
+                                            lineWidth: 1.5
                                         )
                                         .frame(width: playButtonSize, height: playButtonSize)
                                     
                                     if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
                                         // Show loading spinner when episode is loading
                                         ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .progressViewStyle(CircularProgressViewStyle(tint: playbackControlIconColor))
                                             .scaleEffect(0.8)
                                     } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
                                         // Show spinning indicator when reconnecting or buffering
                                         ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .progressViewStyle(CircularProgressViewStyle(tint: playbackControlIconColor))
                                             .scaleEffect(0.8)
                                     } else {
                                         Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
                                             .font(.system(size: playIconSize))
-                                            .foregroundColor(.white)
+                                            .foregroundColor(playbackControlIconColor)
                                     }
                                 }
                                 .modifier(GlassEffectModifier(shape: Circle()))

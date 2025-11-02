@@ -191,6 +191,43 @@ struct HomeButton: View {
     @State private var shouldShow = false
     @Environment(\.colorScheme) var colorScheme
     
+    // Computed properties for adaptive colors
+    private var iconColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var buttonGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.25),
+                Color.white.opacity(0.05),
+                Color.white.opacity(0.15)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.05),
+                Color.black.opacity(0.10)
+            ]
+        }
+    }
+    
+    private var buttonBorderColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.4),
+                Color.white.opacity(0.1),
+                Color.white.opacity(0.3)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.3),
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.25)
+            ]
+        }
+    }
+    
     var body: some View {
         Group {
             // Show button directly based on isScrolling OR shouldShow state
@@ -224,11 +261,7 @@ struct HomeButton: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -239,21 +272,17 @@ struct HomeButton: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 1
+                                lineWidth: 2
                             )
                             .frame(width: 55, height: 55)
                         
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 22, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(iconColor)
                             .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                     }
                     .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)

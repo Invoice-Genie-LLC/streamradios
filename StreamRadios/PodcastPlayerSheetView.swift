@@ -53,6 +53,42 @@ struct PodcastPlayerSheetView: View {
         colorScheme == .dark ? Color.gray.opacity(0.3) : Color.gray.opacity(0.2)
     }
     
+    private var playbackControlIconColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var buttonGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.25),
+                Color.white.opacity(0.05),
+                Color.white.opacity(0.15)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.05),
+                Color.black.opacity(0.10)
+            ]
+        }
+    }
+    
+    private var buttonBorderColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.4),
+                Color.white.opacity(0.1),
+                Color.white.opacity(0.3)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.3),
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.25)
+            ]
+        }
+    }
+    
     init(episode: PodcastEpisode, feed: PodcastFeed, podcastPlayer: PodcastPlayer, viewModel: PodcastViewModel, isPresented: Binding<Bool>) {
         self.episode = episode
         self.feed = feed
@@ -616,11 +652,7 @@ struct PodcastPlayerSheetView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -631,21 +663,17 @@ struct PodcastPlayerSheetView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 0.5
+                                lineWidth: 1.5
                             )
                             .frame(width: 44, height: 44)
                         
                         Image(systemName: "gobackward.15")
                             .font(.title2)
-                            .foregroundColor(.white)
+                            .foregroundColor(playbackControlIconColor)
                             .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                     }
                     .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
@@ -666,11 +694,7 @@ struct PodcastPlayerSheetView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -681,30 +705,26 @@ struct PodcastPlayerSheetView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 1
+                                lineWidth: 2
                             )
                             .frame(width: 64, height: 64)
                         
                         if podcastPlayer.loadingEpisodeId == episode.id && !podcastPlayer.isPlaying {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .progressViewStyle(CircularProgressViewStyle(tint: playbackControlIconColor))
                                 .scaleEffect(1.2)
                         } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .progressViewStyle(CircularProgressViewStyle(tint: playbackControlIconColor))
                                 .scaleEffect(1.2)
                         } else {
                             Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.largeTitle)
-                                .foregroundColor(.white)
+                                .foregroundColor(playbackControlIconColor)
                                 .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
@@ -726,11 +746,7 @@ struct PodcastPlayerSheetView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -741,21 +757,17 @@ struct PodcastPlayerSheetView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 0.5
+                                lineWidth: 1.5
                             )
                             .frame(width: 44, height: 44)
                         
                         Image(systemName: "goforward.30")
                             .font(.title2)
-                            .foregroundColor(.white)
+                            .foregroundColor(playbackControlIconColor)
                             .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                     }
                     .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)

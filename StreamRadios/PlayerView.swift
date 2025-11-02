@@ -11,12 +11,50 @@ struct PlayerView: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
     @State private var bitrateMessage: String = "Playing at high bitrate: 256 kbps"
+    @Environment(\.colorScheme) var colorScheme
     
     // Station list to use for skip/previous navigation - defaults to all stations if not provided
     let stationsForNavigation: [RadioStation]?
     
     init(stationsForNavigation: [RadioStation]? = nil) {
         self.stationsForNavigation = stationsForNavigation
+    }
+    
+    // Computed properties for adaptive colors
+    private var playbackControlIconColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var buttonGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.25),
+                Color.white.opacity(0.05),
+                Color.white.opacity(0.15)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.05),
+                Color.black.opacity(0.10)
+            ]
+        }
+    }
+    
+    private var buttonBorderColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color.white.opacity(0.4),
+                Color.white.opacity(0.1),
+                Color.white.opacity(0.3)
+            ]
+        } else {
+            return [
+                Color.black.opacity(0.3),
+                Color.black.opacity(0.15),
+                Color.black.opacity(0.25)
+            ]
+        }
     }
     
     // Computed property to get the effective stations list
@@ -49,11 +87,7 @@ struct PlayerView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -64,21 +98,17 @@ struct PlayerView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 0.5
+                                lineWidth: 1.5
                             )
                             .frame(width: 44, height: 44)
                         
                         Image(systemName: "backward.fill")
                             .font(.title2)
-                            .foregroundColor(canSkipStations ? .white : .gray)
+                            .foregroundColor(canSkipStations ? playbackControlIconColor : .gray)
                             .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                     }
                     .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
@@ -100,11 +130,7 @@ struct PlayerView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -115,27 +141,23 @@ struct PlayerView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 1
+                                lineWidth: 2
                             )
                             .frame(width: 64, height: 64)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(1.2)
-                                .tint(.white)
+                                .tint(playbackControlIconColor)
                         } else {
                             // Show pause when playing, play when paused
                             Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.largeTitle)
-                                .foregroundColor(.white)
+                                .foregroundColor(playbackControlIconColor)
                                 .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
@@ -157,11 +179,7 @@ struct PlayerView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.white.opacity(0.05),
-                                        Color.white.opacity(0.15)
-                                    ],
+                                    colors: buttonGradientColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
@@ -172,21 +190,17 @@ struct PlayerView: View {
                         Circle()
                             .stroke(
                                 LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.4),
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.3)
-                                    ],
+                                    colors: buttonBorderColors,
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
-                                lineWidth: 0.5
+                                lineWidth: 1.5
                             )
                             .frame(width: 44, height: 44)
                         
                         Image(systemName: "forward.fill")
                             .font(.title2)
-                            .foregroundColor(canSkipStations ? .white : .gray)
+                            .foregroundColor(canSkipStations ? playbackControlIconColor : .gray)
                             .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                     }
                     .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
