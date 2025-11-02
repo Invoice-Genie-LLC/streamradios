@@ -17,6 +17,8 @@ struct PodcastChaptersNotesView: View {
     
     @State private var selectedTab = 0
 	@State private var fallbackChapters: [PodcastChapter] = []
+    @State private var hasScrolledToCurrentChapter = false
+    @State private var scrollTrigger = false
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.presentationMode) var presentationMode
     
@@ -67,17 +69,17 @@ struct PodcastChaptersNotesView: View {
                 }
                 
                 // Content based on selected tab or available data
-                ScrollView {
-					if selectedTab == 0 && hasChapters {
-						chaptersView
-                    } else if selectedTab == 1 && hasNotes {
-                        notesView
-                    } else if hasChapters && !hasNotes {
-                        chaptersView
-                    } else if hasNotes && !hasChapters {
-                        notesView
-                    } else {
-                        // No chapters or notes available
+				if selectedTab == 0 && hasChapters {
+					chaptersView
+                } else if selectedTab == 1 && hasNotes {
+                    notesView
+                } else if hasChapters && !hasNotes {
+                    chaptersView
+                } else if hasNotes && !hasChapters {
+                    notesView
+                } else {
+                    // No chapters or notes available
+                    ScrollView {
                         VStack(spacing: 16) {
                             Image(systemName: "book.closed")
                                 .font(.system(size: 48))
@@ -94,6 +96,12 @@ struct PodcastChaptersNotesView: View {
                         }
                         .padding(.top, 50)
                     }
+                }
+            }
+            .onChange(of: selectedTab) { oldValue, newValue in
+                // Trigger scroll to current chapter when switching to Chapters tab
+                if newValue == 0 && hasChapters {
+                    scrollTrigger.toggle()
                 }
             }
             .navigationTitle("Episode Details")
@@ -156,46 +164,66 @@ struct PodcastChaptersNotesView: View {
     
     // MARK: - Chapters View
 	private var chaptersView: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-				let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
-				if !chaptersToShow.isEmpty {
-					ForEach(chaptersToShow) { chapter in
-                        ChapterRowView(
-                            chapter: chapter,
-                            allChapters: chaptersToShow,
-                            episode: episode,
-                            feed: feed,
-                            podcastPlayer: podcastPlayer,
-                            isCurrentChapter: isCurrentChapter(chapter),
-                            progress: chapterProgress(for: chapter),
-                            durationText: formatChapterDuration(for: chapter),
-                            hasLink: chapterLinkURL(for: chapter) != nil,
-                            onTap: {
-                                seekToChapter(chapter)
-                            },
-                            onLinkTap: {
-                                openChapterLink(chapter)
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+                        if !chaptersToShow.isEmpty {
+                            ForEach(chaptersToShow) { chapter in
+                                ChapterRowView(
+                                    chapter: chapter,
+                                    allChapters: chaptersToShow,
+                                    episode: episode,
+                                    feed: feed,
+                                    podcastPlayer: podcastPlayer,
+                                    isCurrentChapter: isCurrentChapter(chapter),
+                                    progress: chapterProgress(for: chapter),
+                                    durationText: formatChapterDuration(for: chapter),
+                                    hasLink: chapterLinkURL(for: chapter) != nil,
+                                    onTap: {
+                                        seekToChapter(chapter)
+                                    },
+                                    onLinkTap: {
+                                        openChapterLink(chapter)
+                                    }
+                                )
+                                .id(chapter.id)
                             }
-                        )
+                        } else {
+                            // Fallback if no chapters
+                            VStack(alignment: .leading, spacing: 8) {
+                                Image(systemName: "list.number")
+                                    .font(.largeTitle)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                
+                                Text("No chapters available")
+                                    .font(.body)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.top, 40)
+                        }
                     }
-                } else {
-                    // Fallback if no chapters
-                    VStack(alignment: .leading, spacing: 8) {
-                        Image(systemName: "list.number")
-                            .font(.largeTitle)
-                            .foregroundColor(.adaptiveSecondaryText)
-                        
-                        Text("No chapters available")
-                            .font(.body)
-                            .foregroundColor(.adaptiveSecondaryText)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                }
+                .onAppear {
+                    // Scroll to current chapter when chapters view appears
+                    if !hasScrolledToCurrentChapter {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            scrollToCurrentChapter(proxy: proxy)
+                            hasScrolledToCurrentChapter = true
+                        }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 40)
+                }
+                .onChange(of: scrollTrigger) { _, _ in
+                    // Scroll to current chapter when tab is switched to Chapters
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        scrollToCurrentChapter(proxy: proxy)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
         }
     }
     
@@ -355,6 +383,28 @@ struct PodcastChaptersNotesView: View {
             if hasValidURL(raw) { return raw }
         }
         return nil
+    }
+    
+    // Scroll to the currently playing chapter
+    private func scrollToCurrentChapter(proxy: ScrollViewProxy) {
+        guard podcastPlayer.currentEpisode?.id == episode.id else { return }
+        
+        let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+        guard !chaptersToShow.isEmpty else { return }
+        
+        let currentTime = podcastPlayer.currentTime
+        
+        // Find the current chapter based on current time
+        for (index, chapter) in chaptersToShow.enumerated() {
+            let nextChapterTime = index + 1 < chaptersToShow.count ? chaptersToShow[index + 1].startTime : episode.duration
+            if currentTime >= chapter.startTime && currentTime < nextChapterTime {
+                // Scroll to this chapter with animation
+                withAnimation {
+                    proxy.scrollTo(chapter.id, anchor: .top)
+                }
+                return
+            }
+        }
     }
     
     private func formatTime(_ time: TimeInterval) -> String {

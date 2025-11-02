@@ -24,6 +24,8 @@ struct PodcastPlayerSheetView: View {
     @State private var fallbackChapters: [PodcastChapter] = []
     @State private var showDeleteDownloadAlert = false
     @State private var refreshTrigger = false // Force view refresh after download operations
+    @State private var hasScrolledToCurrentChapter = false
+    @State private var scrollTrigger = false
     @Environment(\.colorScheme) var colorScheme
     
     // Computed properties for adaptive colors
@@ -225,6 +227,12 @@ struct PodcastPlayerSheetView: View {
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.3), value: selectedTab)
+                .onChange(of: selectedTab) { oldValue, newValue in
+                    // Trigger scroll to current chapter when switching to Chapters tab
+                    if newValue == 2 && hasChapters {
+                        scrollTrigger.toggle()
+                    }
+                }
                 
                 // Bottom menu - always visible
                 bottomMenuView
@@ -396,46 +404,66 @@ struct PodcastPlayerSheetView: View {
     
     @ViewBuilder
     private var chaptersView: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
-                if !chaptersToShow.isEmpty {
-                    ForEach(chaptersToShow) { chapter in
-                        ChapterRowView(
-                            chapter: chapter,
-                            allChapters: chaptersToShow,
-                            episode: episode,
-                            feed: feed,
-                            podcastPlayer: podcastPlayer,
-                            isCurrentChapter: isCurrentChapter(chapter),
-                            progress: chapterProgress(for: chapter),
-                            durationText: formatChapterDuration(for: chapter),
-                            hasLink: chapterLinkURL(for: chapter) != nil,
-                            onTap: {
-                                seekToChapter(chapter)
-                            },
-                            onLinkTap: {
-                                openChapterLink(chapter)
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+                        if !chaptersToShow.isEmpty {
+                            ForEach(chaptersToShow) { chapter in
+                                ChapterRowView(
+                                    chapter: chapter,
+                                    allChapters: chaptersToShow,
+                                    episode: episode,
+                                    feed: feed,
+                                    podcastPlayer: podcastPlayer,
+                                    isCurrentChapter: isCurrentChapter(chapter),
+                                    progress: chapterProgress(for: chapter),
+                                    durationText: formatChapterDuration(for: chapter),
+                                    hasLink: chapterLinkURL(for: chapter) != nil,
+                                    onTap: {
+                                        seekToChapter(chapter)
+                                    },
+                                    onLinkTap: {
+                                        openChapterLink(chapter)
+                                    }
+                                )
+                                .id(chapter.id)
                             }
-                        )
+                        } else {
+                            // Fallback if no chapters - using same logic as PodcastChaptersNotesView
+                            VStack(alignment: .leading, spacing: 8) {
+                                Image(systemName: "list.number")
+                                    .font(.largeTitle)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                
+                                Text("No chapters available")
+                                    .font(.body)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.top, 40)
+                        }
                     }
-                } else {
-                    // Fallback if no chapters - using same logic as PodcastChaptersNotesView
-                    VStack(alignment: .leading, spacing: 8) {
-                        Image(systemName: "list.number")
-                            .font(.largeTitle)
-                            .foregroundColor(.adaptiveSecondaryText)
-                        
-                        Text("No chapters available")
-                            .font(.body)
-                            .foregroundColor(.adaptiveSecondaryText)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                }
+                .onAppear {
+                    // Scroll to current chapter when chapters view appears
+                    if !hasScrolledToCurrentChapter {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            scrollToCurrentChapter(proxy: proxy)
+                            hasScrolledToCurrentChapter = true
+                        }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 40)
+                }
+                .onChange(of: scrollTrigger) { _, _ in
+                    // Scroll to current chapter when tab is switched to Chapters
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        scrollToCurrentChapter(proxy: proxy)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
         }
     }
     
@@ -1067,6 +1095,28 @@ struct PodcastPlayerSheetView: View {
         let seconds = Int(max(1, round(end - start)))
         let minutes = Int(round(Double(seconds) / 60.0))
         return "\(max(1, minutes))m"
+    }
+    
+    // Scroll to the currently playing chapter
+    private func scrollToCurrentChapter(proxy: ScrollViewProxy) {
+        guard podcastPlayer.currentEpisode?.id == episode.id else { return }
+        
+        let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+        guard !chaptersToShow.isEmpty else { return }
+        
+        let currentTime = podcastPlayer.currentTime
+        
+        // Find the current chapter based on current time
+        for (index, chapter) in chaptersToShow.enumerated() {
+            let nextChapterTime = index + 1 < chaptersToShow.count ? chaptersToShow[index + 1].startTime : episode.duration
+            if currentTime >= chapter.startTime && currentTime < nextChapterTime {
+                // Scroll to this chapter with animation
+                withAnimation {
+                    proxy.scrollTo(chapter.id, anchor: .top)
+                }
+                return
+            }
+        }
     }
     
     private func openChapterLink(_ chapter: PodcastChapter) {
