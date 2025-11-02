@@ -7517,14 +7517,21 @@ class PodcastViewModel: ObservableObject {
         print("📊 FAST SYNC: Processing \(feedsToProcess.count) feeds in \(batches.count) batches of \(batchSize)")
         
         for (batchIndex, batch) in batches.enumerated() {
-            print("🔄 FAST SYNC: Processing batch \(batchIndex + 1)/\(batches.count) with \(batch.count) feeds")
+            print("🔄 Processing batch \(batchIndex + 1)/\(batches.count) with \(batch.count) feeds")
             
-            // Update progress for batch start
+            // Update progress for batch start with detailed info
             let batchProgress = Double(processedCount) / Double(feedsToProcess.count)
+            let progressPercent = Int(batchProgress * 100)
             await MainActor.run {
                 DataSyncManager.shared.updateFeedParsingProgress(
                     batchProgress, 
-                    message: "Processing batch \(batchIndex + 1) of \(batches.count)..."
+                    message: "Processing \(processedCount)/\(feedsToProcess.count) feeds (\(progressPercent)%)..."
+                )
+                
+                // Update podcast feed counts in DataSyncManager
+                DataSyncManager.shared.updatePodcastFeedCounts(
+                    current: processedCount,
+                    total: feedsToProcess.count
                 )
             }
             
@@ -7560,12 +7567,19 @@ class PodcastViewModel: ObservableObject {
             
             processedCount += batch.count
             
-            // Update progress after batch completion
+            // Update progress after batch completion with detailed info
             let completedProgress = Double(processedCount) / Double(feedsToProcess.count)
+            let completedPercent = Int(completedProgress * 100)
             await MainActor.run {
                 DataSyncManager.shared.updateFeedParsingProgress(
                     completedProgress, 
-                    message: "Completed \(processedCount)/\(feedsToProcess.count) feeds..."
+                    message: "Completed \(processedCount)/\(feedsToProcess.count) feeds (\(completedPercent)%)..."
+                )
+                
+                // Update podcast feed counts in DataSyncManager
+                DataSyncManager.shared.updatePodcastFeedCounts(
+                    current: processedCount,
+                    total: feedsToProcess.count
                 )
             }
             
@@ -7631,6 +7645,9 @@ class PodcastViewModel: ObservableObject {
         
         // CRITICAL: Wait for all Core Data save operations to complete  
         print("⏳ Waiting for all Core Data save operations to complete...")
+        await MainActor.run {
+            DataSyncManager.shared.updateFeedParsingProgress(0.95, message: "Saving all episodes to storage...")
+        }
         try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds for all async saves to complete
         
         // Force a final Core Data save to ensure everything is persisted

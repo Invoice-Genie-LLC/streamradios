@@ -42,6 +42,41 @@ struct DataSyncProgressView: View {
                             .multilineTextAlignment(.center)
                     }
                     
+                    // User guidance section
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.blue)
+                            
+                            Text("Please Wait")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                            
+                            Spacer()
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("• Keep the app open during sync")
+                            Text("• Don't close or switch apps")
+                            Text("• Sync time depends on your feed count")
+                            Text("• Large collections may take several minutes")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.blue.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                    
                     // Overall progress bar (more compact)
                     VStack(spacing: 4) {
                         HStack {
