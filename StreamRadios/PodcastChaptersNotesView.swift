@@ -163,6 +163,10 @@ struct PodcastChaptersNotesView: View {
 					ForEach(chaptersToShow) { chapter in
                         ChapterRowView(
                             chapter: chapter,
+                            allChapters: chaptersToShow,
+                            episode: episode,
+                            feed: feed,
+                            podcastPlayer: podcastPlayer,
                             isCurrentChapter: isCurrentChapter(chapter),
                             progress: chapterProgress(for: chapter),
                             durationText: formatChapterDuration(for: chapter),
@@ -516,12 +520,27 @@ struct PodcastChaptersNotesView: View {
 // MARK: - Chapter Row View
 struct ChapterRowView: View {
     let chapter: PodcastChapter
+    let allChapters: [PodcastChapter]
+    let episode: PodcastEpisode
+    let feed: PodcastFeed
+    @ObservedObject var podcastPlayer: PodcastPlayer
     let isCurrentChapter: Bool
     let progress: Double
     let durationText: String
     let hasLink: Bool
     let onTap: () -> Void
     let onLinkTap: () -> Void
+    
+    // Check if this specific chapter is currently playing
+    private var isPlayingThisChapter: Bool {
+        // Only show stop button if this episode is playing AND we're at this specific chapter
+        guard podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying else {
+            return false
+        }
+        
+        // Check if current playback time is within this chapter's time range
+        return isCurrentChapter
+    }
     
     var body: some View {
         Button(action: onTap) {
@@ -555,6 +574,18 @@ struct ChapterRowView: View {
                             .foregroundColor(.adaptiveSecondaryText)
                             .monospacedDigit()
                         HStack(spacing: 8) {
+                            // Play/Stop button for this chapter
+                            Button(action: handlePlayStop) {
+                                Image(systemName: isPlayingThisChapter ? "stop.fill" : "play.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white)
+                                    .frame(width: 32, height: 32)
+                                    .background(isPlayingThisChapter ? Color.red : Color.blue)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .accessibilityLabel(isPlayingThisChapter ? "Stop playing" : "Play from chapter")
+                            
                             if hasLink {
                                 Button(action: onLinkTap) {
                                     Image(systemName: "link")
@@ -565,7 +596,7 @@ struct ChapterRowView: View {
                                 .accessibilityLabel("Open chapter link")
                             }
                             if isCurrentChapter {
-                                Image(systemName: "play.fill")
+                                Image(systemName: "waveform")
                                     .font(.caption)
                                     .foregroundColor(.blue)
                             }
@@ -600,6 +631,47 @@ struct ChapterRowView: View {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         } else {
             return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+    
+    // Handle play/stop button action
+    private func handlePlayStop() {
+        if isPlayingThisChapter {
+            // Stop playback if currently playing this specific chapter
+            podcastPlayer.pause()
+        } else {
+            // Start playing from this chapter
+            if podcastPlayer.currentEpisode?.id != episode.id {
+                // Different episode - load and play from chapter start
+                podcastPlayer.playEpisode(episode, feed: feed)
+                // Wait a moment for the episode to load, then seek to chapter
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    podcastPlayer.seek(to: chapter.startTime)
+                }
+            } else {
+                // Same episode - check if we should resume or seek to chapter start
+                let currentTime = podcastPlayer.currentTime
+                
+                // Determine if current position is within this chapter's time range
+                if let chapterIndex = allChapters.firstIndex(where: { $0.id == chapter.id }) {
+                    let nextChapterTime = chapterIndex + 1 < allChapters.count ? allChapters[chapterIndex + 1].startTime : episode.duration
+                    
+                    // If current time is within this chapter's range, just resume playback
+                    // Otherwise, seek to chapter start
+                    if currentTime >= chapter.startTime && currentTime < nextChapterTime {
+                        // Resume from current position
+                        podcastPlayer.play()
+                    } else {
+                        // Seek to chapter start and play
+                        podcastPlayer.seek(to: chapter.startTime)
+                        podcastPlayer.play()
+                    }
+                } else {
+                    // Fallback: seek to chapter start
+                    podcastPlayer.seek(to: chapter.startTime)
+                    podcastPlayer.play()
+                }
+            }
         }
     }
 }

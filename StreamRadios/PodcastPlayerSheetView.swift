@@ -403,6 +403,10 @@ struct PodcastPlayerSheetView: View {
                     ForEach(chaptersToShow) { chapter in
                         ChapterRowView(
                             chapter: chapter,
+                            allChapters: chaptersToShow,
+                            episode: episode,
+                            feed: feed,
+                            podcastPlayer: podcastPlayer,
                             isCurrentChapter: isCurrentChapter(chapter),
                             progress: chapterProgress(for: chapter),
                             durationText: formatChapterDuration(for: chapter),
