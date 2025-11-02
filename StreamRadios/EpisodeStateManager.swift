@@ -978,6 +978,23 @@ class EpisodeStateManager: ObservableObject {
                 .union(Set(self.episodeFavorites.keys))
                 .union(Set(self.episodeDownloads.keys))
             
+            // FRESH INSTALL FIX: Check if there are ANY episodes in Core Data first
+            // This prevents hundreds of "Episode not found" warnings on fresh installs
+            let countRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            countRequest.fetchLimit = 1
+            
+            do {
+                let episodeCount = try context.count(for: countRequest)
+                if episodeCount == 0 {
+                    print("⚡ FRESH INSTALL: No episodes in Core Data - skipping episode state save")
+                    print("⚡ Episode states will be saved automatically when you add your first podcast feed")
+                    return
+                }
+            } catch {
+                print("❌ EpisodeStateManager: Failed to check episode count: \(error)")
+                // Continue anyway in case of error
+            }
+            
             print("💾 CORE DATA SAVE: Attempting to update \(episodesToUpdate.count) episodes")
             
             for episodeId in episodesToUpdate {

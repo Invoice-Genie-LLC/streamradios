@@ -175,8 +175,12 @@ struct HiddenCountriesSettingsView: View {
                             }
                         }
                         .foregroundColor(.blue)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(Color.clear)
+                        )
                     } else {
                         HStack(spacing: 8) {
                             // Search button

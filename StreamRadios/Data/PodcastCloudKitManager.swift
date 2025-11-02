@@ -2213,9 +2213,10 @@ class PodcastCloudKitManager: ObservableObject {
                 // Only process if this episode exists locally
                 guard episodeIdSet.contains(episodeId) else { continue }
 
-                // Update progress tracking less frequently to reduce main thread pressure
+                // PERFORMANCE OPTIMIZATION: Update progress tracking MUCH less frequently
+                // Reduced from every 50 to every 100 for better performance
                 processedCount += 1
-                if processedCount % 50 == 0 || processedCount == totalCloudStates {
+                if processedCount % 100 == 0 || processedCount == totalCloudStates {
                     // Use Task to avoid blocking current background processing
                     Task { @MainActor in
                         await DataSyncManager.shared.updateEpisodeStateProgress(
@@ -2424,7 +2425,7 @@ class PodcastCloudKitManager: ObservableObject {
     
     /// Fetch all episode states from CloudKit using batched queries (200 records per batch)
     func fetchAllEpisodeStatesFromCloudKit() async throws -> [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool, feedId: String?)] {
-        os_log("🔄 Fetching all episode states from CloudKit in batches of 200", log: log, type: .info)
+        os_log("🔄 FAST SYNC: Fetching all episode states from CloudKit in batches of 200", log: log, type: .info)
         
         let query = CKQuery(recordType: RecordType.episodeState, predicate: NSPredicate(value: true))
         query.sortDescriptors = [NSSortDescriptor(key: "lastUpdated", ascending: false)]
@@ -2435,7 +2436,7 @@ class PodcastCloudKitManager: ObservableObject {
         let batchSize = 200
         
         repeat {
-            os_log("📦 Fetching batch %d of episode states (batch size: %d)", log: log, type: .info, batchNumber, batchSize)
+            os_log("📦 FAST SYNC: Fetching batch %d of episode states (batch size: %d)", log: log, type: .info, batchNumber, batchSize)
             
             let operation = CKQueryOperation(query: query)
             operation.resultsLimit = batchSize
@@ -2444,6 +2445,14 @@ class PodcastCloudKitManager: ObservableObject {
             
             let (batchResults, nextCursor) = try await performBatchedQuery(operation: operation)
             cursor = nextCursor
+            
+            // PERFORMANCE OPTIMIZATION: If first batch is empty, skip remaining batches
+            // This is common for truly fresh installs with no prior data
+            if batchNumber == 1 && batchResults.isEmpty {
+                os_log("⚡ FAST SYNC: No episode states found in CloudKit - skipping sync for fresh install", log: log, type: .info)
+                print("⚡ FAST SYNC: No episode states in CloudKit - instant sync complete!")
+                return [:] // Return empty dictionary immediately
+            }
             
             // Process this batch
             for (recordID, recordResult) in batchResults {
@@ -2463,27 +2472,29 @@ class PodcastCloudKitManager: ObservableObject {
                 }
             }
             
-            os_log("✅ Processed batch %d: %d episode states total so far", log: log, type: .info, batchNumber, episodeStates.count)
+            os_log("✅ FAST SYNC: Processed batch %d: %d episode states total so far", log: log, type: .info, batchNumber, episodeStates.count)
             
-            // Update progress tracking for batched fetching
-            Task { @MainActor in
-                await DataSyncManager.shared.updateEpisodeStateProgress(
-                    currentCount: episodeStates.count,
-                    operation: "Fetched batch \(batchNumber) of episode states (\(episodeStates.count) total)..."
-                )
+            // Update progress tracking for batched fetching (less frequently for better performance)
+            if batchNumber % 2 == 0 || cursor == nil {
+                Task { @MainActor in
+                    await DataSyncManager.shared.updateEpisodeStateProgress(
+                        currentCount: episodeStates.count,
+                        operation: "Fetched batch \(batchNumber) of episode states (\(episodeStates.count) total)..."
+                    )
+                }
             }
             
             batchNumber += 1
             
         } while cursor != nil
         
-        os_log("✅ Completed fetching all episode states from CloudKit: %d total records in %d batches", log: log, type: .info, episodeStates.count, batchNumber - 1)
+        os_log("✅ FAST SYNC: Completed fetching all episode states from CloudKit: %d total records in %d batches", log: log, type: .info, episodeStates.count, batchNumber - 1)
         
         // DEBUG: Log summary of fetched states for fresh install debugging
         let statesWithProgress = episodeStates.values.filter { $0.progress > 0 }.count
         let statesWithFavorites = episodeStates.values.filter { $0.isFavorite }.count
         let statesWithPlayed = episodeStates.values.filter { $0.isPlayed }.count
-        print("☁️ CLOUDKIT DEBUG: Fetched \(episodeStates.count) episode states - Progress: \(statesWithProgress), Favorites: \(statesWithFavorites), Played: \(statesWithPlayed)")
+        print("☁️ FAST SYNC: Fetched \(episodeStates.count) episode states - Progress: \(statesWithProgress), Favorites: \(statesWithFavorites), Played: \(statesWithPlayed)")
         
         return episodeStates
     }

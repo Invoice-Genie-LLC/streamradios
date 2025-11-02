@@ -1723,7 +1723,7 @@ class DataSyncManager: ObservableObject {
                 podcastFeedsProgress = 1.0
                 feedParsingProgress = 1.0
                 feedParsingMessage = "Fresh install processing completed successfully"
-                try? await Task.sleep(nanoseconds: 500_000_000) // Show completion for 0.5 seconds
+                // PERFORMANCE OPTIMIZATION: Removed 0.5s delay for instant UI readiness
                 isParsingFeeds = false
                 
                 // Mark feeds as synced
@@ -1998,16 +1998,11 @@ class DataSyncManager: ObservableObject {
             print("🗑️ CLEARED: All old episode snapshots to ensure fresh state data")
         }
         
-        // First, ensure EpisodeStateManager is ready before creating snapshots
+        // PERFORMANCE OPTIMIZATION: Skip waiting for EpisodeStateManager
+        // Fresh installs don't have episode states yet, so no need to wait
+        // This saves up to 1 second during fresh install sync
         if !EpisodeStateManager.shared.isReady {
-            print("⚠️ SNAPSHOT: EpisodeStateManager not ready, waiting...")
-            // Wait briefly for it to be ready
-            for _ in 0..<10 {
-                if EpisodeStateManager.shared.isReady {
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-            }
+            print("⚡ FAST SYNC: EpisodeStateManager not ready, but proceeding anyway for fresh install speed")
         }
         
         await MainActor.run { [weak self] in

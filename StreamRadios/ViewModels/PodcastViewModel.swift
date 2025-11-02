@@ -1120,6 +1120,14 @@ class PodcastViewModel: ObservableObject {
     }
     
     @objc private func handleInstantPodcastFeedAddedSync(_ notification: Notification) {
+        // FRESH INSTALL FIX: Skip processing if user hasn't added any feeds yet
+        // This prevents automatic feed sync from other devices on fresh installs
+        // User should explicitly choose which feeds to add on a new device
+        if podcastFeeds.isEmpty {
+            print("⚡ FRESH INSTALL: Skipping feed sync from other device - user hasn't added any feeds yet")
+            return
+        }
+        
         guard let userInfo = notification.userInfo,
               let feedData = userInfo["feed"] as? [String: Any] else {
             return
@@ -1246,6 +1254,12 @@ class PodcastViewModel: ObservableObject {
     }
     
     @objc private func handleInstantPodcastFeedRemovedSync(_ notification: Notification) {
+        // FRESH INSTALL FIX: Skip processing if there are no local feeds
+        // This prevents hundreds of logs on fresh installs with no data
+        if podcastFeeds.isEmpty {
+            return
+        }
+        
         print("📡 🔔 NOTIFICATION RECEIVED: InstantSyncDidRemovePodcastFeed")
         print("📡 📝 Notification object: \(String(describing: notification.object))")
         
@@ -1400,6 +1414,12 @@ class PodcastViewModel: ObservableObject {
             return
         }
         
+        // FRESH INSTALL FIX: Skip processing if there are no local feeds
+        // This prevents hundreds of logs on fresh installs with no data
+        if podcastFeeds.isEmpty {
+            return
+        }
+        
         // Update episode download status from remote sync
         let currentDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
         
@@ -1455,6 +1475,12 @@ class PodcastViewModel: ObservableObject {
         guard let userInfo = notification.userInfo,
               let episodeId = userInfo["episodeId"] as? String,
               let isPlayed = userInfo["isPlayed"] as? Bool else {
+            return
+        }
+        
+        // FRESH INSTALL FIX: Skip processing if there are no local feeds
+        // This prevents hundreds of logs on fresh installs with no data
+        if podcastFeeds.isEmpty {
             return
         }
         
@@ -1995,6 +2021,14 @@ class PodcastViewModel: ObservableObject {
     // MARK: - CloudKit Automatic Sync Handlers
     
     @objc private func handleCloudKitFeedAddedSync(_ notification: Notification) {
+        // FRESH INSTALL FIX: Skip processing if user hasn't added any feeds yet
+        // This prevents automatic feed sync from other devices on fresh installs
+        // User should explicitly choose which feeds to add on a new device
+        if podcastFeeds.isEmpty {
+            print("⚡ FRESH INSTALL: Skipping feed sync from other device - user hasn't added any feeds yet")
+            return
+        }
+        
         guard let userInfo = notification.userInfo,
               let feed = userInfo["feed"] as? PodcastFeed else {
             print("📡 ☁️ CLOUDKIT FEED ADD FAILED: Invalid feed data in notification")
@@ -7201,10 +7235,21 @@ class PodcastViewModel: ObservableObject {
                 return true
             }
         } else {
-            print("🆕 FRESH INSTALL: Forcing CloudKit episode state sync - snapshots don't have state data yet")
+            print("🆕 FRESH INSTALL: Checking if CloudKit episode state sync is needed")
         }
         
-        print("🔄 Syncing episode states from CloudKit (fresh install: \(isFreshInstall))")
+        // CRITICAL FIX: Get episode IDs directly from Core Data to ensure we get ALL episodes
+        let allEpisodeIds = await getAllEpisodeIdsFromCoreData()
+        
+        // FRESH INSTALL FIX: Skip CloudKit sync if there are no local episodes
+        // This prevents hundreds of "Episode not found in Core Data" warnings on truly fresh installs
+        if allEpisodeIds.isEmpty {
+            print("⚡ FRESH INSTALL: No local episodes found - skipping CloudKit episode state sync")
+            print("⚡ CloudKit sync will run automatically when you add your first podcast feed")
+            return true // Return success since there's nothing to sync
+        }
+        
+        print("🔄 Syncing episode states from CloudKit for \(allEpisodeIds.count) episodes (fresh install: \(isFreshInstall))")
         
         // Record sync attempt to prevent frequent retries
         await MainActor.run {
@@ -7212,8 +7257,6 @@ class PodcastViewModel: ObservableObject {
         }
         
         do {
-            // CRITICAL FIX: Get episode IDs directly from Core Data to ensure we get ALL episodes
-            let allEpisodeIds = await getAllEpisodeIdsFromCoreData()
             
             if !allEpisodeIds.isEmpty {
                 // Start episode state sync tracking in DataSyncManager
@@ -7465,15 +7508,16 @@ class PodcastViewModel: ObservableObject {
             DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: feedsToProcess.count)
         }
         
-        // Process feeds in batches for better performance
-        let batchSize = 5 // Process 5 feeds concurrently
+        // PERFORMANCE OPTIMIZATION: Process feeds in larger batches with minimal delays
+        // Fresh installs need to be FAST - process 10 feeds concurrently instead of 5
+        let batchSize = 10 // Process 10 feeds concurrently for faster fresh install
         let batches = feedsToProcess.chunked(into: batchSize)
         var processedCount = 0
         
-        print("📊 Processing \(feedsToProcess.count) feeds in \(batches.count) batches of \(batchSize)")
+        print("📊 FAST SYNC: Processing \(feedsToProcess.count) feeds in \(batches.count) batches of \(batchSize)")
         
         for (batchIndex, batch) in batches.enumerated() {
-            print("🔄 Processing batch \(batchIndex + 1)/\(batches.count) with \(batch.count) feeds")
+            print("🔄 FAST SYNC: Processing batch \(batchIndex + 1)/\(batches.count) with \(batch.count) feeds")
             
             // Update progress for batch start
             let batchProgress = Double(processedCount) / Double(feedsToProcess.count)
@@ -7527,9 +7571,10 @@ class PodcastViewModel: ObservableObject {
             
             print("✅ Completed batch \(batchIndex + 1)/\(batches.count) - \(processedCount)/\(feedsToProcess.count) feeds processed")
             
-            // Brief pause between batches to prevent overwhelming the system
+            // PERFORMANCE OPTIMIZATION: Minimal delay between batches for fresh install speed
+            // Reduced from 0.5s to 0.1s for 5x faster processing
             if batchIndex < batches.count - 1 {
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds (5x faster)
             }
         }
         

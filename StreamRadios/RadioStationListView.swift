@@ -299,6 +299,12 @@ struct RadioStationListView: View {
                     }
                 }
                 .foregroundColor(.blue)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(Color.clear)
+                )
             } else {
                 HStack(spacing: 8) {
                     // Search toggle button - Shows in all tabs

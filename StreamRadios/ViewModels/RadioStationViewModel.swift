@@ -1144,6 +1144,19 @@ class RadioStationViewModel: NSObject, ObservableObject {
     // MARK: - CloudKit Refresh Helpers
     
     private func refreshStationFromCloudKit(stationId: String) async {
+        // FRESH INSTALL FIX: Skip CloudKit refresh on fresh installs with no local data
+        // This prevents "Station not found in CloudKit" warnings when receiving sync notifications
+        // from other devices but having no local stations yet
+        let hasLocalStations = await MainActor.run {
+            return !self.stations.isEmpty
+        }
+        
+        if !hasLocalStations {
+            print("⚡ FRESH INSTALL: Skipping CloudKit station refresh - no local stations yet")
+            print("⚡ Station sync will run automatically when you add your first station")
+            return
+        }
+        
         do {
             if let updatedStation = try await RadioStationCloudKitManager.shared.fetchRadioStationFromCloudKit(stationId: stationId) {
                 await MainActor.run {
