@@ -116,6 +116,11 @@ struct RadioPlayerSheetView: View {
     @State private var forceTokenRefresh = false
     @State private var debugLog = ""
     @State private var debugMessage = ""
+    @State private var showSleepTimer = false
+    @State private var sleepTimerActive = false
+    @State private var sleepTimerEndTime: Date?
+    @State private var isFavorite = false
+    @State private var timerCheckTimer: Timer?
     
     var body: some View {
         NavigationView {
@@ -204,12 +209,14 @@ struct RadioPlayerSheetView: View {
         }
         .onAppear {
             startPulsing()
+            loadFavoriteState()
         }
         .onDisappear {
             if isShazaming {
                 shazamViewModel.stopListening()
                 isShazaming = false
             }
+            // Keep timer running even when sheet closes
         }
         .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
             Alert(
@@ -239,9 +246,17 @@ struct RadioPlayerSheetView: View {
             switch item {
             case .playlistPicker:
                 PlaylistPickerView(shazamViewModel: shazamViewModel)
-
-
             }
+        }
+        .sheet(isPresented: $showSleepTimer) {
+            RadioSleepTimerSheet(
+                sleepTimerActive: $sleepTimerActive,
+                sleepTimerEndTime: $sleepTimerEndTime,
+                timerCheckTimer: $timerCheckTimer,
+                radioPlayer: radioPlayer
+            )
+            .presentationDetents([.height(350), .large])
+            .presentationDragIndicator(.visible)
         }
 
 
@@ -403,10 +418,65 @@ struct RadioPlayerSheetView: View {
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)
             
-            AirPlayButtonView()
-                .frame(width: 44, height: 44)
+            // Footer menu
+            ZStack(alignment: .top) {
+                // Background that extends to bottom safe area
+                Color.adaptiveSecondaryBackground
+                    .edgesIgnoringSafeArea(.bottom)
+                
+                // Menu content at natural size
+                bottomMenuView
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.bottom, 8)
+    }
+    
+    // MARK: - Bottom Menu
+    private var bottomMenuView: some View {
+        HStack(spacing: 0) {
+            // AirPlay button
+            VStack(spacing: 4) {
+                AirPlayButtonView()
+                    .frame(width: 44, height: 24)
+                    .tint(.adaptivePrimaryText)
+                Text("AirPlay")
+                    .font(.caption)
+                    .foregroundColor(.adaptiveSecondaryText)
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Favorite button
+            Button(action: {
+                toggleFavorite()
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .font(.system(size: 24))
+                        .foregroundColor(isFavorite ? .red : .adaptivePrimaryText)
+                    Text(isFavorite ? "Favorited" : "Favorite")
+                        .font(.caption)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Sleep Timer button
+            Button(action: {
+                showSleepTimer = true
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: sleepTimerActive ? "moon.fill" : "moon")
+                        .font(.system(size: 24))
+                        .foregroundColor(sleepTimerActive ? .blue : .adaptivePrimaryText)
+                    Text(sleepTimerActive ? "Timer On" : "Timer")
+                        .font(.caption)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
     
     private var hasChapters: Bool {
@@ -554,6 +624,25 @@ struct RadioPlayerSheetView: View {
                 pulse.toggle()
             }
         }
+    }
+    
+    private func loadFavoriteState() {
+        guard let currentStationIndex = radioPlayer.currentStationIndex,
+              let currentStation = viewModel.stations[safe: currentStationIndex] else {
+            isFavorite = false
+            return
+        }
+        isFavorite = currentStation.isFavorite
+    }
+    
+    private func toggleFavorite() {
+        guard let currentStationIndex = radioPlayer.currentStationIndex,
+              let currentStation = viewModel.stations[safe: currentStationIndex] else {
+            return
+        }
+        
+        viewModel.toggleFavorite(for: currentStation)
+        isFavorite.toggle()
     }
     
     private func requestMusicAuthorization() {
@@ -852,6 +941,163 @@ struct PlaylistPickerView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Radio Sleep Timer Sheet
+struct RadioSleepTimerSheet: View {
+    @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
+    @Binding var sleepTimerActive: Bool
+    @Binding var sleepTimerEndTime: Date?
+    @Binding var timerCheckTimer: Timer?
+    @ObservedObject var radioPlayer: RadioPlayer
+    
+    @State private var selectedTime = Date()
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Header
+                VStack(spacing: 12) {
+                    // Drag indicator
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(width: 36, height: 5)
+                        .padding(.top, 8)
+                    
+                    Text("Sleep Timer")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .padding(.bottom, 8)
+                }
+                .padding(.horizontal)
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Time picker section
+                        VStack(spacing: 16) {
+                            HStack {
+                                Text("Stop playback at")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                            }
+                            
+                            DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
+                                .datePickerStyle(WheelDatePickerStyle())
+                                .labelsHidden()
+                                .frame(maxWidth: .infinity)
+                            
+                            Button(action: {
+                                setTimer()
+                            }) {
+                                Text("Set Timer")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.blue)
+                                    .cornerRadius(12)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.gray.opacity(0.08))
+                        .cornerRadius(12)
+                        
+                        // Active timer display
+                        if sleepTimerActive, let endTime = sleepTimerEndTime {
+                            VStack(spacing: 16) {
+                                Button(action: {
+                                    cancelTimer()
+                                }) {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Timer Active")
+                                                .font(.headline)
+                                                .foregroundColor(.primary)
+                                            Text("Stops at \(timeString(from: endTime))")
+                                                .font(.body)
+                                                .foregroundColor(.secondary)
+                                            Text("Tap to cancel")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.secondary)
+                                            .font(.title3)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(Color.gray.opacity(0.08))
+                                .cornerRadius(12)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 150)
+                }
+            }
+            .navigationBarHidden(true)
+        }
+        .onAppear {
+            // Set initial time to current time
+            selectedTime = Date()
+        }
+    }
+    
+    private func setTimer() {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.hour, .minute], from: selectedTime)
+        let now = Date()
+        
+        // Create target time with today's date but selected hour/minute (seconds set to 0)
+        guard var targetTime = calendar.date(bySettingHour: components.hour ?? 0, minute: components.minute ?? 0, second: 0, of: now) else {
+            return
+        }
+        
+        // If selected time is in the past (including same minute), set it for tomorrow
+        if targetTime <= now {
+            targetTime = calendar.date(byAdding: .day, value: 1, to: targetTime) ?? targetTime
+        }
+        
+        sleepTimerEndTime = targetTime
+        sleepTimerActive = true
+        
+        // Cancel any existing timer
+        timerCheckTimer?.invalidate()
+        
+        // Create a timer that checks every second
+        timerCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+            let currentTime = Date()
+            
+            // Check if we've reached or passed the target time
+            if let endTime = self.sleepTimerEndTime, currentTime >= endTime {
+                self.radioPlayer.pause()
+                self.sleepTimerActive = false
+                self.sleepTimerEndTime = nil
+                timer.invalidate()
+                self.timerCheckTimer = nil
+            }
+        }
+        
+        dismiss()
+    }
+    
+    private func cancelTimer() {
+        sleepTimerActive = false
+        sleepTimerEndTime = nil
+        timerCheckTimer?.invalidate()
+        timerCheckTimer = nil
+    }
+    
+    private func timeString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 
