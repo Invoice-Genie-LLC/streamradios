@@ -255,7 +255,7 @@ struct RadioPlayerSheetView: View {
                 timerCheckTimer: $timerCheckTimer,
                 radioPlayer: radioPlayer
             )
-            .presentationDetents([.height(350), .large])
+            .presentationDetents([.height(450), .large])
             .presentationDragIndicator(.visible)
         }
 
@@ -1038,8 +1038,10 @@ struct RadioSleepTimerSheet: View {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 150)
+                    .padding(.top, 8)
+                    .padding(.bottom, 80)
                 }
+                .scrollIndicators(.hidden)
             }
             .navigationBarHidden(true)
         }
