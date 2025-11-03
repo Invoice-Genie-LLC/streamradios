@@ -95,7 +95,7 @@ struct HiddenCountriesSettingsView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 12)
-                    .background(backgroundColor)
+                    .background(Color.adaptiveBackground)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             
@@ -190,7 +190,7 @@ struct HiddenCountriesSettingsView: View {
                                 }
                             }) {
                                 Image(systemName: "magnifyingglass")
-                                    .foregroundColor(.white)
+                                    .foregroundColor(.adaptivePrimaryText)
                                     .font(.system(size: 16, weight: .medium))
                                     .frame(width: 32, height: 32)
                             }
@@ -211,7 +211,7 @@ struct HiddenCountriesSettingsView: View {
                                 }
                             } label: {
                                 Image(systemName: "ellipsis.circle")
-                                    .foregroundColor(.white)
+                                    .foregroundColor(.adaptivePrimaryText)
                                     .font(.system(size: 16, weight: .medium))
                                     .frame(width: 32, height: 32)
                             }

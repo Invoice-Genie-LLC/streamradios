@@ -139,7 +139,7 @@ struct SearchPodcastsView: View {
                                     }
                                 }) {
                                     Image(systemName: "magnifyingglass")
-                                        .foregroundColor(.white)
+                                        .foregroundColor(.adaptivePrimaryText)
                                         .font(.system(size: 16, weight: .medium))
                                         .frame(width: 32, height: 32)
                                 }

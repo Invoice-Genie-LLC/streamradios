@@ -339,12 +339,13 @@ struct CountryPicker: View {
                             RadioStationViewModel.shared.sortStationsAlphabetically()
                         }) {
                             Image(systemName: RadioStationViewModel.shared.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                .foregroundColor(.white)
+                                .foregroundColor(.adaptivePrimaryText)
                                 .font(.system(size: 16, weight: .medium))
                                 .frame(width: 32, height: 32)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 8)
+                        
                         
                         // Search button
                         Button(action: {
@@ -356,7 +357,7 @@ struct CountryPicker: View {
                             }
                         }) {
                             Image(systemName: "magnifyingglass")
-                                .foregroundColor(.white)
+                                .foregroundColor(.adaptivePrimaryText)
                                 .font(.system(size: 16, weight: .medium))
                                 .frame(width: 32, height: 32)
                         }

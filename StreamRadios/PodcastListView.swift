@@ -438,7 +438,7 @@ struct PodcastListView: View {
                                            }
                                        }) {
                                            Image(systemName: "magnifyingglass")
-                                               .foregroundColor(.white)
+                                               .foregroundColor(.adaptivePrimaryText)
                                                .font(.system(size: 16, weight: .medium))
                                                .frame(width: 32, height: 32)
                                        }
@@ -451,7 +451,7 @@ struct PodcastListView: View {
                                            })
                                        }) {
                                            Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                               .foregroundColor(.white)
+                                               .foregroundColor(.adaptivePrimaryText)
                                                .font(.system(size: 16, weight: .medium))
                                                .frame(width: 32, height: 32)
                                        }
@@ -459,7 +459,7 @@ struct PodcastListView: View {
                                        // Plus button
                                        Button(action: { showingSearchPodcasts = true }) {
                                            Image(systemName: "plus")
-                                               .foregroundColor(.white)
+                                               .foregroundColor(.adaptivePrimaryText)
                                                .font(.system(size: 16, weight: .medium))
                                                .frame(width: 32, height: 32)
                                        }

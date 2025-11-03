@@ -598,7 +598,7 @@ struct ContentView: View {
                                                 }
                                             }) {
                                                 Image(systemName: "magnifyingglass")
-                                                    .foregroundColor(.white)
+                                                    .foregroundColor(.adaptivePrimaryText)
                                                     .font(.system(size: 20, weight: .medium))
                                                     .frame(width: 32, height: 32)
                                             }
@@ -620,7 +620,7 @@ struct ContentView: View {
                                                 }
                                             }) {
                                                 Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                                    .foregroundColor(.white)
+                                                    .foregroundColor(.adaptivePrimaryText)
                                                     .font(.system(size: 20, weight: .medium))
                                                     .frame(width: 32, height: 32)
                                             }
@@ -634,7 +634,7 @@ struct ContentView: View {
                                                 }
                                             }) {
                                                 Image(systemName: "plus")
-                                                    .foregroundColor(.white)
+                                                    .foregroundColor(.adaptivePrimaryText)
                                                     .font(.system(size: 20, weight: .medium))
                                                     .frame(width: 32, height: 32)
                                             }
@@ -645,7 +645,7 @@ struct ContentView: View {
                                 }
                                 .background(
                                     RoundedRectangle(cornerRadius: 20)
-                                        .fill(Color(red: 0x19/255.0, green: 0x19/255.0, blue: 0x18/255.0))
+                                        .fill(Color.adaptiveSecondaryBackground)
                                 )
                                 .modifier(ConditionalLiquidGlass(cornerRadius: 20))
                                 .padding(.top, 1)
