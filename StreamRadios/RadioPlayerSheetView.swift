@@ -136,69 +136,38 @@ struct RadioPlayerSheetView: View {
                             .frame(width: 44, height: 44)
                     }
                     
-                    // Custom segmented control - full width
-                    HStack(spacing: 2) {
-                        // Now Playing button
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                selectedTab = 0
-                                if isShazaming {
-                                    shazamViewModel.stopListening()
-                                    isShazaming = false
-                                }
-                            }
-                        }) {
-                            Text("Now Playing")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(selectedTab == 0 ? selectedTextColor : unselectedTextColor)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .frame(maxWidth: .infinity)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .fill(selectedTab == 0 ? selectedBackgroundColor : Color.clear)
-                                )
+                    // Simple segmented picker
+                    if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
+                        Picker("", selection: $selectedTab) {
+                            Text("Now Playing").tag(0)
+                            Text("Shazam").tag(1)
                         }
-                        
-                        // Shazam button
-                        if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
-                            Button(action: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedTab = 1
-                                    if !isShazaming {
-                                        permissionManager.checkMicrophonePermission { granted in
-                                            DispatchQueue.main.async {
-                                                if granted {
-                                                    shazamViewModel.startOrEndListening()
-                                                    isShazaming = true
-                                                } else {
-                                                    self.alertMessage = "Microphone access is required for Shazam. Please go to Settings > Privacy & Security > Microphone and enable access for this app, then try again."
-                                                    self.showAlert = true
-                                                }
-                                            }
+                        .pickerStyle(SegmentedPickerStyle())
+                        .onChange(of: selectedTab) { newValue in
+                            if newValue == 0 && isShazaming {
+                                shazamViewModel.stopListening()
+                                isShazaming = false
+                            } else if newValue == 1 && !isShazaming {
+                                permissionManager.checkMicrophonePermission { granted in
+                                    DispatchQueue.main.async {
+                                        if granted {
+                                            shazamViewModel.startOrEndListening()
+                                            isShazaming = true
+                                        } else {
+                                            self.alertMessage = "Microphone access is required for Shazam. Please go to Settings > Privacy & Security > Microphone and enable access for this app, then try again."
+                                            self.showAlert = true
+                                            selectedTab = 0
                                         }
                                     }
                                 }
-                            }) {
-                                Text("Shazam")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(selectedTab == 1 ? selectedTextColor : unselectedTextColor)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .fill(selectedTab == 1 ? selectedBackgroundColor : Color.clear)
-                                    )
                             }
                         }
+                    } else {
+                        Picker("", selection: $selectedTab) {
+                            Text("Now Playing").tag(0)
+                        }
+                        .pickerStyle(SegmentedPickerStyle())
                     }
-                    .padding(4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24)
-                            .fill(segmentedControlBackgroundColor)
-                    )
-                    .conditionalGlassEffect(cornerRadius: 24)
                     
                     // Spacer to balance layout
                     Spacer()
@@ -269,7 +238,7 @@ struct RadioPlayerSheetView: View {
         .sheet(item: $activeSheet) { item in
             switch item {
             case .playlistPicker:
-                EnhancedPlaylistPickerView(shazamViewModel: shazamViewModel)
+                PlaylistPickerView(shazamViewModel: shazamViewModel)
 
 
             }
@@ -711,14 +680,15 @@ struct AirPlayButtonView: UIViewRepresentable {
     }
 }
 
-// MARK: - Enhanced Playlist Picker
-struct EnhancedPlaylistPickerView: View {
+// MARK: - Playlist Picker
+struct PlaylistPickerView: View {
     @ObservedObject var shazamViewModel: ShazamViewModel
     @Environment(\.presentationMode) var presentationMode
     @State private var alertMessage = ""
     @State private var showAlert = false
     @State private var searchText = ""
     @State private var addedPlaylistIDs: Set<String> = []
+    @FocusState private var isSearchFieldFocused: Bool
     
     var filteredPlaylists: [Playlist] {
         let activePlaylists = Array(shazamViewModel.userPlaylists).filter { playlist in
@@ -788,11 +758,37 @@ struct EnhancedPlaylistPickerView: View {
                 // Search bar
                 HStack {
                     Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.adaptiveSecondaryText)
+                        .font(.body)
+                    
                     TextField("Search playlists", text: $searchText)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.body)
+                        .foregroundColor(.adaptivePrimaryText)
+                        .focused($isSearchFieldFocused)
+                    
+                    if !searchText.isEmpty {
+                        Button(action: {
+                            searchText = ""
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.adaptiveSecondaryText)
+                                .font(.body)
+                        }
+                    }
                 }
-                .padding()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.adaptiveSectionBackground)
+                .cornerRadius(10)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .onAppear {
+                    // Automatically focus the search field when it appears
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        isSearchFieldFocused = true
+                    }
+                }
                 
                 // Playlist list
                 List(filteredPlaylists, id: \.id) { playlist in

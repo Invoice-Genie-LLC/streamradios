@@ -169,78 +169,21 @@ struct PodcastPlayerSheetView: View {
                             .frame(width: 44, height: 44)
                     }
                     
-                    // Custom segmented control - full width
-                    HStack(spacing: 2) {
-                        // Now Playing button
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                selectedTab = 0
-                            }
-                        }) {
-                            Text("Now Playing")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(selectedTab == 0 ? selectedTextColor : unselectedTextColor)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 10)
-                                .frame(maxWidth: .infinity)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .fill(selectedTab == 0 ? selectedBackgroundColor : Color.clear)
-                                )
+                    // Simple segmented picker
+                    if hasChapters {
+                        Picker("", selection: $selectedTab) {
+                            Text("Now Playing").tag(0)
+                            Text("Notes").tag(1)
+                            Text("Chapters").tag(2)
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // Details button
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                selectedTab = 1
-                            }
-                        }) {
-                            Text("Notes")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(selectedTab == 1 ? selectedTextColor : unselectedTextColor)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 10)
-                                .frame(maxWidth: .infinity)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .fill(selectedTab == 1 ? selectedBackgroundColor : Color.clear)
-                                )
+                        .pickerStyle(SegmentedPickerStyle())
+                    } else {
+                        Picker("", selection: $selectedTab) {
+                            Text("Now Playing").tag(0)
+                            Text("Notes").tag(1)
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // Chapters button (only show if chapters exist)
-                        if hasChapters {
-                            Button(action: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedTab = 2
-                                }
-                            }) {
-                                Text("Chapters")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(selectedTab == 2 ? selectedTextColor : unselectedTextColor)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 10)
-                                    .frame(maxWidth: .infinity)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .fill(selectedTab == 2 ? selectedBackgroundColor : Color.clear)
-                                    )
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
+                        .pickerStyle(SegmentedPickerStyle())
                     }
-                    .padding(3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24)
-                            .fill(segmentedControlBackgroundColor)
-                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
