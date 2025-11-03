@@ -150,6 +150,7 @@ struct CountryPicker: View {
     @StateObject private var progressViewModel = CountryDeletionProgressViewModel()
     @AppStorage("hiddenCountries") private var hiddenCountriesData: Data = Data()
     @State private var hiddenCountries: Set<String> = []
+    @State private var isAscendingSort = true
     
     // Group countries by regions
     private var groupedCountries: [CountryRegion: [Country]] {
@@ -273,7 +274,7 @@ struct CountryPicker: View {
                     ForEach(Array(groupedCountries.keys).sorted { $0.sortOrder < $1.sortOrder }, id: \.self) { region in
                         if let regionCountries = groupedCountries[region], !regionCountries.isEmpty {
                             Section {
-                                ForEach(regionCountries.sorted { $0.name < $1.name }, id: \.id) { country in
+                                ForEach(regionCountries.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }, id: \.id) { country in
                                     CountryRow(
                                         country: country,
                                         isSelected: selectedCountry == country.name,
@@ -335,10 +336,10 @@ struct CountryPicker: View {
                     HStack(spacing: 8) {
                         // Sort button
                         Button(action: {
-                            // Toggle sort direction in RadioStationViewModel
-                            RadioStationViewModel.shared.sortStationsAlphabetically()
+                            // Toggle sort direction for countries
+                            isAscendingSort.toggle()
                         }) {
-                            Image(systemName: RadioStationViewModel.shared.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                            Image(systemName: isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
                                 .foregroundColor(.adaptivePrimaryText)
                                 .font(.system(size: 16, weight: .medium))
                                 .frame(width: 32, height: 32)
