@@ -690,15 +690,24 @@ struct RadioPlayerSheetView: View {
 
 // MARK: - Supporting Views
 struct AirPlayButtonView: UIViewRepresentable {
+    @Environment(\.colorScheme) var colorScheme
+    
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
-        view.activeTintColor = .blue
-        view.tintColor = .gray
+        updateColors(for: view)
         return view
     }
     
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
-        uiView.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
+        uiView.frame = CGRect(x: 0, y: 0, width: 70, height: 70)
+        updateColors(for: uiView)
+    }
+    
+    private func updateColors(for view: AVRoutePickerView) {
+        // Match adaptivePrimaryText colors used by other buttons
+        let primaryColor = colorScheme == .dark ? UIColor.white : UIColor.black
+        view.activeTintColor = primaryColor
+        view.tintColor = primaryColor
     }
 }
 

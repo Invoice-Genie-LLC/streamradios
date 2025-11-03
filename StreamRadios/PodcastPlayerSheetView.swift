@@ -784,7 +784,8 @@ struct PodcastPlayerSheetView: View {
             // AirPlay button
             VStack(spacing: 4) {
                 AirPlayButtonView()
-                    .frame(width: 24, height: 24)
+                    .frame(width: 44, height: 24)
+                    .tint(.adaptivePrimaryText)
                 Text("AirPlay")
                     .font(.caption)
                     .foregroundColor(.adaptiveSecondaryText)
