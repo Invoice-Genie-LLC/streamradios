@@ -10,6 +10,12 @@ import AVFoundation
 import CoreData
 import AVKit
 
+enum SleepTimerMode {
+    case none
+    case timer(minutes: Int)
+    case endOfEpisode
+}
+
 struct PodcastPlayerSheetView: View {
     let episode: PodcastEpisode
     let feed: PodcastFeed
@@ -26,6 +32,11 @@ struct PodcastPlayerSheetView: View {
     @State private var refreshTrigger = false // Force view refresh after download operations
     @State private var hasScrolledToCurrentChapter = false
     @State private var scrollTrigger = false
+    @State private var showSleepTimer = false
+    @State private var sleepTimerMinutes: Int? = nil
+    @State private var sleepTimerEndTime: Date? = nil
+    @State private var sleepTimerActive = false
+    @State private var sleepTimerMode: SleepTimerMode = .none
     @Environment(\.colorScheme) var colorScheme
     
     // Computed properties for adaptive colors
@@ -225,6 +236,18 @@ struct PodcastPlayerSheetView: View {
             AudioSettingsSheet(podcastPlayer: podcastPlayer)
                 .presentationDetents([.fraction(0.5), .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showSleepTimer) {
+            SleepTimerSheet(
+                sleepTimerMode: $sleepTimerMode,
+                sleepTimerActive: $sleepTimerActive,
+                sleepTimerMinutes: $sleepTimerMinutes,
+                sleepTimerEndTime: $sleepTimerEndTime,
+                podcastPlayer: podcastPlayer,
+                episode: episode
+            )
+            .presentationDetents([.fraction(0.5), .large])
+            .presentationDragIndicator(.visible)
         }
         .alert("Delete Download", isPresented: $showDeleteDownloadAlert) {
             Button("Delete Download", role: .destructive) {
@@ -732,6 +755,23 @@ struct PodcastPlayerSheetView: View {
                 Text("AirPlay")
                     .font(.caption)
                     .foregroundColor(.adaptiveSecondaryText)
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Sleep Timer button
+            Button(action: {
+                showSleepTimer = true
+            }) {
+                VStack(spacing: 4) {
+                    ZStack {
+                        Image(systemName: sleepTimerActive ? "moon.fill" : "moon")
+                            .font(.system(size: 24))
+                            .foregroundColor(sleepTimerActive ? .blue : .adaptivePrimaryText)
+                    }
+                    Text(sleepTimerActive ? "Timer On" : "Timer")
+                        .font(.caption)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
             }
             .frame(maxWidth: .infinity)
             
@@ -1352,6 +1392,252 @@ extension PodcastPlayerSheetView {
             }
         } catch {
             // Ignore if chapters not available from asset
+        }
+    }
+}
+
+// MARK: - Sleep Timer Sheet
+struct SleepTimerSheet: View {
+    @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
+    @Binding var sleepTimerMode: SleepTimerMode
+    @Binding var sleepTimerActive: Bool
+    @Binding var sleepTimerMinutes: Int?
+    @Binding var sleepTimerEndTime: Date?
+    @ObservedObject var podcastPlayer: PodcastPlayer
+    let episode: PodcastEpisode
+    
+    @State private var showCustomPicker = false
+    @State private var customMinutes = 30
+    
+    private let quickTimerOptions = [60, 30, 15, 10, 5]
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Header
+                VStack(spacing: 12) {
+                    // Drag indicator
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(width: 36, height: 5)
+                        .padding(.top, 8)
+                    
+                    Text("Sleep Timer")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .padding(.bottom, 8)
+                }
+                .padding(.horizontal)
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Quick timer buttons section
+                        VStack(spacing: 16) {
+                            HStack(spacing: 12) {
+                                ForEach(quickTimerOptions, id: \.self) { minutes in
+                                    Button(action: {
+                                        setTimer(minutes: minutes)
+                                    }) {
+                                        VStack(spacing: 4) {
+                                            Text("\(minutes)")
+                                                .font(.system(size: 28, weight: .semibold))
+                                            Text("MIN")
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                        }
+                                        .foregroundColor(.white)
+                                        .frame(width: 60, height: 60)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color.blue)
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            // Custom button
+                            Button(action: {
+                                showCustomPicker = true
+                            }) {
+                                HStack {
+                                    Text("Custom...")
+                                        .font(.body)
+                                        .foregroundColor(.blue)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.gray.opacity(0.08))
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.gray.opacity(0.08))
+                        .cornerRadius(12)
+                        
+                        // Timer options section
+                        VStack(spacing: 16) {
+                            // Active timer display
+                            if sleepTimerActive, let endTime = sleepTimerEndTime {
+                                Button(action: {
+                                    cancelTimer()
+                                }) {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Stop After \(timeRemaining(until: endTime))")
+                                                .font(.body)
+                                                .foregroundColor(.primary)
+                                            Text("Tap to cancel")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.secondary)
+                                            .font(.title3)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(Color.gray.opacity(0.08))
+                                .cornerRadius(12)
+                            }
+                            
+                            // Stop after episode option
+                            Button(action: {
+                                setTimerEndOfEpisode()
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Stop After This Episode")
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        if case .endOfEpisode = sleepTimerMode {
+                                            Text("Active")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    if case .endOfEpisode = sleepTimerMode {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.blue)
+                                            .font(.title3)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(Color.gray.opacity(0.08))
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                    .padding(.bottom, 150)
+                }
+            }
+            .navigationBarHidden(true)
+        }
+        .sheet(isPresented: $showCustomPicker) {
+            CustomTimerPicker(customMinutes: $customMinutes) {
+                setTimer(minutes: customMinutes)
+                showCustomPicker = false
+            }
+            .presentationDetents([.height(250)])
+            .presentationDragIndicator(.visible)
+        }
+    }
+    
+    private func setTimer(minutes: Int) {
+        sleepTimerMinutes = minutes
+        sleepTimerEndTime = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        sleepTimerMode = .timer(minutes: minutes)
+        sleepTimerActive = true
+        
+        // Schedule timer to pause playback
+        DispatchQueue.main.asyncAfter(deadline: .now() + TimeInterval(minutes * 60)) {
+            if sleepTimerActive, case .timer(let mins) = sleepTimerMode, mins == minutes {
+                podcastPlayer.pause()
+                sleepTimerActive = false
+                sleepTimerMode = .none
+                sleepTimerEndTime = nil
+            }
+        }
+        
+        dismiss()
+    }
+    
+    private func setTimerEndOfEpisode() {
+        sleepTimerMode = .endOfEpisode
+        sleepTimerActive = true
+        sleepTimerMinutes = nil
+        sleepTimerEndTime = nil
+        
+        // Monitor for end of episode
+        // This will be handled by the player's completion handler
+        
+        dismiss()
+    }
+    
+    private func cancelTimer() {
+        sleepTimerActive = false
+        sleepTimerMode = .none
+        sleepTimerMinutes = nil
+        sleepTimerEndTime = nil
+    }
+    
+    private func timeRemaining(until endTime: Date) -> String {
+        let remaining = Int(endTime.timeIntervalSinceNow)
+        if remaining <= 0 {
+            return "0:00"
+        }
+        let hours = remaining / 3600
+        let minutes = (remaining % 3600) / 60
+        let seconds = remaining % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+}
+
+// MARK: - Custom Timer Picker
+struct CustomTimerPicker: View {
+    @Environment(\.dismiss) var dismiss
+    @Binding var customMinutes: Int
+    let onSet: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Custom Timer")
+                .font(.headline)
+                .padding(.top)
+            
+            Picker("Minutes", selection: $customMinutes) {
+                ForEach(1..<121) { minute in
+                    Text("\(minute) min").tag(minute)
+                }
+            }
+            .pickerStyle(WheelPickerStyle())
+            .frame(height: 120)
+            
+            Button(action: onSet) {
+                Text("Set Timer")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .cornerRadius(12)
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
         }
     }
 }
