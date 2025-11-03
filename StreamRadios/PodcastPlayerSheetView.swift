@@ -1410,7 +1410,7 @@ struct SleepTimerSheet: View {
     @State private var showCustomPicker = false
     @State private var customMinutes = 30
     
-    private let quickTimerOptions = [60, 30, 15, 10, 5]
+    private let quickTimerOptions = [60, 120, 180, 240, 300]
     
     var body: some View {
         NavigationView {
@@ -1620,7 +1620,7 @@ struct CustomTimerPicker: View {
                 .padding(.top)
             
             Picker("Minutes", selection: $customMinutes) {
-                ForEach(1..<121) { minute in
+                ForEach(1..<301) { minute in
                     Text("\(minute) min").tag(minute)
                 }
             }
