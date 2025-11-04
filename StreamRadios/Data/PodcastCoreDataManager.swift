@@ -551,12 +551,35 @@ class PodcastCoreDataManager {
                 }
                 
                 for episode in chunk {
-                    // 🚨 VALIDATION: Reject episodes with empty titles to prevent corruption
+                    // 🚨 COMPREHENSIVE VALIDATION: Reject episodes with ANY empty/invalid required fields
+                    let trimmedId = episode.id.trimmingCharacters(in: .whitespacesAndNewlines)
                     let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmedTitle.isEmpty {
+                    let trimmedDescription = episode.descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmedAudioUrl = episode.audioUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    // Validate ALL required fields are present and non-empty
+                    if trimmedId.isEmpty || trimmedId.count == 0 {
+                        os_log("🚫 VALIDATION REJECTED: Episode has empty ID - skipping insertion", log: self.log, type: .error)
+                        rejectedCount += 1
+                        continue
+                    }
+                    
+                    if trimmedTitle.isEmpty || trimmedTitle.count == 0 {
                         os_log("🚫 VALIDATION REJECTED: Episode ID %@ has empty title - skipping insertion", log: self.log, type: .error, episode.id)
                         rejectedCount += 1
-                        continue // Skip this corrupted episode
+                        continue
+                    }
+                    
+                    if trimmedDescription.isEmpty || trimmedDescription.count == 0 {
+                        os_log("🚫 VALIDATION REJECTED: Episode ID %@ ('%@') has empty description - skipping insertion", log: self.log, type: .error, episode.id, String(trimmedTitle.prefix(30)))
+                        rejectedCount += 1
+                        continue
+                    }
+                    
+                    if trimmedAudioUrl.isEmpty || trimmedAudioUrl.count == 0 {
+                        os_log("🚫 VALIDATION REJECTED: Episode ID %@ ('%@') has empty audio URL - skipping insertion", log: self.log, type: .error, episode.id, String(trimmedTitle.prefix(30)))
+                        rejectedCount += 1
+                        continue
                     }
                     
                     parsedIds.insert(episode.id)
@@ -610,7 +633,7 @@ class PodcastCoreDataManager {
             
             // Log rejection summary if any episodes were rejected
             if rejectedCount > 0 {
-                os_log("⛔ VALIDATION: Rejected %d episodes with empty titles during reconciliation", log: self.log, type: .error, rejectedCount)
+                os_log("⛔ VALIDATION: Rejected %d episodes with empty/invalid required fields during reconciliation", log: self.log, type: .error, rejectedCount)
             }
             
             os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted %d, updated %d, deleted %d, rejected %d (limit: %@)", log: self.log, type: .info, feedId, parsedIds.count, insertedCount, updatedCount, deletedCount + coreDataDuplicates.count, rejectedCount, maxEpisodes?.description ?? "unlimited")
@@ -749,12 +772,35 @@ class PodcastCoreDataManager {
             var addedCount = 0
             var rejectedCount = 0
             for episode in trulyNewEpisodes {
-                // 🚨 VALIDATION: Reject episodes with empty titles to prevent corruption
+                // 🚨 COMPREHENSIVE VALIDATION: Reject episodes with ANY empty/invalid required fields
+                let trimmedId = episode.id.trimmingCharacters(in: .whitespacesAndNewlines)
                 let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmedTitle.isEmpty {
+                let trimmedDescription = episode.descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedAudioUrl = episode.audioUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Validate ALL required fields are present and non-empty
+                if trimmedId.isEmpty || trimmedId.count == 0 {
+                    os_log("🚫 QUICK RECONCILE REJECTED: Episode has empty ID - skipping insertion", log: self.log, type: .error)
+                    rejectedCount += 1
+                    continue
+                }
+                
+                if trimmedTitle.isEmpty || trimmedTitle.count == 0 {
                     os_log("🚫 QUICK RECONCILE REJECTED: Episode ID %@ has empty title - skipping insertion", log: self.log, type: .error, episode.id)
                     rejectedCount += 1
-                    continue // Skip this corrupted episode
+                    continue
+                }
+                
+                if trimmedDescription.isEmpty || trimmedDescription.count == 0 {
+                    os_log("🚫 QUICK RECONCILE REJECTED: Episode ID %@ ('%@') has empty description - skipping insertion", log: self.log, type: .error, episode.id, String(trimmedTitle.prefix(30)))
+                    rejectedCount += 1
+                    continue
+                }
+                
+                if trimmedAudioUrl.isEmpty || trimmedAudioUrl.count == 0 {
+                    os_log("🚫 QUICK RECONCILE REJECTED: Episode ID %@ ('%@') has empty audio URL - skipping insertion", log: self.log, type: .error, episode.id, String(trimmedTitle.prefix(30)))
+                    rejectedCount += 1
+                    continue
                 }
                 
                 let managedEpisode = PodcastModel(context: backgroundContext)
@@ -765,7 +811,7 @@ class PodcastCoreDataManager {
             
             // Log rejection summary if any episodes were rejected
             if rejectedCount > 0 {
-                os_log("⛔ QUICK RECONCILE: Rejected %d episodes with empty titles", log: self.log, type: .error, rejectedCount)
+                os_log("⛔ QUICK RECONCILE: Rejected %d episodes with empty/invalid required fields", log: self.log, type: .error, rejectedCount)
             }
             
             // EPISODE LIMIT ENFORCEMENT: Remove excess episodes if limit is set
@@ -903,6 +949,43 @@ class PodcastCoreDataManager {
                 
             } catch {
                 os_log("❌ CORRUPTION CLEANUP ERROR: Failed to delete corrupted episodes: %@", log: self.log, type: .error, error.localizedDescription)
+            }
+        }
+    }
+    
+    /// Clean up all corrupted episodes with empty titles from Core Data
+    func cleanupCorruptedEpisodes() async {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        await backgroundContext.perform {
+            do {
+                // Fetch all episodes with empty titles
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "title == nil OR title == %@", "")
+                
+                let corruptedEpisodes = try backgroundContext.fetch(fetchRequest)
+                
+                if !corruptedEpisodes.isEmpty {
+                    os_log("🧽 GLOBAL CLEANUP: Found %d corrupted episodes with empty titles", log: self.log, type: .info, corruptedEpisodes.count)
+                    
+                    var deletedCount = 0
+                    for episode in corruptedEpisodes {
+                        os_log("🗑️ CLEANUP: Deleting corrupted episode ID %@ from feed %@", log: self.log, type: .debug, episode.id ?? "unknown", episode.feedId ?? "unknown")
+                        backgroundContext.delete(episode)
+                        deletedCount += 1
+                    }
+                    
+                    // Save deletions
+                    if backgroundContext.hasChanges {
+                        try backgroundContext.save()
+                        os_log("✅ GLOBAL CLEANUP: Successfully deleted %d corrupted episodes", log: self.log, type: .info, deletedCount)
+                    }
+                } else {
+                    os_log("✨ GLOBAL CLEANUP: No corrupted episodes found", log: self.log, type: .info)
+                }
+                
+            } catch {
+                os_log("❌ GLOBAL CLEANUP ERROR: Failed to clean corrupted episodes: %@", log: self.log, type: .error, error.localizedDescription)
             }
         }
     }

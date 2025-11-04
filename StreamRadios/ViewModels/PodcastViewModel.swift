@@ -928,6 +928,9 @@ class PodcastViewModel: ObservableObject {
                 print("🛡️ STARTUP: Initializing contamination prevention system")
                 initializeContaminationPrevention()
             }
+            
+            // Clean up any corrupted episodes with empty titles
+            await PodcastCoreDataManager.shared.cleanupCorruptedEpisodes()
         }
         
         // Load sorting preferences from UserDefaults
@@ -2264,24 +2267,12 @@ class PodcastViewModel: ObservableObject {
             return
         }
         
-        // STEP 1: Quick HEAD request to check if feed was modified recently
-        // Check if this is a user-initiated request
-        let userRefreshKey = "UserRequestedRefresh_\(feedId)"
-        let isUserInitiated = UserDefaults.standard.bool(forKey: userRefreshKey)
+        // CRITICAL FIX: Always perform sampling when user opens feed
+        // Even if HEAD request fails or feed appears unmodified, we need to check for new episodes
+        // The background refresh will handle the full sync to ensure latest episodes are fetched
+        print("🪶 LIGHTWEIGHT: Starting episode check (bypassing HEAD request for reliability)")
         
-        let wasRecentlyModified = await checkFeedModificationWithHEAD(url: url, feedId: feedId, isUserInitiated: isUserInitiated)
-        
-        // Clear the user-initiated flag after checking
-        if isUserInitiated {
-            UserDefaults.standard.removeObject(forKey: userRefreshKey)
-        }
-        
-        if !wasRecentlyModified {
-            print("🪶 LIGHTWEIGHT: Feed not recently modified - skipping expensive parsing")
-            return
-        }
-        
-        // STEP 2: If potentially new content, do minimal RSS sampling (not full parse)
+        // STEP 2: Do minimal RSS sampling which always triggers full background refresh
         await performMinimalEpisodeSampling(url: url, feedId: feedId)
     }
     
@@ -2313,25 +2304,9 @@ class PodcastViewModel: ObservableObject {
                     }
                 }
                 
-                // CRITICAL FIX: Always allow user-initiated checks to bypass throttling
-                if isUserInitiated {
-                    print("🪶 HEAD: User-initiated check - bypassing throttling to check for new episodes")
-                    return true
-                }
-                
-                // Fallback: Check if it's been more than 30 minutes since last check
-                let lastCheckKey = "LastLightweightCheck_\(feedId)"
-                let lastCheck = UserDefaults.standard.double(forKey: lastCheckKey)
-                let now = Date().timeIntervalSince1970
-                
-                if now - lastCheck > 1800 { // 30 minutes
-                    UserDefaults.standard.set(now, forKey: lastCheckKey)
-                    print("🪶 HEAD: No Last-Modified header, but 30+ minutes since last check")
-                    return true
-                } else {
-                    print("🪶 HEAD: Recently checked within 30 minutes - skipping")
-                    return false
-                }
+                // CRITICAL FIX: Always check for new episodes when user opens feed
+                print("🪶 HEAD: No Last-Modified header - checking for new episodes on feed open")
+                return true
             }
             
             return false
@@ -2352,14 +2327,15 @@ class PodcastViewModel: ObservableObject {
             
             if !newEpisodes.isEmpty {
                 print("🪶 SAMPLING: Found \(newEpisodes.count) new episodes - triggering full background sync")
-                
-                // Trigger a full background sync to ensure Core Data matches RSS exactly
-                // This will add new episodes AND remove old ones that are no longer in the feed
-                Task.detached(priority: .background) {
-                    await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: false)
-                }
             } else {
-                print("🪶 SAMPLING: No new episodes found in sample")
+                print("🪶 SAMPLING: No new episodes found in sample - but still triggering full sync for large feeds")
+            }
+            
+            // CRITICAL FIX: Always trigger full background sync for large feeds
+            // Even if sample shows no new episodes, there might be newer episodes beyond the sample
+            // This ensures feeds with thousands of episodes always get fully synced
+            Task.detached(priority: .background) {
+                await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: false)
             }
         } catch {
             print("🪶 SAMPLING: Failed to check for new episodes: \(error.localizedDescription)")
@@ -2380,29 +2356,34 @@ class PodcastViewModel: ObservableObject {
         activeBackgroundSyncs.insert(feedId)
         syncLock.unlock()
         
-        // Ensure we remove from active syncs when done
+        // Request background time to complete sync even if app is backgrounded
+        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        await MainActor.run {
+            backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "PodcastFeedSync") {
+                // Background time expired - clean up
+                print("⏰ BACKGROUND REFRESH: Background time expired for \(feedId)")
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
+            }
+        }
+        
+        // Ensure we remove from active syncs and end background task when done
         defer {
             syncLock.lock()
             activeBackgroundSyncs.remove(feedId)
             syncLock.unlock()
+            
+            // End background task
+            if backgroundTaskID != .invalid {
+                Task { @MainActor in
+                    UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                }
+            }
         }
         
         // CRITICAL: Always do full sync to ensure Core Data matches RSS exactly
         // This prevents episode accumulation and ensures latest episodes are fetched
-        
-        // Throttle: Don't sync more than once every 10 minutes to prevent excessive API calls
-        let currentTime = Date().timeIntervalSince1970
-        let lastSyncKey = "LastBackgroundSync_\(feedId)"
-        let lastSyncTime = UserDefaults.standard.double(forKey: lastSyncKey)
-        let timeSinceLastSync = currentTime - lastSyncTime
-        
-        if timeSinceLastSync < 600 && lastSyncTime > 0 { // 10 minutes
-            print("⏱️ BACKGROUND REFRESH: Skipping sync - last synced \(Int(timeSinceLastSync/60)) min ago")
-            return
-        }
-        
-        // Update last sync time
-        UserDefaults.standard.set(currentTime, forKey: lastSyncKey)
+        // NO THROTTLING: Fetch new episodes immediately when user opens feed
         
         do {
             print("🔄 BACKGROUND REFRESH: Performing full feed sync from RSS for \(feedId)")
@@ -3749,6 +3730,16 @@ class PodcastViewModel: ObservableObject {
         feedsBeingProcessed.insert(feedId)
         defer { feedsBeingProcessed.remove(feedId) }
         
+        // CRITICAL FIX: Invalidate snapshot when user opens feed to force fresh RSS check
+        if isInitialLoad {
+            await MainActor.run {
+                print("🔄 USER OPENED FEED: Invalidating snapshot for \(feedId) to fetch new episodes")
+                self.snapshotTimestamps.removeValue(forKey: feedId)
+                // Don't clear the actual snapshot yet - we'll use it for instant display
+                // but the background refresh will update it with new episodes
+            }
+        }
+        
         // INSTANT DISPLAY: Load cached episodes from Core Data FIRST for immediate UI display
         let cachedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
         if !cachedEpisodes.isEmpty {
@@ -3811,7 +3802,8 @@ class PodcastViewModel: ObservableObject {
             updateEpisodeSnapshot(for: feedId, episodes: validCachedEpisodes)
             
             // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
-            Task.detached(priority: .background) {
+            // Use higher priority when user opens feed for faster updates
+            Task.detached(priority: isInitialLoad ? .userInitiated : .background) {
                 await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
             }
             
@@ -3872,7 +3864,8 @@ class PodcastViewModel: ObservableObject {
             }
             
             // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
-            Task.detached(priority: .background) {
+            // Use higher priority when user opens feed for faster updates
+            Task.detached(priority: isInitialLoad ? .userInitiated : .background) {
                 await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
             }
             
@@ -3970,7 +3963,8 @@ class PodcastViewModel: ObservableObject {
             }
             
             // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
-            Task.detached(priority: .background) {
+            // Use higher priority when user opens feed for faster updates
+            Task.detached(priority: isInitialLoad ? .userInitiated : .background) {
                 await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
             }
             
@@ -4031,7 +4025,8 @@ class PodcastViewModel: ObservableObject {
             }
             
             // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
-            Task.detached(priority: .background) {
+            // Use higher priority when user opens feed for faster updates  
+            Task.detached(priority: isInitialLoad ? .userInitiated : .background) {
                 await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
             }
             
@@ -8482,32 +8477,8 @@ class PodcastViewModel: ObservableObject {
     
     /// Check if a feed should be refreshed from RSS for new episodes
     private func shouldRefreshFeedFromRSS(feedId: String, isInitialLoad: Bool) async -> Bool {
-        // PERFORMANCE: Check if we should refresh based on snapshot age
-        let snapshot = getEpisodeSnapshot(for: feedId)
-        print("🔍 RSS REFRESH CHECK: Feed \(feedId) - snapshot available: \(snapshot != nil), count: \(snapshot?.count ?? 0)")
-        
-        if let snapshotEpisodes = snapshot, !snapshotEpisodes.isEmpty {
-            let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
-            
-            // 🚀 INSTANT SNAPSHOT MODE: Skip ALL RSS operations when snapshot is fresh (< 5 minutes)
-            if snapshotAge < 300 { // 5 minutes
-                print("⚡ INSTANT SNAPSHOT: Skipping ALL RSS operations - fresh snapshot (\(Int(snapshotAge/60)) min old)")
-                return false
-            }
-            
-            // For older snapshots, use longer refresh threshold to reduce operations
-            let refreshThreshold: TimeInterval = 3600 // 1 hour for any refresh
-            
-            if snapshotAge < refreshThreshold {
-                print("⚡ PERFORMANCE: Skipping RSS refresh - recent snapshot (\(Int(snapshotAge/60)) min old)")
-                return false
-            } else {
-                print("🔍 RSS REFRESH CHECK: Snapshot is \(Int(snapshotAge/60)) min old - allowing background refresh")
-                return true
-            }
-        } else {
-            print("🔍 RSS REFRESH CHECK: No snapshot available for feed \(feedId) - proceeding with RSS check")
-        }
+        // CRITICAL: Always check for new episodes when user opens feed (no time throttling)
+        // This ensures users always see the latest episodes immediately
         
         // Check if feed has episodes in Core Data
         let episodeCount = await getEpisodeCountForFeed(feedId)
@@ -8518,29 +8489,17 @@ class PodcastViewModel: ObservableObject {
             return true
         }
         
-        // For feeds with episodes, check time-based refresh policy
-        let currentTime = Date().timeIntervalSince1970
-        let lastRefreshKey = "LastRSSRefresh_\(feedId)"
-        let lastRefreshTime = UserDefaults.standard.double(forKey: lastRefreshKey)
-        
-        // CRITICAL FIX: Always allow RSS refresh on initial load regardless of last refresh time
-        // This ensures new episodes are fetched immediately when user opens a feed
+        // CRITICAL FIX: Always allow RSS refresh on initial load (when user opens feed)
+        // This ensures new episodes are fetched immediately without any time-based throttling
         if isInitialLoad {
-            print("🔄 Feed \(feedId) initial load - forcing RSS refresh for newest episodes (\(episodeCount) episodes cached)")
+            print("🔄 Feed \(feedId) opened by user - fetching new episodes immediately (\(episodeCount) episodes cached)")
             return true
         }
         
-        // For non-initial loads, use time-based refresh policy
-        let refreshInterval: TimeInterval = 60 * 60 // 1 hour for background refreshes
-        let timeSinceLastRefresh = currentTime - lastRefreshTime
-        
-        if timeSinceLastRefresh >= refreshInterval || lastRefreshTime == 0 {
-            print("🔄 Feed \(feedId) ready for RSS refresh - last check: \(Int(timeSinceLastRefresh/60)) min ago (\(episodeCount) episodes cached)")
-            return true
-        }
-        
-        print("⚡ Feed \(feedId) loading from Core Data: \(episodeCount) episodes, last refresh \(Int(timeSinceLastRefresh/60)) min ago - no RSS refresh needed")
-        return false
+        // For background operations (not user-initiated), still allow refresh
+        // but this shouldn't be called often since we only refresh on user actions
+        print("🔄 Feed \(feedId) background refresh - checking for new episodes")
+        return true
     }
     
     /// Refresh any feeds that don't have episodes by re-parsing their RSS

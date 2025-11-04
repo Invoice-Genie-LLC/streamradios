@@ -813,10 +813,15 @@ class PodcastFeedManager {
                             continue
                         }
                         
-                        // SAFETY CHECK: Ensure episode belongs to this feed
+                        // CRITICAL SAFETY CHECK: Prevent cross-feed contamination
+                        // This happens when RSS feeds mistakenly include episodes from other feeds
                         if !episode.feedId.isEmpty && episode.feedId != feedId {
-                            print("🚨 EPISODE CREATION CONTAMINATION: Episode feedId=\(episode.feedId) but creating for feed=\(feedId)")
-                            continue
+                            print("🚨 CROSS-FEED CONTAMINATION BLOCKED:")
+                            print("   📝 Episode: '\(episode.title)'")
+                            print("   ❌ Wrong feedId: \(episode.feedId)")
+                            print("   ✅ Correct feedId: \(feedId)")
+                            print("   🛡️ REJECTED: Episode will not be created in wrong feed")
+                            continue // Skip this contaminated episode
                         }
                         
                         var episodeWithFeedId = episode
@@ -1259,10 +1264,15 @@ private class EpisodeBuilder {
     }
     
     func build() -> PodcastEpisode? {
+        // 🚨 CRITICAL VALIDATION: Check for nil AND empty strings to prevent corrupted episodes
         guard let title = title,
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let description = description,
+              !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let audioUrl = audioUrl,
+              !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let pubDateString = pubDate else {
+            print("🚫 RSS PARSER: Rejected episode with missing/empty required fields")
             return nil
         }
         
@@ -1271,9 +1281,10 @@ private class EpisodeBuilder {
         
         // CRITICAL FIX: Generate deterministic IDs to prevent duplicates
         let episodeId: String
-        if let guid = guid, !guid.isEmpty {
-            // Use existing GUID if available
-            episodeId = guid
+        let trimmedGuid = guid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedGuid.isEmpty && trimmedGuid.count > 0 {
+            // Use existing GUID if available and valid
+            episodeId = trimmedGuid
         } else {
             // Generate deterministic ID based on content to prevent duplicates
             // This ensures the same episode always gets the same ID across RSS parses
@@ -1283,6 +1294,12 @@ private class EpisodeBuilder {
                 publicationDate: publicationDate,
                 feedUrl: feedUrl // Use feedUrl for uniqueness across different feeds
             )
+        }
+        
+        // CRITICAL VALIDATION: Ensure generated ID is not empty
+        guard !episodeId.isEmpty, episodeId.count > 0 else {
+            print("🚨 RSS PARSER: Generated episode ID is empty - this should never happen")
+            return nil
         }
         
         // Create show notes from available content and try to extract chapters
@@ -1308,19 +1325,8 @@ private class EpisodeBuilder {
         // ENHANCED CONTAMINATION PREVENTION: Generate feedId from feedUrl for proper episode-to-feed mapping
         let feedId = generateFeedIdFromUrl(feedUrl)
         
-        // ADDITIONAL VALIDATION: Ensure episode ID is properly isolated to this feed
-        let validatedEpisodeId: String
-        if let guid = guid, !guid.isEmpty {
-            validatedEpisodeId = guid
-        } else {
-            // Regenerate deterministic ID to ensure it includes proper feed isolation
-            validatedEpisodeId = PodcastEpisode.generateDeterministicID(
-                title: title,
-                audioUrl: audioUrl,
-                publicationDate: publicationDate,
-                feedUrl: feedUrl
-            )
-        }
+        // Use the already validated and generated episodeId
+        let validatedEpisodeId = episodeId
         
         // CONTAMINATION PREVENTION: Validate all required fields are present
         guard !validatedEpisodeId.isEmpty,
@@ -1329,14 +1335,33 @@ private class EpisodeBuilder {
               !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !feedId.isEmpty else {
             print("🚨 RSS PARSER: Episode validation failed - skipping episode with missing required fields")
+            print("🚨   - Episode ID empty: \(validatedEpisodeId.isEmpty)")
+            print("🚨   - Title empty: \(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)")
+            print("🚨   - Description empty: \(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)")
+            print("🚨   - Audio URL empty: \(audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)")
+            print("🚨   - Feed ID empty: \(feedId.isEmpty)")
+            return nil
+        }
+        
+        // CRITICAL: Final contamination check - ensure feedId matches the feed we're parsing
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAudioUrl = audioUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Additional sanity checks to prevent any corrupted episodes
+        guard trimmedTitle.count > 0,
+              trimmedDescription.count > 0,
+              trimmedAudioUrl.count > 0,
+              validatedEpisodeId.count > 0 else {
+            print("🚨 RSS PARSER: Episode has zero-length required fields after trimming")
             return nil
         }
         
         return PodcastEpisode(
             id: validatedEpisodeId,
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-            descriptionText: description.trimmingCharacters(in: .whitespacesAndNewlines),
-            audioUrl: audioUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+            title: trimmedTitle, // Use pre-trimmed validated value
+            descriptionText: trimmedDescription, // Use pre-trimmed validated value
+            audioUrl: trimmedAudioUrl, // Use pre-trimmed validated value
             publicationDate: publicationDate,
             duration: episodeDuration,
             state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
