@@ -2403,6 +2403,9 @@ class PodcastViewModel: ObservableObject {
             // Update UI if this feed is currently selected
             await MainActor.run {
                 if selectedFeedId == feedId {
+                    // CRITICAL: Update isolation manager with refreshed episodes so UI shows new data
+                    feedIsolationManager.replaceEpisodesForFeed(refreshedEpisodes, feedId: feedId)
+                    
                     // Apply current filter to refreshed episodes
                     let filter = EpisodeFilter(rawValue: currentTab) ?? .all
                     let filteredEpisodes: [PodcastEpisode]
@@ -2424,7 +2427,11 @@ class PodcastViewModel: ObservableObject {
                     let downloadsCount = refreshedEpisodes.filter { $0.state.isDownloaded }.count
                     episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
                     
-                    print("🔄 BACKGROUND REFRESH: Updated UI - now showing \(filteredEpisodes.count) episodes")
+                    // Clear episode cache to force UI refresh with new data
+                    _episodeCache = nil
+                    _episodeCacheFeedId = nil
+                    
+                    print("🔄 BACKGROUND REFRESH: Updated isolation manager and UI - now showing \(filteredEpisodes.count) episodes")
                 }
             }
             
@@ -4611,8 +4618,15 @@ class PodcastViewModel: ObservableObject {
                         // CRITICAL FIX: Force snapshot update for pull-to-refresh (bypass throttling)
                         self.forceUpdateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
                         
+                        // CRITICAL: Update isolation manager so UI shows new data
+                        self.feedIsolationManager.replaceEpisodesForFeed(updatedEpisodes, feedId: feedId)
+                        
                         // Update current episodes immediately for UI refresh
                         self.currentEpisodes = updatedEpisodes
+                        
+                        // Clear episode cache to force UI refresh with new data
+                        self._episodeCache = nil
+                        self._episodeCacheFeedId = nil
                         
                         self.isLoadingEpisodes = false
                         self.operationInProgress = false
@@ -4620,7 +4634,7 @@ class PodcastViewModel: ObservableObject {
                         // CRITICAL FIX: Force immediate UI update (bypass throttling)
                         self.forceUIUpdate()
                         
-                        print("⚡ PULL-TO-REFRESH: Forced UI update with \(updatedEpisodes.count) episodes (\(newEpisodes.count) new)")
+                        print("⚡ PULL-TO-REFRESH: Updated isolation manager and forced UI update with \(updatedEpisodes.count) episodes (\(newEpisodes.count) new)")
                     }
                     
                     // BACKGROUND: Defer expensive operations to background
