@@ -4609,20 +4609,70 @@ class PodcastViewModel: ObservableObject {
                         
                         if syncResult.success {
                             print("✅ Pull-to-refresh: Episode states synced successfully for \(episodeIds.count) episodes")
+                            
+                            // CRITICAL: Apply the Core Data updates from CloudKit sync
+                            if !syncResult.updates.isEmpty {
+                                do {
+                                    print("💾 Pull-to-refresh: Saving \(syncResult.updates.count) episode state updates to Core Data")
+                                    try await self.episodeManager.updateEpisodeStates(syncResult.updates)
+                                    print("✅ Pull-to-refresh: Core Data updated with episode states")
+                                } catch {
+                                    print("❌ Pull-to-refresh: Failed to save episode states to Core Data: \(error)")
+                                }
+                            }
+                            
+                            // CRITICAL FIX: Sync ALL episode states from EpisodeStateManager to Core Data
+                            // This ensures episodes with progress that DON'T have CloudKit records still get their states updated
+                            print("🔄 Pull-to-refresh: Syncing ALL episode states from EpisodeStateManager to Core Data")
+                            var additionalUpdates: [EpisodeStateUpdate] = []
+                            for episodeId in episodeIds {
+                                let progress = EpisodeStateManager.shared.getProgress(for: episodeId)
+                                let isFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+                                let isDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
+                                let state = EpisodeStateManager.shared.getState(for: episodeId)
+                                let isPlayed = (state == .played)
+                                
+                                additionalUpdates.append(EpisodeStateUpdate(
+                                    episodeId: episodeId,
+                                    progress: progress,
+                                    isFavorite: isFavorite,
+                                    isDownloaded: isDownloaded,
+                                    isPlayed: isPlayed
+                                ))
+                            }
+                            
+                            if !additionalUpdates.isEmpty {
+                                do {
+                                    print("💾 Pull-to-refresh: Saving \(additionalUpdates.count) additional episode states to Core Data")
+                                    try await self.episodeManager.updateEpisodeStates(additionalUpdates)
+                                    print("✅ Pull-to-refresh: All episode states synced to Core Data")
+                                } catch {
+                                    print("❌ Pull-to-refresh: Failed to save additional episode states: \(error)")
+                                }
+                            }
                         } else {
                             print("⚠️ Pull-to-refresh: Episode state sync completed with some issues")
                         }
                     }
                     
+                    // CRITICAL: Re-fetch episodes from Core Data AFTER state sync to get updated states
+                    let episodesWithStates: [PodcastEpisode]
+                    if let maxEpisodes = feed.maxEpisodes {
+                        episodesWithStates = await PodcastCoreDataManager.shared.getRecentEpisodesForFeed(feedId, limit: maxEpisodes)
+                    } else {
+                        episodesWithStates = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                    }
+                    print("🔄 Pull-to-refresh: Re-fetched \(episodesWithStates.count) episodes with updated states")
+                    
                     await MainActor.run {
                         // CRITICAL FIX: Force snapshot update for pull-to-refresh (bypass throttling)
-                        self.forceUpdateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
+                        self.forceUpdateEpisodeSnapshot(for: feedId, episodes: episodesWithStates)
                         
                         // CRITICAL: Update isolation manager so UI shows new data
-                        self.feedIsolationManager.replaceEpisodesForFeed(updatedEpisodes, feedId: feedId)
+                        self.feedIsolationManager.replaceEpisodesForFeed(episodesWithStates, feedId: feedId)
                         
                         // Update current episodes immediately for UI refresh
-                        self.currentEpisodes = updatedEpisodes
+                        self.currentEpisodes = episodesWithStates
                         
                         // Clear episode cache to force UI refresh with new data
                         self._episodeCache = nil
@@ -4634,7 +4684,7 @@ class PodcastViewModel: ObservableObject {
                         // CRITICAL FIX: Force immediate UI update (bypass throttling)
                         self.forceUIUpdate()
                         
-                        print("⚡ PULL-TO-REFRESH: Updated isolation manager and forced UI update with \(updatedEpisodes.count) episodes (\(newEpisodes.count) new)")
+                        print("⚡ PULL-TO-REFRESH: Updated isolation manager and forced UI update with \(episodesWithStates.count) episodes (\(newEpisodes.count) new, states refreshed)")
                     }
                     
                     // BACKGROUND: Defer expensive operations to background
