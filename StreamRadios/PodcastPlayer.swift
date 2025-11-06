@@ -1221,9 +1221,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         
         // Detailed episode restoration (loads episodes, finds specific episode, etc.)
+        // BACKGROUND RETURN FIX: Skip restoration if returning from background
+        // The user's view already has the correct feed loaded - restoration would overwrite it
         Task { @MainActor in
-            print("🔧 PodcastPlayer: Starting detailed restoration with feeds count: \(viewModel.podcastFeeds.count)")
-            await restoreLastPlayedEpisodeOnStartup()
+            if viewModel.isReturningFromBackground {
+                print("🔧 PodcastPlayer: Skipping restoration - returning from background (user's view has correct feed)")
+            } else {
+                print("🔧 PodcastPlayer: Starting detailed restoration with feeds count: \(viewModel.podcastFeeds.count)")
+                await restoreLastPlayedEpisodeOnStartup()
+            }
         }
         
         // Set up notification listener for when feeds are loaded

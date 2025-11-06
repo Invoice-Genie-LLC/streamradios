@@ -3849,9 +3849,10 @@ struct PodcastPlayerView: View {
         // CRITICAL FIX: Determine if we're actually switching feeds
         // This is a real feed switch ONLY if:
         // 1. selectedFeedId is different from what we're displaying AND
-        // 2. The current episodes don't belong to this feed
+        // 2. The current episodes don't belong to this feed AND
+        // 3. We're NOT returning from background (to prevent clearing on app resume)
         // This prevents CarPlay playback changes from being treated as feed switches
-        let needsFeedSwitch = viewModel.selectedFeedId != feed.id && !currentEpisodesForThisFeed
+        let needsFeedSwitch = viewModel.selectedFeedId != feed.id && !currentEpisodesForThisFeed && !viewModel.isReturningFromBackground
         
         if needsFeedSwitch {
             print("🔄 PodcastListView: Real feed switch detected - from \(viewModel.selectedFeedId ?? "nil") to \(feed.id)")
@@ -3865,6 +3866,23 @@ struct PodcastPlayerView: View {
             let taskKey = "\(feed.id)-true"
             viewModel.pendingInitializationTasks.remove(taskKey)
             print("🔄 PodcastListView: Cleared loading state and pending tasks for feed switch")
+        } else if viewModel.isReturningFromBackground {
+            // CRITICAL FIX: Only preserve episodes if they belong to THIS feed
+            // If episodes are from a different feed, clear them and load correct ones
+            if currentEpisodesForThisFeed {
+                print("🔄 PodcastListView: Returning from background - preserving episodes (\(viewModel.currentEpisodes.count) episodes for feed \(feed.id))")
+            } else {
+                print("🔄 PodcastListView: Returning from background - but episodes are from different feed, clearing them")
+                viewModel.currentEpisodes.removeAll()
+            }
+            
+            // Update selectedFeedId to match current feed to stay in sync
+            if viewModel.selectedFeedId != feed.id {
+                viewModel.selectedFeedId = feed.id
+            }
+            
+            // CRITICAL: Clear the flag AFTER checking it so future navigations work normally
+            viewModel.clearBackgroundReturnFlag()
         } else {
             // Update selectedFeedId if needed, but don't clear episodes if they're already correct
             if viewModel.selectedFeedId != feed.id {
@@ -3874,6 +3892,11 @@ struct PodcastPlayerView: View {
                 print("🔄 PodcastListView: Already viewing feed \(feed.id) with correct episodes - no changes needed")
             }
             // CARPLAY FIX: Episodes belong to this feed, so keep them even if selectedFeedId was different
+            
+            // Clear background return flag if it was set (handles edge cases)
+            if viewModel.isReturningFromBackground {
+                viewModel.clearBackgroundReturnFlag()
+            }
         }
         
         // CRITICAL PERFORMANCE: Skip ALL expensive operations when snapshots are available

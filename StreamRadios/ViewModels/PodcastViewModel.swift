@@ -727,6 +727,9 @@ class PodcastViewModel: ObservableObject {
     @Published var episodeProgress: [String: Double] = [:]
     @Published var downloadProgress: [String: Double] = [:]
     
+    // MARK: - App Lifecycle State
+    @Published var isReturningFromBackground = false // Track when app returns from background
+    
     // MARK: - Background Sync Management
     private var activeBackgroundSyncs = Set<String>() // Track feeds currently being synced
     private let syncLock = NSLock() // Protect the sync set
@@ -1048,6 +1051,21 @@ class PodcastViewModel: ObservableObject {
             name: .init("EpisodePlayedChangedInstantly"),
             object: nil
         )
+        
+        // BACKGROUND RETURN FIX: Listen for app lifecycle events to prevent clearing episodes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
     }
     
     @objc private func handleInstantPodcastProgressSync(_ notification: Notification) {
@@ -1119,6 +1137,30 @@ class PodcastViewModel: ObservableObject {
         // Force immediate UI update for played status changes
         Task { @MainActor in
             self.objectWillChange.send()
+        }
+    }
+    
+    // MARK: - App Lifecycle Handlers
+    
+    @objc private func handleAppWillEnterForeground(_ notification: Notification) {
+        // Mark that we're returning from background to prevent clearing episodes
+        Task { @MainActor in
+            self.isReturningFromBackground = true
+            print("🔄 ViewModel: App entering foreground - set isReturningFromBackground = true")
+        }
+    }
+    
+    @objc private func handleAppDidBecomeActive(_ notification: Notification) {
+        // Don't reset flag here - let the view reset it after checking
+        // This ensures the view always sees the flag before it's cleared
+        print("🔄 ViewModel: App became active - keeping isReturningFromBackground = \(isReturningFromBackground)")
+    }
+    
+    /// Called by view after checking isReturningFromBackground to reset the flag
+    func clearBackgroundReturnFlag() {
+        Task { @MainActor in
+            self.isReturningFromBackground = false
+            print("🔄 ViewModel: Cleared isReturningFromBackground flag after view checked it")
         }
     }
     
