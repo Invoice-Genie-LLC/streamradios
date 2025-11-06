@@ -1959,6 +1959,17 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
         os_log("Started playing episode: %@", log: log, type: .info, episode.title)
         
+        // CARPLAY FIX: Notify CarPlay that a new episode has started playing
+        // This ensures the "Playing" indicator moves to the correct episode in the CarPlay UI
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PodcastPlaybackStateChanged"),
+            object: nil,
+            userInfo: [
+                "episodeId": episode.id,
+                "isPlaying": true
+            ]
+        )
+        
         // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
     }
     

@@ -1696,17 +1696,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         var statusText = ""
         let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
         
+        // CRITICAL FIX: Get fresh state from EpisodeStateManager instead of stale episode.state
+        // This ensures we always show the correct status and highlighting
+        let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+        let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+        let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+        let isPlayed = (episodeState == .played)
+        
         // Determine episode status based on state and current playback
         if isCurrentlyPlaying {
             statusText = " • Playing"
-        } else if episode.state.isPlayed {
+        } else if isPlayed {
             statusText = " • Complete"
-        } else if episode.state.progress > 0 {
+        } else if episodeProgress > 0 {
             statusText = " • IN PROGRESS"
         }
         
         // Add download indicator
-        if episode.state.isDownloaded {
+        if isDownloaded {
             statusText += " • Downloaded"
         }
         
@@ -1804,12 +1811,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             var statusText = ""
             let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
             
+            // CRITICAL FIX: Get fresh state from EpisodeStateManager
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            let isPlayed = (episodeState == .played)
+            
             // Determine episode status based on state and current playback
             if isCurrentlyPlaying {
                 statusText = " • Playing"
-            } else if episode.state.isPlayed {
+            } else if isPlayed {
                 statusText = " • Complete"
-            } else if episode.state.progress > 0 {
+            } else if episodeProgress > 0 {
                 statusText = " • IN PROGRESS"
             }
             
@@ -1859,17 +1871,23 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             var statusText = ""
             let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
             
+            // CRITICAL FIX: Get fresh state from EpisodeStateManager
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+            let isPlayed = (episodeState == .played)
+            
             // Determine episode status based on state and current playback
             if isCurrentlyPlaying {
                 statusText = " • Playing"
-            } else if episode.state.isPlayed {
+            } else if isPlayed {
                 statusText = " • Complete"
-            } else if episode.state.progress > 0 {
+            } else if episodeProgress > 0 {
                 statusText = " • IN PROGRESS"
             }
             
             // Add download indicator if episode is also downloaded
-            if episode.state.isDownloaded {
+            if isDownloaded {
                 statusText += " • Downloaded"
             }
             
@@ -3356,28 +3374,64 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             return
         }
         
+        // CRITICAL FIX: Reload episodes directly from Core Data to get fresh episode data
+        // CarPlayManager's feeds have empty episode arrays (loaded on-demand), so we must load from Core Data
+        os_log("🚗 CarPlay: Reloading episodes from Core Data for feed '%@'", log: log, type: .info, currentFeed.title)
+        
+        // Load episodes synchronously from Core Data
+        let context = CoreDataStack.shared.context
+        var reloadedEpisodes: [PodcastEpisode] = []
+        
+        context.performAndWait {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "feedId == %@", currentFeed.id)
+            fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+            
+            do {
+                let managedEpisodes = try context.fetch(fetchRequest)
+                reloadedEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
+                os_log("🚗 CarPlay: Reloaded %d episodes from Core Data for feed '%@'", log: self.log, type: .info, reloadedEpisodes.count, currentFeed.title)
+            } catch {
+                os_log("🚗 CarPlay: Failed to reload episodes from Core Data: %@", log: self.log, type: .error, error.localizedDescription)
+            }
+        }
+        
+        guard !reloadedEpisodes.isEmpty else {
+            os_log("🚗 CarPlay: No episodes found in Core Data for feed '%@'", log: log, type: .error, currentFeed.title)
+            return
+        }
+        
+        // Create updated feed with fresh episodes
+        var updatedFeed = currentFeed
+        updatedFeed.episodes = reloadedEpisodes
+        
+        os_log("🚗 CarPlay: Reloaded feed '%@' - now has %d episodes (was %d)", log: log, type: .info, updatedFeed.title, updatedFeed.episodes.count, currentFeed.episodes.count)
+        
+        // Update the current feed reference with fresh data
+        currentPodcastFeed = updatedFeed
+        
         // Get the currently playing episode to determine if we need to update this feed
         let currentPlayingEpisodeId = PodcastPlayer.shared.currentEpisode?.id
         
         // Check if the currently playing episode is in this feed OR if any episode in this feed was previously playing
         // This ensures we update when switching between episodes within the same podcast
         let shouldUpdate = currentPlayingEpisodeId == nil || 
-                          currentFeed.episodes.contains(where: { $0.id == currentPlayingEpisodeId }) ||
-                          currentFeed.episodes.contains(where: { $0.id == episodeId })
+                          updatedFeed.episodes.contains(where: { $0.id == currentPlayingEpisodeId }) ||
+                          updatedFeed.episodes.contains(where: { $0.id == episodeId })
         
         if !shouldUpdate {
             os_log("🚗 CarPlay: No episodes in current feed need section update", log: log, type: .debug)
             return
         }
         
-        os_log("🚗 CarPlay: Updating sections for podcast '%@' - current playing: %@, notification episode: %@", log: log, type: .info, currentFeed.title, currentPlayingEpisodeId ?? "none", episodeId)
+        os_log("🚗 CarPlay: Updating sections for podcast '%@' - current playing: %@, notification episode: %@", log: log, type: .info, updatedFeed.title, currentPlayingEpisodeId ?? "none", episodeId)
         
         // Use the same efficient section update approach that works perfectly for Recents
         // Reset the updating flag to ensure this critical update goes through
         isUpdatingTemplate = false
         
-        // Use immediate section updates - same approach as Recents tab which works perfectly
-        updateCurrentPodcastTemplateSections(for: currentFeed)
+        // Use immediate section updates with FRESH feed data - same approach as Recents tab which works perfectly
+        updateCurrentPodcastTemplateSections(for: updatedFeed)
     }
     
     private func forceImmediateHighlightingUpdate(episodeId: String) {
@@ -3443,17 +3497,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 os_log("🚗 CarPlay: Episode '%@' is currently playing - will show highlighting", log: log, type: .info, episode.title)
             }
             
+            // CRITICAL FIX: Get fresh state from EpisodeStateManager instead of stale episode.state
+            // This ensures we always show the correct status and highlighting
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+            let isPlayed = (episodeState == .played)
+            
             // Determine episode status based on state and current playback
             if isCurrentlyPlaying {
                 statusText = " • Playing"
-            } else if episode.state.isPlayed {
+            } else if isPlayed {
                 statusText = " • Complete"
-            } else if episode.state.progress > 0 {
+            } else if episodeProgress > 0 {
                 statusText = " • IN PROGRESS"
             }
             
             // Add download indicator
-            if episode.state.isDownloaded {
+            if isDownloaded {
                 statusText += " • Downloaded"
             }
             
