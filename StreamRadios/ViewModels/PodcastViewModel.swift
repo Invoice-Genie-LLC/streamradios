@@ -4967,10 +4967,10 @@ class PodcastViewModel: ObservableObject {
         coreDataLoadTimestamps.removeAll()
         print("🧹 EMERGENCY: Cleared all episodes from isolation manager to prevent contamination spread")
         
-        // Reset DataSyncManager cache tracking
-        DataSyncManager.shared.updateEpisodeCacheReadiness(
-            feedsWithCaches: 0,
-            totalFeedsRequiringCaches: 0
+        // Reset DataSyncManager Core Data tracking
+        DataSyncManager.shared.updateCoreDataEpisodeLoadStatus(
+            feedsLoaded: 0,
+            totalFeeds: 0
         )
     }
     

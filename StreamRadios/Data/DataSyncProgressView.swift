@@ -125,19 +125,19 @@ struct DataSyncProgressView: View {
                         )
                         
                         DetailedSyncStatusItem(
-                            title: "Episode States & Caches",
+                            title: "Episode Progress Sync",
                             status: syncManager.episodeStatesStatus,
                             progress: syncManager.episodeStatesProgress,
                             operation: syncManager.episodeStatesOperation,
-                            currentCount: syncManager.feedsWithCaches,
-                            totalCount: syncManager.totalFeedsRequiringCaches > 0 ? syncManager.totalFeedsRequiringCaches : syncManager.episodeStatesTotalCount
+                            currentCount: syncManager.feedsLoadedFromCoreData,
+                            totalCount: syncManager.totalFeedsInCoreData > 0 ? syncManager.totalFeedsInCoreData : syncManager.episodeStatesTotalCount
                         )
                         
                         DetailedSyncStatusItem(
-                            title: "Station Snapshots",
+                            title: "Radio Stations Sync",
                             status: syncManager.stationSnapshotsReady ? .completed : .pending,
                             progress: syncManager.totalCountriesRequiringSnapshots > 0 ? Double(syncManager.countriesWithSnapshots) / Double(syncManager.totalCountriesRequiringSnapshots) : 0.0,
-                            operation: syncManager.totalCountriesRequiringSnapshots > 0 ? "Creating snapshots for \(syncManager.totalCountriesRequiringSnapshots) countries..." : "Preparing station snapshots...",
+                            operation: syncManager.totalCountriesRequiringSnapshots > 0 ? "Syncing stations for \(syncManager.totalCountriesRequiringSnapshots) countries..." : "Preparing station syncing...",
                             currentCount: syncManager.countriesWithSnapshots,
                             totalCount: syncManager.totalCountriesRequiringSnapshots
                         )
