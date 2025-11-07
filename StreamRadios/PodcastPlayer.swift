@@ -981,7 +981,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
             
             Task { @MainActor in
-                // PERFORMANCE: Get episodes from snapshot if available, otherwise use current episodes
+                // PERFORMANCE: Get episodes from cache if available, otherwise use current episodes
                 let episodes = viewModel.feedIsolationManager.getEpisodesForFeed(feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
                 allEpisodesInFeed = episodes
                 allEpisodesInFeed.sort { $0.publicationDate > $1.publicationDate } // Sort by newest first
@@ -3784,7 +3784,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         progress: progress
                     )
                 } else {
-                    print("⚡ PERFORMANCE: Skipped playback CloudKit sync - using snapshot for feed \(currentEpisode.feedId)")
+                    print("⚡ PERFORMANCE: Skipped playback CloudKit sync - using cache for feed \(currentEpisode.feedId)")
                 }
                 
                 os_log("🚗 CarPlay progress update sent: %@, Progress: %.1f%% (CPU optimized)", log: log, type: .debug, currentEpisode.title, progress * 100)

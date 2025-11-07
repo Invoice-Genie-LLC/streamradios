@@ -4968,9 +4968,9 @@ class PodcastViewModel: ObservableObject {
         print("🧹 EMERGENCY: Cleared all episodes from isolation manager to prevent contamination spread")
         
         // Reset DataSyncManager cache tracking
-        DataSyncManager.shared.updateEpisodeSnapshotReadiness(
-            feedsWithSnapshots: 0,
-            totalFeedsRequiringSnapshots: 0
+        DataSyncManager.shared.updateEpisodeCacheReadiness(
+            feedsWithCaches: 0,
+            totalFeedsRequiringCaches: 0
         )
     }
     

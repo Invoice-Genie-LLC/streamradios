@@ -98,9 +98,9 @@ class DataSyncManager: ObservableObject {
     @Published var episodeStatesTotalCount = 0
     
     // Episode Cache Readiness
-    @Published var episodeSnapshotsReady = false
-    @Published var feedsWithSnapshots = 0
-    @Published var totalFeedsRequiringSnapshots = 0
+    @Published var episodeCachesReady = false
+    @Published var feedsWithCaches = 0
+    @Published var totalFeedsRequiringCaches = 0
     
     // Radio Station Snapshots Readiness
     @Published var stationSnapshotsReady = false
@@ -466,9 +466,9 @@ class DataSyncManager: ObservableObject {
             // Wait for podcast feeds to be loaded first
             await waitForPodcastFeedsToLoad(podcastViewModel)
             
-                    // PERFORMANCE: Skip entire episode sync if snapshots are available
-        // Snapshots already contain complete episode data with states
-        let hasSnapshots = await MainActor.run {
+                    // PERFORMANCE: Skip entire episode sync if caches are available
+        // Caches already contain complete episode data with states
+        let hasCaches = await MainActor.run {
             for feed in podcastViewModel.podcastFeeds {
                 if podcastViewModel.feedIsolationManager.getEpisodesForFeed(feed.id) != nil {
                     print("⚡ PERFORMANCE: Found episode cache for feed \(feed.title)")
@@ -478,7 +478,7 @@ class DataSyncManager: ObservableObject {
             return false
         }
         
-        if hasSnapshots {
+        if hasCaches {
             print("⚡ PERFORMANCE: Skipping entire episode state sync - using episode cache with complete state data")
             episodeStatesStatus = .completed
             episodeStatesProgress = 1.0
@@ -531,10 +531,10 @@ class DataSyncManager: ObservableObject {
             
             // Phase 2: Create Episode Cache (60-90%)
             episodeStatesOperation = "Creating episode cache for instant access..."
-            await createEpisodeSnapshotsForAllFeeds(podcastViewModel)
+            await createEpisodeCachesForAllFeeds(podcastViewModel)
             episodeStatesProgress = 0.9
             
-            // Update current count to reflect snapshots created
+            // Update current count to reflect caches created
             episodeStatesCurrentCount = Int(Double(episodeStatesTotalCount) * 0.9)
             
             // Phase 3: Final Verification (90-100%)
@@ -544,8 +544,8 @@ class DataSyncManager: ObservableObject {
             episodeStatesStatus = .completed
             episodeStatesProgress = 1.0
             episodeStatesCurrentCount = episodeStatesTotalCount
-            episodeStatesOperation = "✅ \(episodeStatesTotalCount) episodes ready with instant snapshots"
-            print("✅ Episode states sync completed with snapshots created")
+            episodeStatesOperation = "✅ \(episodeStatesTotalCount) episodes ready with instant cache"
+            print("✅ Episode states sync completed with caches created")
             
         } catch {
             episodeStatesStatus = .failed
@@ -627,9 +627,9 @@ class DataSyncManager: ObservableObject {
         episodeStatesTotalCount = 0
         
         // Episode Cache
-        episodeSnapshotsReady = false
-        feedsWithSnapshots = 0
-        totalFeedsRequiringSnapshots = 0
+        episodeCachesReady = false
+        feedsWithCaches = 0
+        totalFeedsRequiringCaches = 0
         
         // User Preferences
         userPreferencesStatus = .pending
@@ -731,25 +731,25 @@ class DataSyncManager: ObservableObject {
         episodeStatesTotalCount = 0
         episodeStatesOperation = ""
         
-        // Also reset snapshot tracking
-        episodeSnapshotsReady = false
-        feedsWithSnapshots = 0
-        totalFeedsRequiringSnapshots = 0
+        // Also reset cache tracking
+        episodeCachesReady = false
+        feedsWithCaches = 0
+        totalFeedsRequiringCaches = 0
         
-        print("🔄 DataSyncManager: Reset episode state sync tracking and snapshots")
+        print("🔄 DataSyncManager: Reset episode state sync tracking and caches")
     }
     
-    /// Update episode cache readiness tracking (called by PodcastViewModel when snapshots are created)
+    /// Update episode cache readiness tracking (called by PodcastViewModel when caches are created)
     @MainActor
-    func updateEpisodeSnapshotReadiness(feedsWithSnapshots: Int, totalFeedsRequiringSnapshots: Int) {
-        self.feedsWithSnapshots = feedsWithSnapshots
-        self.totalFeedsRequiringSnapshots = totalFeedsRequiringSnapshots
-        self.episodeSnapshotsReady = (feedsWithSnapshots == totalFeedsRequiringSnapshots && totalFeedsRequiringSnapshots > 0)
+    func updateEpisodeCacheReadiness(feedsWithCaches: Int, totalFeedsRequiringCaches: Int) {
+        self.feedsWithCaches = feedsWithCaches
+        self.totalFeedsRequiringCaches = totalFeedsRequiringCaches
+        self.episodeCachesReady = (feedsWithCaches == totalFeedsRequiringCaches && totalFeedsRequiringCaches > 0)
         
-        print("📸 DataSyncManager: Updated episode cache readiness - \(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots) ready: \(episodeSnapshotsReady)")
+        print("📸 DataSyncManager: Updated episode cache readiness - \(feedsWithCaches)/\(totalFeedsRequiringCaches) ready: \(episodeCachesReady)")
     }
     
-    /// Update radio station snapshot readiness tracking (called by RadioStationViewModel when snapshots are created)
+    /// Update radio station snapshot readiness tracking (called by RadioStationViewModel when caches are created)
     @MainActor
     func updateStationSnapshotReadiness(countriesWithSnapshots: Int, totalCountriesRequiringSnapshots: Int) {
         self.countriesWithSnapshots = countriesWithSnapshots
@@ -1225,7 +1225,7 @@ class DataSyncManager: ObservableObject {
         await waitForAllSyncStatusesToComplete()
         
         // CRITICAL: Final verification that episode cache are available
-        await verifyEpisodeSnapshotsAreReady(podcastViewModel)
+        await verifyEpisodeCachesAreReady(podcastViewModel)
         
         currentOperation = "Synchronization completed!"
         
@@ -1234,9 +1234,9 @@ class DataSyncManager: ObservableObject {
         await podcastViewModel.forceSaveAndReload()
         
         // CRITICAL: Ensure episode cache are created for all feeds before completion
-        await ensureEpisodeSnapshotsAreCreated(podcastViewModel)
+        await ensureEpisodeCachesAreCreated(podcastViewModel)
         
-        // CRITICAL: Ensure radio station snapshots are created for all countries before completion
+        // CRITICAL: Ensure radio station caches are created for all countries before completion
         await ensureStationSnapshotsAreCreated(RadioStationViewModel.shared)
         
         // IMMEDIATE: Trigger PodcastViewModel UI refresh as soon as sync completes
@@ -1320,30 +1320,30 @@ class DataSyncManager: ObservableObject {
         print("🎯 FINAL VERIFICATION: Current isFreshInstallUIReady=\(isFreshInstallUIReady)")
         
         if finalFeedCount > 0 && finalFeedOrderCount > 0 {
-            // CRITICAL: Also check that both episode and station snapshots are ready before allowing UI access
-            let snapshotsReady = (episodeSnapshotsReady || totalFeedsRequiringSnapshots == 0) && 
+            // CRITICAL: Also check that both episode caches and station snapshots are ready before allowing UI access
+            let cachesReady = (episodeCachesReady || totalFeedsRequiringCaches == 0) && 
                                 (stationSnapshotsReady || totalCountriesRequiringSnapshots == 0)
             
-            if snapshotsReady {
-                print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds, \(finalFeedOrderCount) feed order items, \(feedsWithSnapshots) episode cache, and \(countriesWithSnapshots) station snapshots")
+            if cachesReady {
+                print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds, \(finalFeedOrderCount) feed order items, \(feedsWithCaches) episode cache, and \(countriesWithSnapshots) station snapshots")
                 isFreshInstallUIReady = true
                 isSyncing = false
-                print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND all snapshots")
+                print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND all caches")
             } else {
-                print("⏳ WAITING FOR SNAPSHOTS: Feeds ready but snapshots not complete - Episodes: (\(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots)), Stations: (\(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots))")
-                // Wait a bit more for snapshots to complete
+                print("⏳ WAITING FOR CACHES: Feeds ready but caches not complete - Episodes: (\(feedsWithCaches)/\(totalFeedsRequiringCaches)), Stations: (\(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots))")
+                // Wait a bit more for caches to complete
                 try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 
-                let snapshotsReadyAfterWait = (episodeSnapshotsReady || totalFeedsRequiringSnapshots == 0) && 
+                let cachesReadyAfterWait = (episodeCachesReady || totalFeedsRequiringCaches == 0) && 
                                              (stationSnapshotsReady || totalCountriesRequiringSnapshots == 0)
                 
-                if snapshotsReadyAfterWait {
-                    print("✅ SNAPSHOTS READY: All snapshots completed after wait")
+                if cachesReadyAfterWait {
+                    print("✅ CACHES READY: All caches completed after wait")
                     isFreshInstallUIReady = true
                     isSyncing = false
-                    print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND all snapshots")
+                    print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND all caches")
                 } else {
-                    print("⏳ STILL WAITING: Snapshots not ready after wait - will retry")
+                    print("⏳ STILL WAITING: Caches not ready after wait - will retry")
                 }
             }
         } else {
@@ -1371,31 +1371,31 @@ class DataSyncManager: ObservableObject {
     
     /// Ensure episode cache are created for all feeds before completing sync
     @MainActor
-    private func ensureEpisodeSnapshotsAreCreated(_ podcastViewModel: PodcastViewModel) async {
-        print("📸 FINAL SNAPSHOT CHECK: Ensuring all feeds have episode cache...")
+    private func ensureEpisodeCachesAreCreated(_ podcastViewModel: PodcastViewModel) async {
+        print("📸 FINAL CACHE CHECK: Ensuring all feeds have episode cache...")
         
-        // CRITICAL: Clear old snapshots first to ensure fresh state data
+        // CRITICAL: Clear old caches first to ensure fresh state data
         podcastViewModel.clearAllEpisodeCaches()
         print("🗑️ CLEARED: All old episode cache before final creation")
         
         let feedsWithEpisodes = podcastViewModel.podcastFeeds.filter { !$0.episodes.isEmpty }
-        var snapshotsCreated = 0
+        var cachesCreated = 0
         var totalEpisodes = 0
         
-        // Update snapshot tracking
-        totalFeedsRequiringSnapshots = feedsWithEpisodes.count
-        feedsWithSnapshots = 0
+        // Update cache tracking
+        totalFeedsRequiringCaches = feedsWithEpisodes.count
+        feedsWithCaches = 0
         
         for feed in podcastViewModel.podcastFeeds {
-            // Since we cleared all snapshots, create new ones for feeds with episodes
+            // Since we cleared all caches, create new ones for feeds with episodes
             if !feed.episodes.isEmpty {
-                // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating snapshot
+                // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating cache
                 let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
                 if validEpisodes.count != feed.episodes.count {
                     print("🚨 STARTUP CONTAMINATION: Feed '\(feed.title)' has \(feed.episodes.count - validEpisodes.count) contaminated episodes")
                 }
                 
-                // Apply current states from EpisodeStateManager before creating snapshot
+                // Apply current states from EpisodeStateManager before creating cache
                 let episodesWithCurrentStates = validEpisodes.map { episode in
                     var updatedEpisode = episode
                     
@@ -1406,7 +1406,7 @@ class DataSyncManager: ObservableObject {
                     let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
                     
                     // DEBUG: Log states for ALL episodes to see what's happening
-                    print("📸 FINAL SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
+                    print("📸 FINAL CACHE DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
                     
                     // Update episode state with current values
                     updatedEpisode.state.progress = progress
@@ -1417,32 +1417,32 @@ class DataSyncManager: ObservableObject {
                     return updatedEpisode
                 }
                 
-                // Create snapshot for feeds with validated episodes that have current states
+                // Create cache for feeds with validated episodes that have current states
                 podcastViewModel.feedIsolationManager.replaceEpisodesForFeed(episodesWithCurrentStates, feedId: feed.id)
-                feedsWithSnapshots += 1
-                snapshotsCreated += 1
+                feedsWithCaches += 1
+                cachesCreated += 1
                 totalEpisodes += validEpisodes.count
-                print("📸 Created final snapshot for '\(feed.title)' with \(validEpisodes.count) episodes with current states")
+                print("📸 Created final cache for '\(feed.title)' with \(validEpisodes.count) episodes with current states")
             } else {
-                print("📸 Skipped snapshot for '\(feed.title)' - no episodes available")
+                print("📸 Skipped cache for '\(feed.title)' - no episodes available")
             }
         }
         
-        // Mark snapshots as ready
-        episodeSnapshotsReady = (feedsWithSnapshots == totalFeedsRequiringSnapshots)
+        // Mark caches as ready
+        episodeCachesReady = (feedsWithCaches == totalFeedsRequiringCaches)
         
-        print("📸 FINAL SNAPSHOT SUMMARY: \(snapshotsCreated) snapshots available with \(totalEpisodes) total episodes")
-        print("📸 FINAL SNAPSHOT READINESS: \(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots) feeds with episodes have snapshots - Ready: \(episodeSnapshotsReady)")
+        print("📸 FINAL CACHE SUMMARY: \(cachesCreated) caches available with \(totalEpisodes) total episodes")
+        print("📸 FINAL CACHE READINESS: \(feedsWithCaches)/\(totalFeedsRequiringCaches) feeds with episodes have caches - Ready: \(episodeCachesReady)")
         
-        // Update episode states progress to reflect snapshot creation
+        // Update episode states progress to reflect cache creation
         if episodeStatesStatus != .completed {
             episodeStatesStatus = .completed
             episodeStatesProgress = 1.0
-            episodeStatesOperation = "✅ \(feedsWithSnapshots) episode cache ready for instant access"
+            episodeStatesOperation = "✅ \(feedsWithCaches) episode cache ready for instant access"
         }
     }
     
-    /// Ensure radio station snapshots are created for all countries before completing sync
+    /// Ensure radio station caches are created for all countries before completing sync
     @MainActor
     private func ensureStationSnapshotsAreCreated(_ radioStationViewModel: RadioStationViewModel) async {
         print("📸 FINAL STATION SNAPSHOT CHECK: Ensuring all countries have station snapshots...")
@@ -1453,7 +1453,7 @@ class DataSyncManager: ObservableObject {
         var snapshotsCreated = 0
         var totalStations = 0
         
-        // Update snapshot tracking
+        // Update cache tracking
         totalCountriesRequiringSnapshots = countriesWithStations.count
         countriesWithSnapshots = 0
         
@@ -1464,7 +1464,7 @@ class DataSyncManager: ObservableObject {
                 snapshotsCreated += 1
                 print("📸 Station snapshot already exists for '\(country)'")
             } else {
-                // Create snapshot for countries with stations
+                // Create cache for countries with stations
                 radioStationViewModel.updateStationSnapshot(for: country, stations: stations)
                 countriesWithSnapshots += 1
                 snapshotsCreated += 1
@@ -1473,13 +1473,13 @@ class DataSyncManager: ObservableObject {
             }
         }
         
-        // Mark snapshots as ready
+        // Mark caches as ready
         stationSnapshotsReady = (countriesWithSnapshots == totalCountriesRequiringSnapshots)
         
-        print("📸 FINAL STATION SNAPSHOT SUMMARY: \(snapshotsCreated) snapshots available with \(totalStations) total stations")
-        print("📸 FINAL STATION SNAPSHOT READINESS: \(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots) countries have snapshots - Ready: \(stationSnapshotsReady)")
+        print("📸 FINAL STATION CACHE SUMMARY: \(snapshotsCreated) caches available with \(totalStations) total stations")
+        print("📸 FINAL STATION CACHE READINESS: \(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots) countries have caches - Ready: \(stationSnapshotsReady)")
         
-        // Update radio stations progress to reflect snapshot creation
+        // Update radio stations progress to reflect cache creation
         if radioStationsStatus != .completed {
             radioStationsStatus = .completed
             radioStationsProgress = 1.0
@@ -1684,7 +1684,7 @@ class DataSyncManager: ObservableObject {
                 podcastFeedsProgress = 0.95
                 podcastFeedsOperation = "Completing feed sync..."
                 
-                // STEP 3: Fetch ALL episode states from CloudKit for complete snapshots
+                // STEP 3: Fetch ALL episode states from CloudKit for complete caches
                 podcastFeedsOperation = "Fetching ALL episode states from iCloud..."
                 podcastFeedsProgress = 1.0
                 episodeStatesStatus = .inProgress
@@ -1718,7 +1718,7 @@ class DataSyncManager: ObservableObject {
                     print("⚠️ FRESH INSTALL: Episode states sync had issues, continuing...")
                 }
                 
-                // STEP 4: Apply CloudKit feed metadata updates before creating snapshots
+                // STEP 4: Apply CloudKit feed metadata updates before creating caches
                 podcastFeedsOperation = "Applying CloudKit feed metadata updates..."
                 podcastFeedsProgress = 0.85
                 episodeStatesOperation = "Applying CloudKit feed metadata updates..."
@@ -1737,12 +1737,12 @@ class DataSyncManager: ObservableObject {
                 feedParsingMessage = "Creating episode cache with complete state data..."
                 print("📸 FRESH INSTALL: Creating complete episode cache with states and metadata...")
                 
-                // Create snapshots that include complete episode lists with their states AND CloudKit metadata
-                await createEpisodeSnapshotsForAllFeeds(podcastViewModel)
+                // Create caches that include complete episode lists with their states AND CloudKit metadata
+                await createEpisodeCachesForAllFeeds(podcastViewModel)
                 
                 // Complete episode states sync
                 episodeStatesStatus = .completed
-                episodeStatesOperation = "✅ Episode snapshots ready with complete state data"
+                episodeStatesOperation = "✅ Episode caches ready with complete state data"
                 episodeStatesProgress = 1.0
                 
                 // Complete feed parsing
@@ -1788,12 +1788,12 @@ class DataSyncManager: ObservableObject {
     
     /// Verify that episode cache are ready for immediate use
     @MainActor
-    private func verifyEpisodeSnapshotsAreReady(_ podcastViewModel: PodcastViewModel) async {
+    private func verifyEpisodeCachesAreReady(_ podcastViewModel: PodcastViewModel) async {
         print("🔍 FINAL VERIFICATION: Checking episode cache availability...")
         
-        var feedsWithSnapshots = 0
+        var feedsWithCaches = 0
         var feedsWithEpisodes = 0
-        var totalSnapshotEpisodes = 0
+        var totalCacheEpisodes = 0
         
         for feed in podcastViewModel.podcastFeeds {
             if !feed.episodes.isEmpty {
@@ -1801,34 +1801,34 @@ class DataSyncManager: ObservableObject {
                 
                 let cachedEpisodes = podcastViewModel.feedIsolationManager.getEpisodesForFeed(feed.id)
                 if !cachedEpisodes.isEmpty {
-                    feedsWithSnapshots += 1
-                    totalSnapshotEpisodes += cachedEpisodes.count
+                    feedsWithCaches += 1
+                    totalCacheEpisodes += cachedEpisodes.count
                     print("✅ Cache verified for '\(feed.title)': \(cachedEpisodes.count) episodes")
                 } else {
-                    print("⚠️ Missing snapshot for '\(feed.title)' with \(feed.episodes.count) episodes")
+                    print("⚠️ Missing cache for '\(feed.title)' with \(feed.episodes.count) episodes")
                     
-                    // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating missing snapshot
+                    // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating missing cache
                     let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
                     if validEpisodes.count != feed.episodes.count {
-                        print("🚨 MISSING SNAPSHOT CONTAMINATION: Feed '\(feed.title)' has \(feed.episodes.count - validEpisodes.count) contaminated episodes")
+                        print("🚨 MISSING CACHE CONTAMINATION: Feed '\(feed.title)' has \(feed.episodes.count - validEpisodes.count) contaminated episodes")
                     }
                     
-                    // Create missing snapshot with validated episodes
+                    // Create missing cache with validated episodes
                     podcastViewModel.feedIsolationManager.replaceEpisodesForFeed(validEpisodes, feedId: feed.id)
-                    feedsWithSnapshots += 1
-                    totalSnapshotEpisodes += validEpisodes.count
-                    print("🔧 Created missing snapshot for '\(feed.title)' with \(validEpisodes.count) validated episodes")
+                    feedsWithCaches += 1
+                    totalCacheEpisodes += validEpisodes.count
+                    print("🔧 Created missing cache for '\(feed.title)' with \(validEpisodes.count) validated episodes")
                 }
             }
         }
         
-        let snapshotCoverage = feedsWithEpisodes > 0 ? (Double(feedsWithSnapshots) / Double(feedsWithEpisodes)) * 100 : 100
-        print("📊 SNAPSHOT COVERAGE: \(feedsWithSnapshots)/\(feedsWithEpisodes) feeds (\(Int(snapshotCoverage))%) with \(totalSnapshotEpisodes) total episodes")
+        let cacheCoverage = feedsWithEpisodes > 0 ? (Double(feedsWithCaches) / Double(feedsWithEpisodes)) * 100 : 100
+        print("📊 CACHE COVERAGE: \(feedsWithCaches)/\(feedsWithEpisodes) feeds (\(Int(cacheCoverage))%) with \(totalCacheEpisodes) total episodes")
         
-        if feedsWithSnapshots == feedsWithEpisodes {
-            print("✅ All feeds with episodes have snapshots - ready for instant access")
+        if feedsWithCaches == feedsWithEpisodes {
+            print("✅ All feeds with episodes have caches - ready for instant access")
         } else {
-            print("⚠️ Some feeds missing snapshots - this may affect performance")
+            print("⚠️ Some feeds missing caches - this may affect performance")
         }
     }
     
@@ -2019,8 +2019,8 @@ class DataSyncManager: ObservableObject {
     }
     
     /// Create episode cache for all loaded feeds for instant access
-    private func createEpisodeSnapshotsForAllFeeds(_ podcastViewModel: PodcastViewModel) async {
-        // CRITICAL: Always clear old snapshots first to ensure fresh data
+    private func createEpisodeCachesForAllFeeds(_ podcastViewModel: PodcastViewModel) async {
+        // CRITICAL: Always clear old caches first to ensure fresh data
         await MainActor.run {
             podcastViewModel.clearAllEpisodeCaches()
             print("🗑️ CLEARED: All old episode cache to ensure fresh state data")
@@ -2041,10 +2041,10 @@ class DataSyncManager: ObservableObject {
             
             print("📸 Creating episode cache for \(feedCount) feeds (\(feedsWithEpisodes.count) have episodes)...")
             
-            // Update snapshot tracking
-            self.totalFeedsRequiringSnapshots = feedsWithEpisodes.count
-            self.feedsWithSnapshots = 0
-            self.episodeSnapshotsReady = false
+            // Update cache tracking
+            self.totalFeedsRequiringCaches = feedsWithEpisodes.count
+            self.feedsWithCaches = 0
+            self.episodeCachesReady = false
             
             var processedFeeds = 0
             
@@ -2054,7 +2054,7 @@ class DataSyncManager: ObservableObject {
                     let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
                     if validEpisodes.count != feed.episodes.count {
                         let contaminatedCount = feed.episodes.count - validEpisodes.count
-                        print("🚨 SNAPSHOT CONTAMINATION: Feed '\(feed.title)' has \(contaminatedCount) contaminated episodes - filtering them out")
+                        print("🚨 CACHE CONTAMINATION: Feed '\(feed.title)' has \(contaminatedCount) contaminated episodes - filtering them out")
                         
                         // Log contaminated episodes for debugging
                         let contaminatedEpisodes = feed.episodes.filter { $0.feedId != feed.id }
@@ -2063,13 +2063,13 @@ class DataSyncManager: ObservableObject {
                         }
                     }
                     
-                    // CRITICAL: Refresh episode states before creating snapshot to ensure they're current
+                    // CRITICAL: Refresh episode states before creating cache to ensure they're current
                     
                     // DEBUG: Check EpisodeStateManager state
                     let progressCount = EpisodeStateManager.shared.episodeProgress.count
                     let favoritesCount = EpisodeStateManager.shared.episodeFavorites.count
                     let downloadsCount = EpisodeStateManager.shared.episodeDownloads.count
-                    print("📸 SNAPSHOT: EpisodeStateManager Ready=\(EpisodeStateManager.shared.isReady), Progress=\(progressCount), Favorites=\(favoritesCount), Downloads=\(downloadsCount)")
+                    print("📸 CACHE: EpisodeStateManager Ready=\(EpisodeStateManager.shared.isReady), Progress=\(progressCount), Favorites=\(favoritesCount), Downloads=\(downloadsCount)")
                     
                     let episodesWithCurrentStates = validEpisodes.map { episode in
                         var updatedEpisode = episode
@@ -2081,7 +2081,7 @@ class DataSyncManager: ObservableObject {
                         let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
                         
                         // DEBUG: Log states for ALL episodes to see what's happening
-                        print("📸 SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
+                        print("📸 CACHE DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
                         
                         // Update episode state with current values
                         updatedEpisode.state.progress = progress
@@ -2093,46 +2093,46 @@ class DataSyncManager: ObservableObject {
                         return updatedEpisode
                     }
                     
-                    // Create snapshot with validated episodes that have current states
+                    // Create cache with validated episodes that have current states
                     podcastViewModel.feedIsolationManager.replaceEpisodesForFeed(episodesWithCurrentStates, feedId: feed.id)
-                    self.feedsWithSnapshots += 1
-                    print("📸 Created snapshot for '\(feed.title)' with \(validEpisodes.count) validated episodes with current states (\(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots))")
+                    self.feedsWithCaches += 1
+                    print("📸 Created cache for '\(feed.title)' with \(validEpisodes.count) validated episodes with current states (\(self.feedsWithCaches)/\(self.totalFeedsRequiringCaches))")
                 } else {
-                    print("📸 Skipped snapshot for '\(feed.title)' - no episodes loaded")
+                    print("📸 Skipped cache for '\(feed.title)' - no episodes loaded")
                 }
                 
                 processedFeeds += 1
                 let progress = 0.6 + (Double(processedFeeds) / Double(feedCount)) * 0.3 // 60% to 90%
                 self.episodeStatesProgress = progress
-                self.episodeStatesOperation = "Created snapshots for \(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots) feeds with episodes..."
+                self.episodeStatesOperation = "Created caches for \(self.feedsWithCaches)/\(self.totalFeedsRequiringCaches) feeds with episodes..."
             }
             
-            // Mark snapshots as ready when all feeds with episodes have snapshots
-            self.episodeSnapshotsReady = (self.feedsWithSnapshots == self.totalFeedsRequiringSnapshots)
-            print("📸 SNAPSHOT READINESS: \(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots) snapshots created - Ready: \(self.episodeSnapshotsReady)")
+            // Mark caches as ready when all feeds with episodes have caches
+            self.episodeCachesReady = (self.feedsWithCaches == self.totalFeedsRequiringCaches)
+            print("📸 CACHE READINESS: \(self.feedsWithCaches)/\(self.totalFeedsRequiringCaches) caches created - Ready: \(self.episodeCachesReady)")
         }
     }
     
-    /// Verify that episode data is available and snapshots are created
+    /// Verify that episode data is available and caches are created
     private func verifyEpisodeDataAvailability(_ podcastViewModel: PodcastViewModel) async {
         await MainActor.run {
-            var totalSnapshots = 0
+            var totalCaches = 0
             var totalEpisodes = 0
             
             for feed in podcastViewModel.podcastFeeds {
                 let cachedEpisodes = podcastViewModel.feedIsolationManager.getEpisodesForFeed(feed.id)
                 if !cachedEpisodes.isEmpty {
-                    totalSnapshots += 1
+                    totalCaches += 1
                     totalEpisodes += cachedEpisodes.count
                 }
             }
             
-            print("🔍 Episode data verification: \(totalSnapshots) snapshots created with \(totalEpisodes) total episodes")
+            print("🔍 Episode data verification: \(totalCaches) caches created with \(totalEpisodes) total episodes")
             
-            if totalSnapshots > 0 {
-                self.episodeStatesOperation = "✅ \(totalSnapshots) feed snapshots ready for instant access"
+            if totalCaches > 0 {
+                self.episodeStatesOperation = "✅ \(totalCaches) feed caches ready for instant access"
             } else {
-                self.episodeStatesOperation = "⚠️ Episode data verified (no snapshots - feeds may be empty)"
+                self.episodeStatesOperation = "⚠️ Episode data verified (no caches - feeds may be empty)"
             }
         }
     }
@@ -2301,10 +2301,10 @@ class DataSyncManager: ObservableObject {
         }
     }
     
-    /// Test method to manually trigger episode state sync with snapshots
+    /// Test method to manually trigger episode state sync with caches
     @MainActor
-    func testEpisodeStateSyncWithSnapshots() {
-        print("🧪 TEST: Manually triggering episode state sync with snapshot creation")
+    func testEpisodeStateSyncWithCaches() {
+        print("🧪 TEST: Manually triggering episode state sync with cache creation")
         Task {
             await self.syncEpisodeStates()
         }

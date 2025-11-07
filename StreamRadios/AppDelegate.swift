@@ -89,7 +89,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         if let currentEpisode = PodcastPlayer.shared.currentEpisode {
             Task {
             }
-            print("⚡ FORCE CLOSE: Updated snapshot for currently playing episode")
+            print("⚡ FORCE CLOSE: Updated cache for currently playing episode")
         }
         
         // Request that global player be suppressed on next launch
@@ -366,7 +366,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         if let currentEpisode = PodcastPlayer.shared.currentEpisode {
             Task {
             }
-            print("⚡ BACKGROUND: Updated snapshot for currently playing episode")
+            print("⚡ BACKGROUND: Updated cache for currently playing episode")
         }
         
         // CRITICAL FIX: Enhanced background task management to prevent main thread deadlocks

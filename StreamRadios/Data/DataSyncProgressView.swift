@@ -125,12 +125,12 @@ struct DataSyncProgressView: View {
                         )
                         
                         DetailedSyncStatusItem(
-                            title: "Episode States & Snapshots",
+                            title: "Episode States & Caches",
                             status: syncManager.episodeStatesStatus,
                             progress: syncManager.episodeStatesProgress,
                             operation: syncManager.episodeStatesOperation,
-                            currentCount: syncManager.feedsWithSnapshots,
-                            totalCount: syncManager.totalFeedsRequiringSnapshots > 0 ? syncManager.totalFeedsRequiringSnapshots : syncManager.episodeStatesTotalCount
+                            currentCount: syncManager.feedsWithCaches,
+                            totalCount: syncManager.totalFeedsRequiringCaches > 0 ? syncManager.totalFeedsRequiringCaches : syncManager.episodeStatesTotalCount
                         )
                         
                         DetailedSyncStatusItem(

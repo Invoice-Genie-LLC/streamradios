@@ -1037,11 +1037,11 @@ actor PodcastCacheManager {
     private var lastCacheClearTime: [String: Date] = [:]
     private let cacheClearThrottleInterval: TimeInterval = 2.0 // 2 seconds minimum between cache clears per feed
     
-    /// SMART CACHE CLEARING: Only clear when new episodes are detected and no snapshots are available
+    /// SMART CACHE CLEARING: Only clear when new episodes are detected and no caches are available
     func clearCacheForFeed(_ feedId: String) async {
         // CRITICAL PERFORMANCE: Skip cache clearing entirely to prevent CPU spikes
         // Snapshots handle data consistency automatically, making cache clearing unnecessary
-        print("⚡ PERFORMANCE: Skipping cache clear for feed \(feedId) - snapshots handle consistency")
+        print("⚡ PERFORMANCE: Skipping cache clear for feed \(feedId) - caches handle consistency")
         return
         
         // NOTE: Original cache clearing logic preserved but disabled for performance

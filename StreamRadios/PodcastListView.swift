@@ -1306,7 +1306,7 @@ struct PodcastListView: View {
         // PERFORMANCE: Use optimized feed refresh instead of expensive fetchEpisodes
         viewModel.requestFeedRefresh(feed.id)
         
-        // Get episodes immediately from snapshot or current episodes
+        // Get episodes immediately from cache or current episodes
         let episodes = viewModel.feedIsolationManager.getEpisodesForFeed(feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
         if let latestEpisode = episodes.first {
             podcastPlayer.playEpisode(latestEpisode, feed: feed)

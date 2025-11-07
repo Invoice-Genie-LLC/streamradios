@@ -284,7 +284,7 @@ class EpisodeStateManager: ObservableObject {
             
             var emergencyData: [String: Any] = [:]
             
-            // Backup in-memory data (most current) - create a snapshot first
+            // Backup in-memory data (most current) - create a cache first
             let statesSnapshot = self.episodeStates.mapValues { $0.rawValue }
             let progressSnapshot = self.episodeProgress
             let favoritesSnapshot = self.episodeFavorites
