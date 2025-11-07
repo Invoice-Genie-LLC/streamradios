@@ -88,7 +88,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // ⚡ PROACTIVE: Update all snapshots before app terminates for instant next launch
         if let currentEpisode = PodcastPlayer.shared.currentEpisode {
             Task {
-                await PodcastViewModel.shared.updateSnapshotForEpisodeStateChange(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
             }
             print("⚡ FORCE CLOSE: Updated snapshot for currently playing episode")
         }
@@ -366,7 +365,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // ⚡ PROACTIVE: Update snapshots when app enters background (potential force close)
         if let currentEpisode = PodcastPlayer.shared.currentEpisode {
             Task {
-                await PodcastViewModel.shared.updateSnapshotForEpisodeStateChange(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
             }
             print("⚡ BACKGROUND: Updated snapshot for currently playing episode")
         }

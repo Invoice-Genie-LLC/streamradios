@@ -982,7 +982,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             Task { @MainActor in
                 // PERFORMANCE: Get episodes from snapshot if available, otherwise use current episodes
-                let episodes = viewModel.getEpisodeSnapshot(for: feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
+                let episodes = viewModel.feedIsolationManager.getEpisodesForFeed(feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
                 allEpisodesInFeed = episodes
                 allEpisodesInFeed.sort { $0.publicationDate > $1.publicationDate } // Sort by newest first
                 os_log("Loaded %d episodes for feed: %{public}@", log: log, type: .info, allEpisodesInFeed.count, feed.title)
@@ -2487,7 +2487,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // ⚡ PROACTIVE: Update snapshot immediately for instant loading on next app launch
         Task {
-            await PodcastViewModel.shared.updateSnapshotForEpisodeStateChange(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
         }
         
         // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
@@ -3773,9 +3772,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     ]
                 )
                 
-                // PERFORMANCE: Skip expensive CloudKit sync when snapshots are available
+                // PERFORMANCE: Skip expensive CloudKit sync when cache is available
                 let hasSnapshot = await MainActor.run {
-                    viewModel?.getEpisodeSnapshot(for: currentEpisode.feedId) != nil
+                    !(viewModel?.feedIsolationManager.getEpisodesForFeed(currentEpisode.feedId).isEmpty ?? true)
                 }
                 
                 if hasSnapshot != true {

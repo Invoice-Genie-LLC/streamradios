@@ -1307,7 +1307,7 @@ struct PodcastListView: View {
         viewModel.requestFeedRefresh(feed.id)
         
         // Get episodes immediately from snapshot or current episodes
-        let episodes = viewModel.getEpisodeSnapshot(for: feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
+        let episodes = viewModel.feedIsolationManager.getEpisodesForFeed(feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
         if let latestEpisode = episodes.first {
             podcastPlayer.playEpisode(latestEpisode, feed: feed)
         } else {
@@ -3900,12 +3900,13 @@ struct PodcastPlayerView: View {
         }
         
         // CRITICAL PERFORMANCE: Skip ALL expensive operations when snapshots are available
-        let hasSnapshot = viewModel.getEpisodeSnapshot(for: feed.id) != nil
+        let hasSnapshot = viewModel.feedIsolationManager.getEpisodesForFeed(feed.id) != nil
         if hasSnapshot {
-            print("⚡ ULTRA PERFORMANCE: Using snapshot for feed \(feed.id) - SKIPPING ALL EXPENSIVE OPERATIONS")
-            // Use snapshot data directly without any loading operations
-            if let snapshot = viewModel.getEpisodeSnapshot(for: feed.id) {
-                print("📸 SNAPSHOT SUCCESS: Displaying \(snapshot.count) episodes instantly - NO EXPENSIVE OPERATIONS NEEDED")
+            print("⚡ ULTRA PERFORMANCE: Using cache for feed \(feed.id) - SKIPPING ALL EXPENSIVE OPERATIONS")
+            // Use cached data directly without any loading operations
+            let cachedEpisodes = viewModel.feedIsolationManager.getEpisodesForFeed(feed.id)
+            if !cachedEpisodes.isEmpty {
+                print("💾 CACHE SUCCESS: Displaying \(cachedEpisodes.count) episodes instantly - NO EXPENSIVE OPERATIONS NEEDED")
                 // The snapshot will be used automatically by the view model
             }
         } else if !currentEpisodesForThisFeed || viewModel.currentEpisodes.isEmpty {
