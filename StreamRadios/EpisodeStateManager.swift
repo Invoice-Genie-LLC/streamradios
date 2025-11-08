@@ -180,6 +180,16 @@ class EpisodeStateManager: ObservableObject {
     // Readiness indicator to help avoid cold-start races
     private(set) var isReady: Bool = false
     
+    // Track if we just restored from backup to prevent overwriting
+    private var didRestoreFromBackup: Bool = false
+    
+    // DATA INTEGRITY: Track integrity check timing and results
+    private var lastIntegrityCheckTime: Date?
+    private var integrityCheckTimer: Timer?
+    private let integrityCheckInterval: TimeInterval = 300 // Check every 5 minutes
+    private var integrityIssuesFound: Int = 0
+    private var integrityChecksPerformed: Int = 0
+    
     private init() {
         // Try to use app group UserDefaults, fallback to standard if not available
         if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
@@ -193,8 +203,10 @@ class EpisodeStateManager: ObservableObject {
         }
         
         // UPGRADE PROTECTION: Check for app version changes and migrate data if needed
+        // This may set didRestoreFromBackup = true if backup restoration occurs
         handleAppVersionUpgrade()
         
+        // Load states from Core Data (will merge with restored backup if present)
         loadSavedStates()
         
         // CRITICAL: Sync download states from Core Data on startup to recover from force close scenarios
@@ -222,6 +234,14 @@ class EpisodeStateManager: ObservableObject {
         // Mark manager as ready and notify listeners
         self.isReady = true
         NotificationCenter.default.post(name: NSNotification.Name("EpisodeStateManagerReady"), object: nil)
+        
+        // DATA INTEGRITY: Start periodic integrity checks
+        startPeriodicIntegrityChecks()
+        
+        // Perform initial integrity check after a delay to allow Core Data to fully load
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            self?.performDataIntegrityCheck(reason: "initial_startup")
+        }
     }
     
     // MARK: - Core Data Recreation Protection
@@ -273,6 +293,363 @@ class EpisodeStateManager: ObservableObject {
         saveToCoreData()
         
         print("✅ EpisodeStateManager: Data recovery from Core Data recreation completed")
+        
+        // Perform integrity check after recreation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.performDataIntegrityCheck(reason: "after_core_data_recreation")
+        }
+    }
+    
+    // MARK: - Data Integrity Verification System
+    
+    /// Start periodic integrity checks to ensure Core Data, CloudKit, and local memory stay synchronized
+    private func startPeriodicIntegrityChecks() {
+        // Stop any existing timer
+        integrityCheckTimer?.invalidate()
+        
+        // Create new timer for periodic checks
+        integrityCheckTimer = Timer.scheduledTimer(withTimeInterval: integrityCheckInterval, repeats: true) { [weak self] _ in
+            self?.performDataIntegrityCheck(reason: "periodic_check")
+        }
+        
+        print("✅ DATA INTEGRITY: Started periodic integrity checks (every \(Int(integrityCheckInterval))s)")
+    }
+    
+    /// Perform comprehensive data integrity check across all storage layers
+    /// Compares Core Data, local memory, and validates CloudKit sync status
+    func performDataIntegrityCheck(reason: String) {
+        // FRESH INSTALL GUARD: Skip integrity checks if there are no episodes
+        // This prevents noise on fresh installs where CloudKit may have orphaned data
+        let checkContext = CoreDataStack.shared.newBackgroundContext()
+        let countRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        countRequest.fetchLimit = 1
+        
+        do {
+            let episodeCount = try checkContext.count(for: countRequest)
+            if episodeCount == 0 {
+                return // Silently skip - no episodes to check
+            }
+        } catch {
+            // Continue if we can't determine episode count
+        }
+        
+        print("🔍 DATA INTEGRITY CHECK: Starting verification (reason: \(reason))")
+        
+        integrityChecksPerformed += 1
+        lastIntegrityCheckTime = Date()
+        
+        // DIAGNOSTIC: Log current memory state
+        print("📊 MEMORY STATE: Progress=\(episodeProgress.count), Favorites=\(episodeFavorites.count), Downloads=\(episodeDownloads.count), States=\(episodeStates.count)")
+        if episodeProgress.count > 0 {
+            print("📊 PROGRESS EPISODES: \(Array(episodeProgress.keys.prefix(3)).map { $0.prefix(8) })")
+        }
+        
+        let context = CoreDataStack.shared.newBackgroundContext()
+        
+        context.perform { [weak self] in
+            guard let self = self else { return }
+            
+            var issuesFound = 0
+            var totalEpisodesChecked = 0
+            var discrepancies: [String: IntegrityDiscrepancy] = [:]
+            
+            do {
+                // Load all episodes from Core Data
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                let coreDataEpisodes = try context.fetch(fetchRequest)
+                
+                print("🔍 DATA INTEGRITY: Checking \(coreDataEpisodes.count) Core Data episodes against local memory")
+                
+                // DIAGNOSTIC: Check for episodes with states in Core Data
+                let coreDataEpisodesWithProgress = coreDataEpisodes.filter { $0.progress > 0 }
+                if !coreDataEpisodesWithProgress.isEmpty {
+                    print("📊 CORE DATA PROGRESS: Found \(coreDataEpisodesWithProgress.count) episodes with progress")
+                    for episode in coreDataEpisodesWithProgress.prefix(3) {
+                        if let id = episode.id {
+                            print("   - \(id.prefix(8)): progress=\(episode.progress)")
+                        }
+                    }
+                }
+                
+                for episode in coreDataEpisodes {
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    
+                    totalEpisodesChecked += 1
+                    
+                    // Compare progress
+                    let coreDataProgress = Double(episode.progress)
+                    let memoryProgress = self.episodeProgress[episodeId] ?? 0.0
+                    
+                    if abs(coreDataProgress - memoryProgress) > 0.01 { // Allow 1% tolerance
+                        issuesFound += 1
+                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                            episodeId: episodeId,
+                            type: .progressMismatch,
+                            coreDataValue: coreDataProgress,
+                            memoryValue: memoryProgress,
+                            fieldName: "progress"
+                        )
+                        print("⚠️ INTEGRITY ISSUE: Progress mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataProgress), Memory: \(memoryProgress)")
+                    }
+                    
+                    // Compare played state
+                    let coreDataPlayed = episode.isPlayed
+                    let memoryState = self.episodeStates[episodeId]
+                    let memoryPlayed = (memoryState == .played)
+                    
+                    if coreDataPlayed != memoryPlayed {
+                        issuesFound += 1
+                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                            episodeId: episodeId,
+                            type: .playedStateMismatch,
+                            coreDataValue: coreDataPlayed,
+                            memoryValue: memoryPlayed,
+                            fieldName: "isPlayed"
+                        )
+                        print("⚠️ INTEGRITY ISSUE: Played state mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataPlayed), Memory: \(memoryPlayed)")
+                    }
+                    
+                    // Compare favorite status
+                    let coreDataFavorite = episode.isFavorite
+                    let memoryFavorite = self.episodeFavorites[episodeId] ?? false
+                    
+                    if coreDataFavorite != memoryFavorite {
+                        issuesFound += 1
+                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                            episodeId: episodeId,
+                            type: .favoriteMismatch,
+                            coreDataValue: coreDataFavorite,
+                            memoryValue: memoryFavorite,
+                            fieldName: "isFavorite"
+                        )
+                        print("⚠️ INTEGRITY ISSUE: Favorite mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataFavorite), Memory: \(memoryFavorite)")
+                    }
+                    
+                    // Compare download status
+                    let coreDataDownloaded = episode.isDownloaded
+                    let memoryDownloaded = self.episodeDownloads[episodeId] ?? false
+                    
+                    if coreDataDownloaded != memoryDownloaded {
+                        issuesFound += 1
+                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                            episodeId: episodeId,
+                            type: .downloadMismatch,
+                            coreDataValue: coreDataDownloaded,
+                            memoryValue: memoryDownloaded,
+                            fieldName: "isDownloaded"
+                        )
+                        print("⚠️ INTEGRITY ISSUE: Download mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataDownloaded), Memory: \(memoryDownloaded)")
+                    }
+                }
+                
+                // Check for episodes in memory that don't exist in Core Data
+                let coreDataEpisodeIds = Set(coreDataEpisodes.compactMap { $0.id })
+                let memoryEpisodeIds = Set(self.episodeStates.keys)
+                    .union(Set(self.episodeProgress.keys))
+                    .union(Set(self.episodeFavorites.keys))
+                    .union(Set(self.episodeDownloads.keys))
+                
+                let orphanedMemoryEpisodes = memoryEpisodeIds.subtracting(coreDataEpisodeIds)
+                if !orphanedMemoryEpisodes.isEmpty {
+                    issuesFound += orphanedMemoryEpisodes.count
+                    print("⚠️ INTEGRITY ISSUE: Found \(orphanedMemoryEpisodes.count) episodes in memory but not in Core Data")
+                    for orphanId in orphanedMemoryEpisodes.prefix(5) {
+                        print("   - Orphaned episode: \(orphanId.prefix(8))")
+                    }
+                }
+                
+                // Report results
+                print("📊 DATA INTEGRITY REPORT:")
+                print("   - Episodes checked: \(totalEpisodesChecked)")
+                print("   - Issues found: \(issuesFound)")
+                print("   - Total integrity checks: \(self.integrityChecksPerformed)")
+                print("   - Total issues found historically: \(self.integrityIssuesFound + issuesFound)")
+                
+                self.integrityIssuesFound += issuesFound
+                
+                // If issues found, reconcile them
+                if issuesFound > 0 {
+                    print("🔧 DATA INTEGRITY: Attempting to reconcile \(issuesFound) discrepancies")
+                    Task { @MainActor in
+                        self.reconcileDataInconsistencies(discrepancies: discrepancies)
+                    }
+                } else {
+                    print("✅ DATA INTEGRITY: All data is synchronized correctly")
+                }
+                
+            } catch {
+                print("❌ DATA INTEGRITY CHECK FAILED: \(error)")
+            }
+        }
+    }
+    
+    /// Reconcile data inconsistencies by applying the "source of truth" rule
+    /// Memory is considered the source of truth, Core Data is updated to match
+    @MainActor
+    private func reconcileDataInconsistencies(discrepancies: [String: IntegrityDiscrepancy]) {
+        print("🔧 RECONCILIATION: Fixing \(discrepancies.count) data inconsistencies")
+        
+        var fixedCount = 0
+        let context = CoreDataStack.shared.newBackgroundContext()
+        
+        context.perform {
+            for (episodeId, discrepancy) in discrepancies {
+                do {
+                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                    fetchRequest.fetchLimit = 1
+                    
+                    guard let episode = try context.fetch(fetchRequest).first else {
+                        print("⚠️ RECONCILIATION: Episode \(episodeId.prefix(8)) not found in Core Data, skipping")
+                        continue
+                    }
+                    
+                    // Apply memory values to Core Data (memory is source of truth)
+                    switch discrepancy.type {
+                    case .progressMismatch:
+                        if let memoryValue = discrepancy.memoryValue as? Double {
+                            episode.progress = memoryValue
+                            print("✅ RECONCILIATION: Fixed progress for \(episodeId.prefix(8)) - set to \(memoryValue)")
+                            fixedCount += 1
+                        }
+                        
+                    case .playedStateMismatch:
+                        if let memoryValue = discrepancy.memoryValue as? Bool {
+                            episode.isPlayed = memoryValue
+                            print("✅ RECONCILIATION: Fixed played state for \(episodeId.prefix(8)) - set to \(memoryValue)")
+                            fixedCount += 1
+                        }
+                        
+                    case .favoriteMismatch:
+                        if let memoryValue = discrepancy.memoryValue as? Bool {
+                            episode.isFavorite = memoryValue
+                            print("✅ RECONCILIATION: Fixed favorite for \(episodeId.prefix(8)) - set to \(memoryValue)")
+                            fixedCount += 1
+                        }
+                        
+                    case .downloadMismatch:
+                        if let memoryValue = discrepancy.memoryValue as? Bool {
+                            episode.isDownloaded = memoryValue
+                            print("✅ RECONCILIATION: Fixed download status for \(episodeId.prefix(8)) - set to \(memoryValue)")
+                            fixedCount += 1
+                        }
+                    }
+                    
+                } catch {
+                    print("❌ RECONCILIATION ERROR for \(episodeId.prefix(8)): \(error)")
+                }
+            }
+            
+            // Save all changes
+            if fixedCount > 0 {
+                do {
+                    try context.save()
+                    print("✅ RECONCILIATION COMPLETE: Fixed \(fixedCount) inconsistencies and saved to Core Data")
+                    
+                    // Sync fixed data to CloudKit
+                    Task { @MainActor in
+                        for (episodeId, _) in discrepancies.prefix(10) {
+                            // Sync the fixed episode to CloudKit
+                            self.syncEpisodeStateToCloudKit(episodeId: episodeId)
+                        }
+                    }
+                } catch {
+                    print("❌ RECONCILIATION: Failed to save to Core Data: \(error)")
+                }
+            }
+        }
+    }
+    
+    /// Sync a single episode's state to CloudKit after reconciliation
+    private func syncEpisodeStateToCloudKit(episodeId: String) {
+        guard let feedId = getFeedId(for: episodeId) else {
+            print("⚠️ CLOUDKIT SYNC: Cannot sync \(episodeId.prefix(8)) - feedId not found")
+            return
+        }
+        
+        let progress = episodeProgress[episodeId] ?? 0.0
+        let state = episodeStates[episodeId]
+        let isFavorite = episodeFavorites[episodeId] ?? false
+        let isDownloaded = episodeDownloads[episodeId] ?? false
+        let isPlayed = (state == .played)
+        
+        // Sync complete episode state to CloudKit
+        Task {
+            await PodcastCloudKitManager.shared.saveEpisodeState(
+                episodeId: episodeId,
+                feedId: feedId,
+                progress: progress,
+                isFavorite: isFavorite,
+                isDownloaded: isDownloaded,
+                isPlayed: isPlayed
+            )
+        }
+        
+        print("☁️ CLOUDKIT SYNC: Synced reconciled state for \(episodeId.prefix(8))")
+    }
+    
+    /// Helper struct to track integrity discrepancies
+    private struct IntegrityDiscrepancy {
+        let episodeId: String
+        let type: DiscrepancyType
+        let coreDataValue: Any
+        let memoryValue: Any
+        let fieldName: String
+        
+        enum DiscrepancyType {
+            case progressMismatch
+            case playedStateMismatch
+            case favoriteMismatch
+            case downloadMismatch
+        }
+    }
+    
+    /// Public method to manually trigger integrity check
+    func forceIntegrityCheck() {
+        print("🔍 MANUAL INTEGRITY CHECK: Forcing immediate verification")
+        performDataIntegrityCheck(reason: "manual_trigger")
+    }
+    
+    /// Diagnostic method to investigate missing episode states
+    func diagnoseEpisodeStates(for episodeIds: [String]) {
+        print("🔬 DIAGNOSTIC: Investigating states for \(episodeIds.count) episodes")
+        
+        for episodeId in episodeIds.prefix(5) {
+            let progress = episodeProgress[episodeId] ?? 0.0
+            let isFavorite = episodeFavorites[episodeId] ?? false
+            let isDownloaded = episodeDownloads[episodeId] ?? false
+            let state = episodeStates[episodeId]
+            
+            print("🔬 Episode \(episodeId.prefix(8)):")
+            print("   - Progress: \(progress)")
+            print("   - Favorite: \(isFavorite)")
+            print("   - Downloaded: \(isDownloaded)")
+            print("   - State: \(state?.rawValue ?? "none")")
+            
+            // Check Core Data
+            let context = CoreDataStack.shared.context
+            context.performAndWait {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.fetchLimit = 1
+                
+                if let episode = try? context.fetch(fetchRequest).first {
+                    print("   - Core Data Progress: \(episode.progress)")
+                    print("   - Core Data Played: \(episode.isPlayed)")
+                    print("   - Core Data Favorite: \(episode.isFavorite)")
+                    print("   - Core Data Downloaded: \(episode.isDownloaded)")
+                } else {
+                    print("   ⚠️ NOT FOUND in Core Data")
+                }
+            }
+        }
+        
+        // Summary
+        print("📊 DIAGNOSTIC SUMMARY:")
+        print("   - Total episodes in progress dict: \(episodeProgress.count)")
+        print("   - Total episodes in favorites dict: \(episodeFavorites.count)")
+        print("   - Total episodes in downloads dict: \(episodeDownloads.count)")
+        print("   - Total episodes in states dict: \(episodeStates.count)")
     }
     
     /// Create emergency backup of all episode data to multiple locations
@@ -361,6 +738,100 @@ class EpisodeStateManager: ObservableObject {
         sendThrottledUpdate()
     }
     
+    /// Restore from emergency backup only if current data appears incomplete after upgrade
+    private func restoreFromEmergencyBackupIfNeeded() {
+        // Check if we have emergency backup
+        guard let emergencyData = userDefaults.data(forKey: "CoreDataEmergencyBackup"),
+              let backup = try? JSONSerialization.jsonObject(with: emergencyData) as? [String: Any] else {
+            print("⚠️ EpisodeStateManager: No emergency backup available for upgrade restoration")
+            didRestoreFromBackup = false
+            return
+        }
+        
+        // Get backup data counts
+        let backupStatesCount = (backup["episodeStates"] as? [String: String])?.count ?? 0
+        let backupProgressCount = (backup["episodeProgress"] as? [String: Double])?.count ?? 0
+        let backupFavoritesCount = (backup["episodeFavorites"] as? [String: Bool])?.count ?? 0
+        let backupDownloadsCount = (backup["episodeDownloads"] as? [String: Bool])?.count ?? 0
+        
+        let backupTotalCount = backupStatesCount + backupProgressCount + backupFavoritesCount + backupDownloadsCount
+        let currentTotalCount = episodeStates.count + episodeProgress.count + episodeFavorites.count + episodeDownloads.count
+        
+        print("📊 UPGRADE RESTORE CHECK: Current data count: \(currentTotalCount), Backup count: \(backupTotalCount)")
+        
+        // Restore if backup has data (we're in upgrade scenario)
+        // Set flag to prevent Core Data from overwriting restored data
+        if backupTotalCount > 0 {
+            if currentTotalCount == 0 || (backupTotalCount > currentTotalCount * 2) {
+                print("🔄 UPGRADE RESTORE: Restoring from backup - current data appears incomplete")
+                restoreFromEmergencyBackup()
+                didRestoreFromBackup = true
+            } else if backupTotalCount > currentTotalCount {
+                // Merge backup data with current data (take the maximum of both)
+                print("🔄 UPGRADE MERGE: Merging backup data with current data")
+                mergeEmergencyBackup(backup)
+                didRestoreFromBackup = true
+            } else {
+                print("✅ UPGRADE RESTORE: Current data looks complete, no restore needed")
+                didRestoreFromBackup = false
+            }
+        } else {
+            didRestoreFromBackup = false
+        }
+    }
+    
+    /// Merge emergency backup with current data (keep the maximum of both)
+    private func mergeEmergencyBackup(_ backup: [String: Any]) {
+        var mergedCount = 0
+        
+        // Merge episode states
+        if let backupStates = backup["episodeStates"] as? [String: String] {
+            for (episodeId, stateRaw) in backupStates {
+                if episodeStates[episodeId] == nil, let state = EpisodePlaybackState(rawValue: stateRaw) {
+                    episodeStates[episodeId] = state
+                    mergedCount += 1
+                }
+            }
+        }
+        
+        // Merge episode progress
+        if let backupProgress = backup["episodeProgress"] as? [String: Double] {
+            for (episodeId, progress) in backupProgress {
+                let currentProgress = episodeProgress[episodeId] ?? 0.0
+                if progress > currentProgress {
+                    episodeProgress[episodeId] = progress
+                    mergedCount += 1
+                }
+            }
+        }
+        
+        // Merge episode favorites
+        if let backupFavorites = backup["episodeFavorites"] as? [String: Bool] {
+            for (episodeId, isFavorite) in backupFavorites {
+                if episodeFavorites[episodeId] == nil && isFavorite {
+                    episodeFavorites[episodeId] = isFavorite
+                    mergedCount += 1
+                }
+            }
+        }
+        
+        // Merge episode downloads
+        if let backupDownloads = backup["episodeDownloads"] as? [String: Bool] {
+            for (episodeId, isDownloaded) in backupDownloads {
+                if episodeDownloads[episodeId] == nil && isDownloaded {
+                    episodeDownloads[episodeId] = isDownloaded
+                    mergedCount += 1
+                }
+            }
+        }
+        
+        if mergedCount > 0 {
+            print("✅ UPGRADE MERGE: Merged \(mergedCount) items from backup")
+            saveCurrentStates()
+            sendThrottledUpdate()
+        }
+    }
+    
     // MARK: - Upgrade Protection Methods
     
     /// Handle app version upgrades and migrate data to prevent loss
@@ -381,6 +852,9 @@ class EpisodeStateManager: ObservableObject {
             if hasExistingEpisodeData() {
                 print("🔄 EpisodeStateManager: Detected upgrade scenario - preserving existing data")
                 performUpgradeMigration(from: storedVersion, to: currentVersion)
+                
+                // CRITICAL: Restore from emergency backup if available
+                restoreFromEmergencyBackupIfNeeded()
             } else {
                 print("🆕 EpisodeStateManager: Fresh install detected")
             }
@@ -388,6 +862,14 @@ class EpisodeStateManager: ObservableObject {
             // App version changed - this is an upgrade
             print("🔄 EpisodeStateManager: App upgraded from \(storedVersion ?? "unknown") to \(currentVersion)")
             performUpgradeMigration(from: storedVersion, to: currentVersion)
+            
+            // CRITICAL: Restore from emergency backup after upgrade
+            restoreFromEmergencyBackupIfNeeded()
+            
+            // DATA INTEGRITY: Perform immediate check after upgrade to ensure states are preserved
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.performDataIntegrityCheck(reason: "post_upgrade_verification")
+            }
         } else {
             print("✅ EpisodeStateManager: Same version (\(currentVersion)) - no migration needed")
         }
@@ -568,13 +1050,20 @@ class EpisodeStateManager: ObservableObject {
     // MARK: - Public Methods
     
     private func loadSavedStates() {
-        // CRITICAL FIX: Load from Core Data instead of UserDefaults
-        loadFromCoreData()
-        
-        // Check if Core Data loading failed and we need to restore from emergency backup
-        if episodeStates.isEmpty && episodeProgress.isEmpty && hasEmergencyBackup() {
-            print("🚨 EpisodeStateManager: Core Data appears empty but emergency backup exists - attempting recovery")
-            restoreFromEmergencyBackup()
+        // CRITICAL FIX: If we just restored from backup, merge Core Data instead of replacing
+        if didRestoreFromBackup {
+            print("🔄 UPGRADE LOAD: Backup was restored, merging Core Data (not replacing)")
+            loadFromCoreDataAndMerge()
+        } else {
+            // Normal startup: Load from Core Data
+            print("💾 NORMAL LOAD: Loading states from Core Data")
+            loadFromCoreData()
+            
+            // Check if Core Data loading failed and we need to restore from emergency backup
+            if episodeStates.isEmpty && episodeProgress.isEmpty && hasEmergencyBackup() {
+                print("🚨 EpisodeStateManager: Core Data appears empty but emergency backup exists - attempting recovery")
+                restoreFromEmergencyBackup()
+            }
         }
         
         // Load currently playing episode from UserDefaults (small data)
@@ -678,6 +1167,89 @@ class EpisodeStateManager: ObservableObject {
         }
     }
     
+    /// Load episode states from Core Data and MERGE with existing restored backup data
+    /// Used after backup restoration to avoid overwriting restored data
+    private func loadFromCoreDataAndMerge() {
+        let context = CoreDataStack.shared.context
+        
+        var coreDataProgress: [String: Double] = [:]
+        var coreDataFavorites: [String: Bool] = [:]
+        var coreDataDownloads: [String: Bool] = [:]
+        var coreDataStates: [String: EpisodePlaybackState] = [:]
+        
+        context.performAndWait {
+            do {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                let episodes = try context.fetch(fetchRequest)
+                print("💾 MERGE LOAD: Found \(episodes.count) episodes in Core Data to merge")
+                
+                for episode in episodes {
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    
+                    // Collect Core Data values
+                    if episode.progress > 0 {
+                        coreDataProgress[episodeId] = Double(episode.progress)
+                    }
+                    if episode.isFavorite {
+                        coreDataFavorites[episodeId] = true
+                    }
+                    if episode.isDownloaded {
+                        coreDataDownloads[episodeId] = true
+                    }
+                    if episode.isPlayed {
+                        coreDataStates[episodeId] = .played
+                    } else if episode.progress >= 1.0 {
+                        coreDataStates[episodeId] = .played
+                    } else if episode.progress > 0 {
+                        coreDataStates[episodeId] = .inProgress
+                    }
+                }
+            } catch {
+                print("❌ MERGE LOAD: Failed to load from Core Data: \(error)")
+            }
+        }
+        
+        // MERGE: Take maximum of both sources (never lose data)
+        var mergedCount = 0
+        
+        // Merge progress - take maximum
+        for (episodeId, coreProgress) in coreDataProgress {
+            let existingProgress = self.episodeProgress[episodeId] ?? 0.0
+            if coreProgress > existingProgress {
+                self.episodeProgress[episodeId] = coreProgress
+                mergedCount += 1
+            }
+        }
+        
+        // Merge favorites - keep any true values
+        for (episodeId, isFavorite) in coreDataFavorites {
+            if isFavorite && (self.episodeFavorites[episodeId] == nil || !self.episodeFavorites[episodeId]!) {
+                self.episodeFavorites[episodeId] = true
+                mergedCount += 1
+            }
+        }
+        
+        // Merge downloads - keep any true values
+        for (episodeId, isDownloaded) in coreDataDownloads {
+            if isDownloaded && (self.episodeDownloads[episodeId] == nil || !self.episodeDownloads[episodeId]!) {
+                self.episodeDownloads[episodeId] = true
+                mergedCount += 1
+            }
+        }
+        
+        // Merge states - prioritize played over in-progress
+        for (episodeId, coreState) in coreDataStates {
+            let existingState = self.episodeStates[episodeId]
+            if existingState == nil || (coreState == .played && existingState != .played) {
+                self.episodeStates[episodeId] = coreState
+                mergedCount += 1
+            }
+        }
+        
+        print("✅ MERGE COMPLETE: Merged \(mergedCount) items from Core Data with restored backup")
+        print("📊 FINAL COUNTS: Progress=\(self.episodeProgress.count), Favorites=\(self.episodeFavorites.count), Downloads=\(self.episodeDownloads.count), States=\(self.episodeStates.count)")
+    }
+    
     /// Fallback method to load from UserDefaults (for migration from old data)
     private func loadFromUserDefaultsAsFallback() {
         print("🔄 EpisodeStateManager: Loading from UserDefaults as fallback")
@@ -738,20 +1310,34 @@ class EpisodeStateManager: ObservableObject {
         // CRITICAL: Create emergency backup periodically to survive Core Data recreation
         createPeriodicEmergencyBackup()
         
+        // DATA INTEGRITY: Perform integrity check every 100 saves
+        if periodicBackupCounter % 100 == 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.performDataIntegrityCheck(reason: "after_100_saves")
+            }
+        }
+        
         // Send throttled notification about state changes
         sendThrottledUpdate()
     }
     
-    /// Create emergency backup periodically (much less frequently) to avoid excessive backup creation
+    /// Create emergency backup periodically to prevent data loss during app updates
     private func createPeriodicEmergencyBackup() {
         // Use instance property instead of static to avoid Swift compilation error
         periodicBackupCounter += 1
         
-        // EMERGENCY PERFORMANCE: Create backup MUCH less frequently to prevent notification storms
-        // Only backup every 500 saves to drastically reduce CloudKit notifications
-        if periodicBackupCounter % 500 == 0 {
+        // UPGRADE PROTECTION: Create backup more frequently to prevent data loss during app updates
+        // Backup every 50 saves (was 500) to ensure recent changes are captured before updates
+        if periodicBackupCounter % 50 == 0 {
             createEmergencyBackup()
+            print("💾 PERIODIC BACKUP: Created emergency backup (backup #\(periodicBackupCounter / 50))")
         }
+    }
+    
+    /// Force create emergency backup (for app lifecycle events)
+    func forceCreateEmergencyBackup() {
+        print("🚨 FORCED BACKUP: Creating emergency backup for app lifecycle event")
+        createEmergencyBackup()
     }
     
     /// Helper method to get feedId for an episode (needed for CloudKit sync)
@@ -2177,6 +2763,26 @@ class EpisodeStateManager: ObservableObject {
         print("🗑️   ✅ Cleared \(backupsCleared) backup files")
         print("🗑️   ⏱️ Duration: \(String(format: "%.3f", duration)) seconds")
         print("🗑️   🚀 Performance: \(String(format: "%.1f", Double(clearedCount) / duration)) episodes/second")
+    }
+    
+    /// Clear state for a specific episode
+    /// Used when deleting individual episodes or feeds
+    func clearState(for episodeId: String) {
+        episodeStates.removeValue(forKey: episodeId)
+        episodeProgress.removeValue(forKey: episodeId)
+        episodeFavorites.removeValue(forKey: episodeId)
+        episodeDownloads.removeValue(forKey: episodeId)
+        
+        if currentlyPlayingEpisodeId == episodeId {
+            currentlyPlayingEpisodeId = nil
+            userDefaults.removeObject(forKey: currentlyPlayingKey)
+        }
+        
+        // NOTE: We don't call saveToCoreData() here because the episode is being deleted
+        // from Core Data anyway. Calling it would try to update a non-existent episode.
+        // The episode will be removed from Core Data by the deletion operation.
+        
+        sendThrottledUpdate()
     }
     
     func clearAllStates() {

@@ -3830,7 +3830,7 @@ class PodcastViewModel: ObservableObject {
         let startTime = Date()
         
         // Refresh states for all episodes
-        let episodesWithFreshStates = episodes.map { episode -> PodcastEpisode in
+        var episodesWithFreshStates = episodes.map { episode -> PodcastEpisode in
             var updatedEpisode = episode
             
             // Get current states from EpisodeStateManager
@@ -3851,6 +3851,62 @@ class PodcastViewModel: ObservableObject {
         print("🔄 BACKGROUND STATE REFRESH: Updated \(episodes.count) episodes in \(String(format: "%.3f", elapsed))s")
         print("   ✅ Episodes with states: \(statesCount)/\(episodes.count)")
         
+        // DIAGNOSTIC: If no states found but EpisodeStateManager has states, investigate
+        if statesCount == 0 && (EpisodeStateManager.shared.episodeProgress.count > 0 || 
+                                 EpisodeStateManager.shared.episodeFavorites.count > 0 ||
+                                 EpisodeStateManager.shared.episodeDownloads.count > 0) {
+            print("⚠️ STATES MISMATCH: EpisodeStateManager has states but none found in episodes")
+            EpisodeStateManager.shared.diagnoseEpisodeStates(for: episodes.map { $0.id })
+        }
+        
+        // CRITICAL FIX: Sync episode states from EpisodeStateManager to Core Data
+        // This ensures episodes have their states in Core Data, not just in memory
+        // (Same logic as pull-to-refresh which works correctly)
+        var stateUpdates: [EpisodeStateUpdate] = []
+        for episode in episodesWithFreshStates {
+            stateUpdates.append(EpisodeStateUpdate(
+                episodeId: episode.id,
+                progress: episode.state.progress,
+                isFavorite: episode.state.isFavorite,
+                isDownloaded: episode.state.isDownloaded,
+                isPlayed: episode.state.isPlayed
+            ))
+        }
+        
+        if !stateUpdates.isEmpty {
+            do {
+                print("   💾 STATE SYNC: Saving \(stateUpdates.count) episode states to Core Data")
+                try await self.episodeManager.updateEpisodeStates(stateUpdates)
+                print("   ✅ STATE SYNC: Episode states saved to Core Data successfully")
+                
+                // CRITICAL FIX: Reload episodes from Core Data to pick up the saved states
+                // This ensures the UI displays the states immediately without needing to reopen the app
+                // BUT: Only reload ALL episodes if we're on "All Episodes" tab to avoid breaking filters
+                if await MainActor.run(body: { self.currentTab }) == 0 {
+                    print("   🔄 STATE SYNC: Reloading all episodes from Core Data to apply saved states (All Episodes tab)")
+                    let reloadedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                    
+                    // CRITICAL: Refresh states from EpisodeStateManager on the reloaded episodes
+                    // This ensures the UI displays states correctly
+                    episodesWithFreshStates = reloadedEpisodes.map { episode -> PodcastEpisode in
+                        var updatedEpisode = episode
+                        updatedEpisode.state.progress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                        updatedEpisode.state.isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                        updatedEpisode.state.isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                        let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                        updatedEpisode.state.isPlayed = (episodeState == .played)
+                        return updatedEpisode
+                    }
+                    
+                    print("   ✅ STATE SYNC: Episodes reloaded and refreshed with states (\(episodesWithFreshStates.count) episodes)")
+                } else {
+                    print("   ⚠️ STATE SYNC: Skipping reload on filtered tab (tab \(await MainActor.run(body: { self.currentTab }))) - states saved to Core Data")
+                }
+            } catch {
+                print("   ❌ STATE SYNC: Failed to save episode states to Core Data: \(error)")
+            }
+        }
+        
         // Update UI on main thread if this is still the selected feed
         await MainActor.run {
             guard self.selectedFeedId == feedId else {
@@ -3861,11 +3917,36 @@ class PodcastViewModel: ObservableObject {
             // Update isolation manager with fresh states
             self.feedIsolationManager.replaceEpisodesForFeed(episodesWithFreshStates, feedId: feedId)
             
-            // Update current episodes if they belong to this feed
-            if !self.currentEpisodes.isEmpty && self.currentEpisodes.first?.feedId == feedId {
+            // CRITICAL FIX: Always update current episodes and filter if this is the selected feed
+            // This ensures Favorites and Downloads tabs refresh with new states
+            if self.currentEpisodes.isEmpty || self.currentEpisodes.first?.feedId == feedId {
                 self.currentEpisodes = episodesWithFreshStates
                 self.updateFilter(tab: self.currentTab)
-                print("   ✅ UI updated with refreshed states")
+                print("   ✅ UI updated with refreshed states (filter updated for tab: \(self.currentTab))")
+            }
+            
+            // CRITICAL FIX: Send instant update notifications for episodes with states
+            // This ensures UI buttons (favorite, download) update immediately
+            for episode in episodesWithFreshStates {
+                if episode.state.isFavorite {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeFavoriteChangedInstantly"),
+                        object: nil,
+                        userInfo: ["episodeId": episode.id, "isFavorite": true]
+                    )
+                }
+                if episode.state.isDownloaded {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeDownloadChangedInstantly"),
+                        object: nil,
+                        userInfo: ["episodeId": episode.id, "isDownloaded": true]
+                    )
+                }
+            }
+            
+            let notificationCount = episodesWithFreshStates.filter { $0.state.isFavorite || $0.state.isDownloaded }.count
+            if notificationCount > 0 {
+                print("   📡 Sent instant update notifications for \(notificationCount) episodes with states")
             }
         }
     }
@@ -7990,6 +8071,13 @@ class PodcastViewModel: ObservableObject {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             context.perform {
                 do {
+                    // Step 0: Collect episode IDs for state cleanup
+                    let episodeIdRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    episodeIdRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                    let episodesToDelete = try context.fetch(episodeIdRequest)
+                    let episodeIds = episodesToDelete.compactMap { $0.id }
+                    print("💾 Found \(episodeIds.count) episode IDs to clean up for feed: \(feed.title)")
+                    
                     // Step 1: Count episodes first for logging
                     let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                     episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
@@ -8060,6 +8148,17 @@ class PodcastViewModel: ObservableObject {
                     
                     print("💾 ✅ Successfully completed comprehensive deletion for feed: \(feed.title)")
                     print("💾 ✅ Verified: 0 episodes and 0 feeds remain in Core Data")
+                    
+                    // CRITICAL: Clean up episode states from EpisodeStateManager
+                    // This ensures all episode states (progress, favorites, downloads) are removed
+                    DispatchQueue.main.async {
+                        print("🗑️ EPISODE STATES: Cleaning up \(episodeIds.count) episode states for deleted feed")
+                        for episodeId in episodeIds {
+                            EpisodeStateManager.shared.clearState(for: episodeId)
+                        }
+                        print("✅ EPISODE STATES: Successfully cleaned up all episode states for feed: \(feed.title)")
+                    }
+                    
                     continuation.resume()
                     
                 } catch {
@@ -9863,6 +9962,12 @@ extension PodcastViewModel {
                     } catch {
                         print("❌ CORE DATA DEBUG: Error counting records after deletion: \(error)")
                     }
+                    
+                    // CRITICAL: Clear all episode states from EpisodeStateManager
+                    // This ensures all episode states (progress, favorites, downloads) are completely removed
+                    print("🗑️ EPISODE STATES: Clearing all episode states from EpisodeStateManager")
+                    EpisodeStateManager.shared.clearAllStates()
+                    print("✅ EPISODE STATES: All episode states cleared successfully")
                     
                     // Ensure in-memory data is cleared after successful Core Data deletion
                     self.podcastFeeds.removeAll()

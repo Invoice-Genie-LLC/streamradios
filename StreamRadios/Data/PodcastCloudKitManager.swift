@@ -945,39 +945,33 @@ class PodcastCloudKitManager: ObservableObject {
     }
     
     @objc private func ubiquitousKeyValueStoreDidChange(_ notification: Notification) {
-        print("📡 🔔 NOTIFICATION TRIGGERED: ubiquitousKeyValueStoreDidChange called!")
-        print("📡 🔔 NOTIFICATION INFO: \(notification)")
-        
         guard let userInfo = notification.userInfo else {
-            print("📡 ❌ NOTIFICATION: No userInfo in notification")
             return
         }
-        
-        print("📡 🔔 NOTIFICATION: UserInfo keys: \(userInfo.keys)")
         
         guard let keys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] else {
-            os_log("📡 SYNC RECEIVE FAILED: No keys in notification", log: log, type: .error)
-            print("📡 SYNC RECEIVE FAILED: No keys in notification")
-            print("📡 SYNC RECEIVE FAILED: UserInfo: \(userInfo)")
             return
         }
         
-        os_log("📡 🚨 SYNC NOTIFICATION RECEIVED: Keys changed: %@", log: log, type: .info, keys.joined(separator: ", "))
-        print("📡 🚨 SYNC NOTIFICATION RECEIVED: Keys changed: \(keys.joined(separator: ", "))")
-        print("📡 📝 Full notification userInfo: \(userInfo)")
+        // FRESH INSTALL GUARD: Skip episode state sync logging on fresh installs
+        // Check if we have any local feeds before processing episode state changes
+        let context = CoreDataStack.shared.newBackgroundContext()
+        let feedCountRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        feedCountRequest.fetchLimit = 1
         
-        // Log what data is available for each key
-        for key in keys {
-            if let data = ubiquitousStore.object(forKey: key) {
-                print("📡 📂 DATA FOR KEY '\(key)': \(data)")
-            } else {
-                print("📡 ❌ NO DATA FOR KEY '\(key)'")
-            }
+        var hasFeedsLocally = false
+        do {
+            let feedCount = try context.count(for: feedCountRequest)
+            hasFeedsLocally = feedCount > 0
+        } catch {
+            // If we can't determine, assume we might have feeds
+            hasFeedsLocally = true
         }
         
-        // Check if we have the critical deletion key
-        if keys.contains("instant_podcast_feed_removed") {
-            print("📡 🎯 CRITICAL DELETION KEY DETECTED: instant_podcast_feed_removed")
+        // Only log sync activity if we have local feeds or if it's a feed-related sync
+        let feedRelatedKeys = keys.filter { $0.hasPrefix("instant_podcast_feed") }
+        if hasFeedsLocally || !feedRelatedKeys.isEmpty {
+            print("📡 🔔 CloudKit sync: \(keys.count) key(s) changed")
         }
         
         // Use background queue for sync processing to prevent main thread blocking
@@ -1002,27 +996,32 @@ class PodcastCloudKitManager: ObservableObject {
             for key in podcastKeys {
                 // Handle shared collection keys for episode data
                 if key == SharedDataKeys.episodeProgress {
-                    print("📡 🔔 Processing shared episode progress collection sync")
+                    if hasFeedsLocally {
+                        print("📡 🔔 Processing shared episode progress collection sync")
+                    }
                     self.handleSharedCollectionSync(key: key, dataType: "progress")
                 } else if key == SharedDataKeys.episodeFavorites {
-                    print("📡 🔔 Processing shared episode favorites collection sync")
+                    if hasFeedsLocally {
+                        print("📡 🔔 Processing shared episode favorites collection sync")
+                    }
                     self.handleSharedCollectionSync(key: key, dataType: "favorites")
                 } else if key == SharedDataKeys.episodeDownloads {
-                    print("📡 🔔 Processing shared episode downloads collection sync")
+                    if hasFeedsLocally {
+                        print("📡 🔔 Processing shared episode downloads collection sync")
+                    }
                     self.handleSharedCollectionSync(key: key, dataType: "downloads")
                 } else if key == SharedDataKeys.episodePlayed {
-                    print("📡 🔔 Processing shared episode played collection sync")
+                    if hasFeedsLocally {
+                        print("📡 🔔 Processing shared episode played collection sync")
+                    }
                     self.handleSharedCollectionSync(key: key, dataType: "played")
                 } else if key.hasPrefix("instant_podcast_progress_") ||
                           key.hasPrefix("instant_podcast_favorite_") ||
                           key.hasPrefix("instant_podcast_download_") ||
                           key.hasPrefix("instant_podcast_played_") {
-                    // Legacy unique episode keys - ignore (will be cleaned up)
-                    print("📡 🧹 LEGACY KEY IGNORED: \(key) (will be cleaned up)")
+                    // Legacy unique episode keys - silently ignore (will be cleaned up)
                 } else if key.hasPrefix("StreamRadios_Episode") {
-                    // Handle episode state keys - process silently without unknown key warnings
-                    print("📡 🔄 EPISODE STATE SYNC: Processing episode state key \(key)")
-                    // Individual episode state keys are handled by shared collection sync
+                    // Individual episode state keys are handled by shared collection sync - silently skip
                 } else {
                     // Handle legacy global keys and other types
                     switch key {
@@ -1062,6 +1061,21 @@ class PodcastCloudKitManager: ObservableObject {
     
     /// Handle sync for shared collections
     private func handleSharedCollectionSync(key: String, dataType: String) {
+        // FRESH INSTALL GUARD: Skip episode state sync if there are no feeds
+        // This prevents loading orphaned episode states from other devices on fresh installs
+        let context = CoreDataStack.shared.newBackgroundContext()
+        let feedCountRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        feedCountRequest.fetchLimit = 1
+        
+        do {
+            let feedCount = try context.count(for: feedCountRequest)
+            if feedCount == 0 {
+                return // Silently skip - no feeds, so no need to sync episode states
+            }
+        } catch {
+            // Continue if we can't determine feed count
+        }
+        
         guard let collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] else {
             return
         }
@@ -1270,6 +1284,20 @@ class PodcastCloudKitManager: ObservableObject {
     }
     
     private func handleInstantPodcastFeedProgressSync() {
+        // FRESH INSTALL GUARD: Skip feed progress sync if there are no feeds
+        let context = CoreDataStack.shared.newBackgroundContext()
+        let feedCountRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        feedCountRequest.fetchLimit = 1
+        
+        do {
+            let feedCount = try context.count(for: feedCountRequest)
+            if feedCount == 0 {
+                return // Silently skip - no feeds to sync progress for
+            }
+        } catch {
+            // Continue if we can't determine feed count
+        }
+        
         guard let progressData = ubiquitousStore.object(forKey: "instant_podcast_feed_progress") as? [String: Any] else {
             print("📡 ⚠️ No progress data found for instant_podcast_feed_progress")
             return
@@ -1303,6 +1331,21 @@ class PodcastCloudKitManager: ObservableObject {
     }
     
     private func handleInstantPodcastFeedRemovedSync() {
+        // FRESH INSTALL GUARD: Skip feed deletion sync if there are no feeds
+        // This prevents logging deletion notifications from other devices when nothing local exists
+        let context = CoreDataStack.shared.newBackgroundContext()
+        let feedCountRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        feedCountRequest.fetchLimit = 1
+        
+        do {
+            let feedCount = try context.count(for: feedCountRequest)
+            if feedCount == 0 {
+                return // Silently skip - no feeds to delete
+            }
+        } catch {
+            // Continue if we can't determine feed count
+        }
+        
         print("📡 🔄 FEED DELETION RECEIVE: Handling incoming feed removal sync")
         
         guard let removalData = ubiquitousStore.object(forKey: "instant_podcast_feed_removed") as? [String: Any] else {

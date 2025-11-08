@@ -82,6 +82,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         print("🚨 COMPREHENSIVE SAVE: applicationWillTerminate called - final save attempt")
         
+        // UPGRADE PROTECTION: Force emergency backup before termination to prevent data loss on updates
+        EpisodeStateManager.shared.forceCreateEmergencyBackup()
+        
         // CRITICAL FIX: Use universal save for maximum reliability
         performUniversalProgressSave(reason: "app_will_terminate")
         
@@ -128,6 +131,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         DebugLogger.setUserAction("App Resign Active")
         
         print("🚨 COMPREHENSIVE SAVE: applicationWillResignActive called - saving progress immediately")
+        
+        // UPGRADE PROTECTION: Force emergency backup when app resigns active (potential force close scenario)
+        EpisodeStateManager.shared.forceCreateEmergencyBackup()
         
         // CRITICAL FIX: Use universal save to cover all possible termination scenarios
         performUniversalProgressSave(reason: "app_resign_active_force_close_protection")
@@ -393,6 +399,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
          DebugLogger.setUserAction("App Background")
          
                  print("🚨 COMPREHENSIVE SAVE: applicationDidEnterBackground called - saving progress immediately")
+        
+        // UPGRADE PROTECTION: Force emergency backup when entering background (potential force close or update scenario)
+        EpisodeStateManager.shared.forceCreateEmergencyBackup()
         
         // CRITICAL FIX: Use universal save for app switcher scenarios
         performUniversalProgressSave(reason: "app_did_enter_background_potential_force_close")

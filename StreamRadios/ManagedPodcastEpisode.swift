@@ -41,9 +41,22 @@ extension PodcastModel {
            self.publicationDate = episode.publicationDate
            self.duration = episode.duration
            self.isPlayed = episode.state.isPlayed
-           self.isFavorite = episode.state.isFavorite
+           
+           // CRITICAL: Preserve existing favorites/downloads during RSS updates
+           // Only update if the new value is true (adding) or if Core Data currently has no value
+           // This prevents RSS defaults (false) from overwriting user's favorites/downloads during upgrades
+           if episode.state.isFavorite || self.isFavorite == false {
+               self.isFavorite = episode.state.isFavorite
+           }
+           
            self.progress = episode.state.progress
-           self.isDownloaded = episode.state.isDownloaded
+           
+           // CRITICAL: Preserve existing downloads during RSS updates
+           // Only update if the new value is true (adding) or if Core Data currently has no value
+           if episode.state.isDownloaded || self.isDownloaded == false {
+               self.isDownloaded = episode.state.isDownloaded
+           }
+           
            self.feedId = episode.feedId
            self.localFilePath = episode.localFilePath
            self.fileSize = episode.fileSize ?? 0
@@ -77,16 +90,26 @@ extension PodcastModel {
     func toPodcastEpisode() -> PodcastEpisode {
             let episodeId = self.id ?? UUID().uuidString
             
-                    // FIX: Use EpisodeStateManager as source of truth for progress and playback state
-        // while preserving Core Data for favorites and downloads, per memories
+                    // FIX: Use EpisodeStateManager as source of truth for ALL episode states
+        // This ensures favorite/download states don't get reset during playback or screen changes
         let episodeStateProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
         let episodeState = EpisodeStateManager.shared.getState(for: episodeId)
         let episodeStateIsPlayed = episodeState == .played
+        let isUpgradeScenario = EpisodeStateManager.shared.isUpgradeScenario()
         
         // Use the higher progress value and trust EpisodeStateManager for played status
         let progress = max(Double(self.progress), episodeStateProgress)
-        let isFavorite = self.isFavorite
-        var isDownloaded = self.isDownloaded
+        
+        // SAFE STATE RESOLUTION: Combine EpisodeStateManager and Core Data with OR logic
+        // This prevents data loss during state transitions (upgrades, background/foreground, etc.)
+        let episodeStateManagerFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+        let episodeStateManagerDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
+        
+        // If EITHER source says favorited/downloaded, trust it
+        // Core Data is now protected from RSS overwrites (see update method above)
+        let isFavorite = episodeStateManagerFavorite || self.isFavorite
+        var isDownloaded = episodeStateManagerDownloaded || self.isDownloaded
+        
         let isPlayed = episodeStateIsPlayed || self.isPlayed || progress >= 1.0
             
             // PERFORMANCE: Only log critical download/path issues, not every episode
