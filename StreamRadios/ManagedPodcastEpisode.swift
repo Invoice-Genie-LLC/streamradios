@@ -41,22 +41,9 @@ extension PodcastModel {
            self.publicationDate = episode.publicationDate
            self.duration = episode.duration
            self.isPlayed = episode.state.isPlayed
-           
-           // CRITICAL: Preserve existing favorites/downloads during RSS updates
-           // Only update if the new value is true (adding) or if Core Data currently has no value
-           // This prevents RSS defaults (false) from overwriting user's favorites/downloads during upgrades
-           if episode.state.isFavorite || self.isFavorite == false {
-               self.isFavorite = episode.state.isFavorite
-           }
-           
+           self.isFavorite = episode.state.isFavorite
            self.progress = episode.state.progress
-           
-           // CRITICAL: Preserve existing downloads during RSS updates
-           // Only update if the new value is true (adding) or if Core Data currently has no value
-           if episode.state.isDownloaded || self.isDownloaded == false {
-               self.isDownloaded = episode.state.isDownloaded
-           }
-           
+           self.isDownloaded = episode.state.isDownloaded
            self.feedId = episode.feedId
            self.localFilePath = episode.localFilePath
            self.fileSize = episode.fileSize ?? 0
