@@ -122,6 +122,10 @@ struct RadioPlayerSheetView: View {
     @State private var isFavorite = false
     @State private var timerCheckTimer: Timer?
     
+    // UserDefaults keys for timer persistence
+    private let timerActiveKey = "RadioSleepTimerActive"
+    private let timerEndTimeKey = "RadioSleepTimerEndTime"
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -253,14 +257,16 @@ struct RadioPlayerSheetView: View {
                 sleepTimerActive: $sleepTimerActive,
                 sleepTimerEndTime: $sleepTimerEndTime,
                 timerCheckTimer: $timerCheckTimer,
-                radioPlayer: radioPlayer
+                radioPlayer: radioPlayer,
+                saveTimerState: saveTimerState,
+                clearTimerState: clearTimerState
             )
             .presentationDetents([.height(450), .large])
             .presentationDragIndicator(.visible)
         }
-
-
-
+        .onAppear {
+            restoreTimerState()
+        }
     }
     
     // MARK: - Content Views
@@ -744,6 +750,71 @@ struct RadioPlayerSheetView: View {
             }
         }
     }
+    
+    // MARK: - Timer State Persistence
+    private func restoreTimerState() {
+        let userDefaults = UserDefaults.standard
+        
+        // Check if timer was active
+        guard userDefaults.bool(forKey: timerActiveKey) else {
+            sleepTimerActive = false
+            return
+        }
+        
+        // Check if timer end time has passed
+        if let endTime = userDefaults.object(forKey: timerEndTimeKey) as? Date {
+            if endTime > Date() {
+                // Timer is still valid
+                sleepTimerEndTime = endTime
+                sleepTimerActive = true
+                
+                // Recreate the timer
+                timerCheckTimer?.invalidate()
+                timerCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+                    let currentTime = Date()
+                    
+                    if let endTime = self.sleepTimerEndTime, currentTime >= endTime {
+                        self.radioPlayer.pause()
+                        self.sleepTimerActive = false
+                        self.sleepTimerEndTime = nil
+                        timer.invalidate()
+                        self.timerCheckTimer = nil
+                        self.clearTimerState()
+                    }
+                }
+                
+                let remainingTime = endTime.timeIntervalSinceNow
+                print("✅ Restored radio timer with \(Int(remainingTime/60)) minutes remaining")
+            } else {
+                // Timer expired, clear it
+                clearTimerState()
+                print("⏰ Radio timer expired, clearing state")
+            }
+        }
+    }
+    
+    func saveTimerState() {
+        let userDefaults = UserDefaults.standard
+        userDefaults.set(sleepTimerActive, forKey: timerActiveKey)
+        
+        if let endTime = sleepTimerEndTime {
+            userDefaults.set(endTime, forKey: timerEndTimeKey)
+        }
+        
+        userDefaults.synchronize()
+    }
+    
+    func clearTimerState() {
+        let userDefaults = UserDefaults.standard
+        userDefaults.removeObject(forKey: timerActiveKey)
+        userDefaults.removeObject(forKey: timerEndTimeKey)
+        userDefaults.synchronize()
+        
+        sleepTimerActive = false
+        sleepTimerEndTime = nil
+        timerCheckTimer?.invalidate()
+        timerCheckTimer = nil
+    }
 }
 
 // MARK: - Supporting Views
@@ -952,6 +1023,8 @@ struct RadioSleepTimerSheet: View {
     @Binding var sleepTimerEndTime: Date?
     @Binding var timerCheckTimer: Timer?
     @ObservedObject var radioPlayer: RadioPlayer
+    let saveTimerState: () -> Void
+    let clearTimerState: () -> Void
     
     @State private var selectedTime = Date()
     
@@ -1069,6 +1142,9 @@ struct RadioSleepTimerSheet: View {
         sleepTimerEndTime = targetTime
         sleepTimerActive = true
         
+        // Save timer state to UserDefaults
+        saveTimerState()
+        
         // Cancel any existing timer
         timerCheckTimer?.invalidate()
         
@@ -1083,6 +1159,7 @@ struct RadioSleepTimerSheet: View {
                 self.sleepTimerEndTime = nil
                 timer.invalidate()
                 self.timerCheckTimer = nil
+                self.clearTimerState()
             }
         }
         
@@ -1094,6 +1171,9 @@ struct RadioSleepTimerSheet: View {
         sleepTimerEndTime = nil
         timerCheckTimer?.invalidate()
         timerCheckTimer = nil
+        
+        // Clear timer state from UserDefaults
+        clearTimerState()
     }
     
     private func timeString(from date: Date) -> String {

@@ -39,6 +39,12 @@ struct PodcastPlayerSheetView: View {
     @State private var sleepTimerMode: SleepTimerMode = .none
     @Environment(\.colorScheme) var colorScheme
     
+    // UserDefaults keys for timer persistence
+    private let timerActiveKey = "PodcastSleepTimerActive"
+    private let timerEndTimeKey = "PodcastSleepTimerEndTime"
+    private let timerMinutesKey = "PodcastSleepTimerMinutes"
+    private let timerModeKey = "PodcastSleepTimerMode"
+    
     // Computed properties for adaptive colors
     private var backButtonColor: Color {
         colorScheme == .dark ? .white : .black
@@ -244,7 +250,9 @@ struct PodcastPlayerSheetView: View {
                 sleepTimerMinutes: $sleepTimerMinutes,
                 sleepTimerEndTime: $sleepTimerEndTime,
                 podcastPlayer: podcastPlayer,
-                episode: episode
+                episode: episode,
+                saveTimerState: saveTimerState,
+                clearTimerState: clearTimerState
             )
             .presentationDetents([.fraction(0.5), .large])
             .presentationDragIndicator(.visible)
@@ -258,6 +266,9 @@ struct PodcastPlayerSheetView: View {
             Text("Are you sure you want to delete the downloaded file? The episode will remain in the list but will need to be downloaded again to listen offline.")
         }
         .onAppear {
+            // Restore timer state
+            restoreTimerState()
+            
             // Persist fallback chapters if they were derived during initialization
             if !fallbackChapters.isEmpty {
                 persistFallbackChapters(fallbackChapters)
@@ -1394,6 +1405,91 @@ extension PodcastPlayerSheetView {
             // Ignore if chapters not available from asset
         }
     }
+    
+    // MARK: - Timer State Persistence
+    private func restoreTimerState() {
+        let userDefaults = UserDefaults.standard
+        
+        // Check if timer was active
+        guard userDefaults.bool(forKey: timerActiveKey) else {
+            sleepTimerActive = false
+            sleepTimerMode = .none
+            return
+        }
+        
+        // Restore timer mode
+        if let modeString = userDefaults.string(forKey: timerModeKey) {
+            if modeString == "endOfEpisode" {
+                sleepTimerMode = .endOfEpisode
+                sleepTimerActive = true
+                print("✅ Restored end-of-episode timer")
+            } else if let minutes = userDefaults.object(forKey: timerMinutesKey) as? Int {
+                // Check if timer end time has passed
+                if let endTime = userDefaults.object(forKey: timerEndTimeKey) as? Date {
+                    if endTime > Date() {
+                        // Timer is still valid
+                        sleepTimerEndTime = endTime
+                        sleepTimerMinutes = minutes
+                        sleepTimerMode = .timer(minutes: minutes)
+                        sleepTimerActive = true
+                        
+                        // Reschedule timer for remaining time
+                        let remainingTime = endTime.timeIntervalSinceNow
+                        DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
+                            if self.sleepTimerActive, case .timer(let mins) = self.sleepTimerMode, mins == minutes {
+                                self.podcastPlayer.pause()
+                                self.clearTimerState()
+                            }
+                        }
+                        print("✅ Restored timer with \(Int(remainingTime/60)) minutes remaining")
+                    } else {
+                        // Timer expired, clear it
+                        clearTimerState()
+                        print("⏰ Timer expired, clearing state")
+                    }
+                }
+            }
+        }
+    }
+    
+    func saveTimerState() {
+        let userDefaults = UserDefaults.standard
+        userDefaults.set(sleepTimerActive, forKey: timerActiveKey)
+        
+        if let endTime = sleepTimerEndTime {
+            userDefaults.set(endTime, forKey: timerEndTimeKey)
+        }
+        
+        if let minutes = sleepTimerMinutes {
+            userDefaults.set(minutes, forKey: timerMinutesKey)
+        }
+        
+        switch sleepTimerMode {
+        case .endOfEpisode:
+            userDefaults.set("endOfEpisode", forKey: timerModeKey)
+        case .timer(let minutes):
+            userDefaults.set("timer", forKey: timerModeKey)
+            userDefaults.set(minutes, forKey: timerMinutesKey)
+        case .none:
+            userDefaults.removeObject(forKey: timerModeKey)
+        }
+        
+        userDefaults.synchronize()
+    }
+    
+    func clearTimerState() {
+        let userDefaults = UserDefaults.standard
+        userDefaults.removeObject(forKey: timerActiveKey)
+        userDefaults.removeObject(forKey: timerEndTimeKey)
+        userDefaults.removeObject(forKey: timerMinutesKey)
+        userDefaults.removeObject(forKey: timerModeKey)
+        userDefaults.synchronize()
+        
+        sleepTimerActive = false
+        sleepTimerMode = .none
+        sleepTimerMinutes = nil
+        sleepTimerEndTime = nil
+    }
 }
 
 // MARK: - Sleep Timer Sheet
@@ -1406,6 +1502,8 @@ struct SleepTimerSheet: View {
     @Binding var sleepTimerEndTime: Date?
     @ObservedObject var podcastPlayer: PodcastPlayer
     let episode: PodcastEpisode
+    let saveTimerState: () -> Void
+    let clearTimerState: () -> Void
     
     @State private var showCustomPicker = false
     @State private var customMinutes = 30
@@ -1558,6 +1656,9 @@ struct SleepTimerSheet: View {
         sleepTimerMode = .timer(minutes: minutes)
         sleepTimerActive = true
         
+        // Save timer state to UserDefaults
+        saveTimerState()
+        
         // Schedule timer to pause playback
         DispatchQueue.main.asyncAfter(deadline: .now() + TimeInterval(minutes * 60)) {
             if sleepTimerActive, case .timer(let mins) = sleepTimerMode, mins == minutes {
@@ -1565,6 +1666,7 @@ struct SleepTimerSheet: View {
                 sleepTimerActive = false
                 sleepTimerMode = .none
                 sleepTimerEndTime = nil
+                clearTimerState()
             }
         }
         
@@ -1577,6 +1679,9 @@ struct SleepTimerSheet: View {
         sleepTimerMinutes = nil
         sleepTimerEndTime = nil
         
+        // Save timer state to UserDefaults
+        saveTimerState()
+        
         // Monitor for end of episode
         // This will be handled by the player's completion handler
         
@@ -1588,6 +1693,9 @@ struct SleepTimerSheet: View {
         sleepTimerMode = .none
         sleepTimerMinutes = nil
         sleepTimerEndTime = nil
+        
+        // Clear timer state from UserDefaults
+        clearTimerState()
     }
     
     private func timeRemaining(until endTime: Date) -> String {
