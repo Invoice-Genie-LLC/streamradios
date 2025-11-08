@@ -92,8 +92,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             print("⚡ FORCE CLOSE: Updated cache for currently playing episode")
         }
         
-        // Request that global player be suppressed on next launch
-        UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
+        // CRITICAL FIX: Only suppress global player if neither radio nor podcast was actively playing
+        // This ensures the player UI is restored on next launch if content was playing during force close
+        let radioPlayer = RadioPlayer.shared
+        let podcastPlayer = PodcastPlayer.shared
+        let isRadioPlaying = radioPlayer.isPlaying && radioPlayer.userWantsToPlay
+        let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.userWantsToPlay
+        
+        if !(isRadioPlaying || isPodcastPlaying) {
+            // Only suppress global player if neither radio nor podcast was actively playing
+            UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
+            DebugLogger.logInfo("App terminating with no active playback - suppressing player on next launch", category: "AppLifecycle")
+        } else {
+            // Preserve player state for next launch since content was playing
+            UserDefaults.standard.set(false, forKey: "SuppressGlobalPlayerOnNextLaunch")
+            if isRadioPlaying {
+                DebugLogger.logInfo("App terminating with active radio playback - preserving player state for next launch", category: "AppLifecycle")
+            }
+            if isPodcastPlaying {
+                let episodeTitle = podcastPlayer.currentEpisode?.title ?? "Unknown"
+                DebugLogger.logInfo("App terminating with active podcast playback - preserving player state for next launch, Episode: \(episodeTitle)", category: "AppLifecycle")
+            }
+        }
         
         // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         // Removed to fix Swift Concurrency warning
@@ -112,13 +132,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // CRITICAL FIX: Use universal save to cover all possible termination scenarios
         performUniversalProgressSave(reason: "app_resign_active_force_close_protection")
         
-        // CRITICAL FIX: Don't suppress radio player if it's actively playing in background
+        // CRITICAL FIX: Don't suppress player if either radio or podcast is actively playing
         let radioPlayer = RadioPlayer.shared
-        if !(radioPlayer.isPlaying && radioPlayer.userWantsToPlay) {
-            // Only suppress global player if radio is not actively playing
+        let podcastPlayer = PodcastPlayer.shared
+        let isRadioPlaying = radioPlayer.isPlaying && radioPlayer.userWantsToPlay
+        let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.userWantsToPlay
+        
+        if !(isRadioPlaying || isPodcastPlaying) {
+            // Only suppress global player if neither radio nor podcast is actively playing
             UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
+            DebugLogger.logInfo("App resigning active with no active playback - suppressing player on next launch", category: "AppLifecycle")
         } else {
-            print("🔧 AppDelegate: Radio is playing - not suppressing player on next launch")
+            // Preserve player state for next launch since content was playing
+            UserDefaults.standard.set(false, forKey: "SuppressGlobalPlayerOnNextLaunch")
+            if isRadioPlaying {
+                print("🔧 AppDelegate: Radio is playing - not suppressing player on next launch")
+                DebugLogger.logInfo("App resigning active with active radio playback - preserving player state", category: "AppLifecycle")
+            }
+            if isPodcastPlaying {
+                let episodeTitle = podcastPlayer.currentEpisode?.title ?? "Unknown"
+                print("🔧 AppDelegate: Podcast is playing - not suppressing player on next launch, Episode: \(episodeTitle)")
+                DebugLogger.logInfo("App resigning active with active podcast playback - preserving player state, Episode: \(episodeTitle)", category: "AppLifecycle")
+            }
         }
         
         // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically

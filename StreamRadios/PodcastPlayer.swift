@@ -1370,10 +1370,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         
         print("📍 PodcastPlayer: Found feed for restoration: \(feed.title)")
+        print("🔍 Feed URL: \(feed.url)")
+        print("🔍 Feed has iconData: \(feed.iconData != nil)")
+        print("🔍 Feed has imageData: \(feed.imageData != nil)")
+        print("🔍 Feed artworkUrl: \(feed.artworkUrl ?? "nil")")
         
-        // Set the feed first to enable player display
+        // Set the real feed
         currentFeed = feed
         isPodcastActive = true
+        print("✅ PodcastPlayer: Set real feed with artwork data")
         
         // Force UI update to ensure GlobalPlayerView shows the podcast player immediately
         DispatchQueue.main.async { [weak self] in
@@ -1384,14 +1389,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Load episodes for this feed to find the specific episode
         await viewModel.loadEpisodesForFeed(feedId, isInitialLoad: true)
         
-        // Find and set the specific episode (if not already set by immediate restoration)
+        // Find and set the specific episode (ALWAYS set real data)
         if let episode = viewModel.currentEpisodes.first(where: { $0.id == episodeId }) {
-            print("🎵 PodcastPlayer: Episode restored and ready to play: \(episode.title)")
+            print("🎵 PodcastPlayer: Episode restored: \(episode.title)")
+            print("🔍 Episode audio URL: \(episode.audioUrl)")
+            print("🔍 Episode duration: \(episode.duration)s")
             
-            // Only set if not already set by immediate restoration
-            if currentEpisode == nil {
-                currentEpisode = episode
-            }
+            // Set the real episode
+            currentEpisode = episode
+            print("✅ PodcastPlayer: Set real episode data with audio URL and metadata")
             
             // Set the episode as ready to play (but don't auto-play)   
             userWantsToPlay = false // Don't auto-play on startup
@@ -1403,14 +1409,18 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Initialize the player with the episode's audio URL
             await initializePlayerForRestoredEpisode(episode: episode)
             
-            // Load saved progress (only if not already loaded)
-            if currentProgress == 0 {
-                let savedProgress = stateManager.getProgress(for: episode.id)
-                if savedProgress > 0 {
-                    currentProgress = savedProgress
+            // Load saved progress and ensure it's set correctly
+            let savedProgress = stateManager.getProgress(for: episode.id)
+            if savedProgress > 0 {
+                currentProgress = savedProgress
+                if duration > 0 {
                     currentTime = savedProgress * duration
-                    print("🔧 PodcastPlayer: Restored progress: \(savedProgress * 100)%")
+                    print("🔧 PodcastPlayer: Restored progress: \(savedProgress * 100)%, time: \(currentTime)s / \(duration)s")
+                } else {
+                    print("⚠️ PodcastPlayer: Duration not yet available, progress will be applied when player initializes")
                 }
+            } else {
+                print("ℹ️ PodcastPlayer: No saved progress found for episode")
             }
             
             // Force UI update to ensure GlobalPlayerView shows the real episode data
@@ -1445,45 +1455,125 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Get saved episode data
         guard let episodeData = UserDefaults.standard.dictionary(forKey: "LastPlayedEpisodeData") as? [String: String],
               let episodeId = episodeData["episodeId"],
-              let feedId = episodeData["feedId"] else {
+              let feedId = episodeData["feedId"],
+              let episodeTitle = episodeData["episodeTitle"],
+              let feedTitle = episodeData["feedTitle"] else {
             print("⚠️ Podcast: No saved episode data found for immediate restoration")
             return
         }
         
         print("✅ Podcast: Found saved episode data - Episode ID: \(episodeId), Feed ID: \(feedId)")
+        print("✅ Podcast: Episode: \(episodeTitle), Feed: \(feedTitle)")
         
-        // Set basic state to make player visible immediately
+        // CRITICAL: Load real data from Core Data synchronously for immediate display
+        // This ensures we show the player with real artwork immediately
         isPodcastActive = true
-        userWantsToPlay = false // Don't auto-play on startup
-        connectionState = .connected // Set to ready state
+        userWantsToPlay = false
+        connectionState = .connected
         
-        // Try to find the feed in already loaded feeds (if available)
-        if let viewModel = viewModel,
-           let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }) {
-            print("🚀 Podcast: Found feed immediately: \(feed.title)")
-            currentFeed = feed
+        print("🚀 Podcast: Loading real feed and episode from Core Data synchronously...")
+        
+        // Load real feed and episode from Core Data synchronously
+        Task { @MainActor in
+            guard let viewModel = viewModel else {
+                print("⚠️ Podcast: ViewModel not available for immediate restoration")
+                return
+            }
             
-            // Try to find the episode if episodes are already loaded
-            if let episode = viewModel.currentEpisodes.first(where: { $0.id == episodeId }) {
-                print("🚀 Podcast: Found episode immediately: \(episode.title)")
-                currentEpisode = episode
+            // Try to find feed in already loaded feeds first
+            if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }) {
+                print("✅ Podcast: Found feed in memory: \(feed.title)")
+                currentFeed = feed
                 
-                // Load saved progress for immediate display
-                let savedProgress = stateManager.getProgress(for: episode.id)
-                if savedProgress > 0 {
-                    currentProgress = savedProgress
-                    print("🚀 Podcast: Restored progress immediately: \(savedProgress * 100)%")
+                // Try to find episode in loaded episodes
+                if let episode = viewModel.currentEpisodes.first(where: { $0.id == episodeId }) {
+                    print("✅ Podcast: Found episode in memory: \(episode.title)")
+                    print("🔍 Episode audio URL: \(episode.audioUrl)")
+                    print("🔍 Episode duration: \(episode.duration)s")
+                    currentEpisode = episode
+                    
+                    // Restore progress
+                    let savedProgress = stateManager.getProgress(for: episode.id)
+                    if savedProgress > 0 {
+                        currentProgress = savedProgress
+                        print("✅ Podcast: Restored progress: \(savedProgress * 100)%")
+                    }
+                    
+                    objectWillChange.send()
+                    
+                    // CRITICAL: Initialize the player with this episode so it can play
+                    print("🎬 Podcast: Initializing AVPlayer for fast-path restoration")
+                    await initializePlayerForRestoredEpisode(episode: episode)
+                    
+                    // Mark as successfully restored to prevent duplicate initialization
+                    hasSuccessfullyRestored = true
+                    restorationAttempts = 0
+                    print("✅ Podcast: Fast-path restoration complete")
+                    return
+                }
+            }
+            
+            // If not in memory, load from Core Data synchronously
+            print("📀 Podcast: Loading from Core Data...")
+            let context = CoreDataStack.shared.context
+            
+            await context.perform {
+                // Load feed from Core Data
+                let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                feedRequest.predicate = NSPredicate(format: "id == %@", feedId)
+                feedRequest.fetchLimit = 1
+                
+                do {
+                    if let feedModel = try context.fetch(feedRequest).first {
+                        let feed = feedModel.toPodcastFeed()
+                        print("✅ Podcast: Loaded feed from Core Data: \(feed.title)")
+                        
+                        // Load episode from Core Data
+                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        episodeRequest.predicate = NSPredicate(format: "id == %@ AND feedId == %@", episodeId, feedId)
+                        episodeRequest.fetchLimit = 1
+                        
+                        if let episodeModel = try context.fetch(episodeRequest).first {
+                            let episode = episodeModel.toPodcastEpisode()
+                            print("✅ Podcast: Loaded episode from Core Data: \(episode.title)")
+                            print("🔍 Episode audio URL: \(episode.audioUrl)")
+                            print("🔍 Episode duration: \(episode.duration)s")
+                            
+                            // Set on main actor
+                            Task { @MainActor in
+                                self.currentFeed = feed
+                                self.currentEpisode = episode
+                                
+                                // Restore progress
+                                let savedProgress = self.stateManager.getProgress(for: episode.id)
+                                if savedProgress > 0 {
+                                    self.currentProgress = savedProgress
+                                    print("✅ Podcast: Restored progress: \(savedProgress * 100)%")
+                                }
+                                
+                                self.objectWillChange.send()
+                                print("✅ Podcast: Player UI ready with real Core Data")
+                                
+                                // CRITICAL: Initialize the player with this episode so it can play
+                                print("🎬 Podcast: Initializing AVPlayer for immediate restoration")
+                                await self.initializePlayerForRestoredEpisode(episode: episode)
+                                
+                                // Mark as successfully restored to prevent duplicate initialization
+                                self.hasSuccessfullyRestored = true
+                                self.restorationAttempts = 0
+                                print("✅ Podcast: Immediate restoration complete")
+                            }
+                        } else {
+                            print("⚠️ Podcast: Episode not found in Core Data")
+                        }
+                    } else {
+                        print("⚠️ Podcast: Feed not found in Core Data")
+                    }
+                } catch {
+                    print("❌ Podcast: Failed to load from Core Data: \(error)")
                 }
             }
         }
-        
-        // Force UI update to make player visible immediately
-        DispatchQueue.main.async { [weak self] in
-            self?.objectWillChange.send()
-            print("🚀 Podcast: Triggered immediate UI update - player should be visible now")
-        }
-        
-        print("✅ Podcast: Immediate UI restoration completed")
     }
     
     /// Initialize the AVPlayer for a restored episode without starting playback
@@ -1550,32 +1640,44 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Update duration from episode data
         if episode.duration > 0 {
             duration = episode.duration
+            print("🔧 PodcastPlayer: Set duration from episode data: \(duration)s")
         }
         
-        // Wait for the player item to be ready, then seek to saved position if needed
-        if let playerItem = player?.currentItem {
-            // Observe when the player item is ready to play
-            let observation = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-                if item.status == .readyToPlay {
-                    Task { @MainActor in
-                        await self?.seekToSavedPositionForRestoredEpisode(episode: episode)
-                    }
-                }
+        // CRITICAL: Wait for player to be ready, then seek to saved position
+        // Check if player is already ready
+        if player?.currentItem?.status == .readyToPlay {
+            print("🔧 PodcastPlayer: Player already ready, seeking immediately")
+            await seekToSavedPositionForRestoredEpisode(episode: episode)
+        } else {
+            // Wait for player to become ready
+            print("🔧 PodcastPlayer: Waiting for player to become ready...")
+            
+            // Poll for player readiness with timeout
+            var attempts = 0
+            while attempts < 50 && player?.currentItem?.status != .readyToPlay {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                attempts += 1
             }
             
-            // Store the observation to prevent it from being deallocated
-            // Note: In a real implementation, you'd want to manage this observation properly
+            if player?.currentItem?.status == .readyToPlay {
+                print("✅ PodcastPlayer: Player became ready after \(attempts * 100)ms, seeking now")
+                await seekToSavedPositionForRestoredEpisode(episode: episode)
+            } else {
+                print("⚠️ PodcastPlayer: Player didn't become ready within 5 seconds - will seek when duration is available")
+            }
         }
         
-        print("✅ PodcastPlayer: AVPlayer initialized and ready for restored episode")
+        print("✅ PodcastPlayer: AVPlayer initialization complete")
     }
     
     /// Seek to saved position for restored episode once player is ready
     @MainActor
     private func seekToSavedPositionForRestoredEpisode(episode: PodcastEpisode) async {
-        print("🔧 PodcastPlayer: Seeking to saved position for restored episode")
+        print("🔧 PodcastPlayer: Seeking to saved position for restored episode: \(episode.title)")
         
         let savedProgress = stateManager.getProgress(for: episode.id)
+        print("🔧 PodcastPlayer: Saved progress: \(savedProgress * 100)%, duration: \(duration)s")
+        
         if savedProgress > 0 && duration > 0 {
             let targetTime = savedProgress * duration
             
@@ -1591,7 +1693,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Update Now Playing info with correct position
             updateNowPlayingInfo()
             
-            print("✅ PodcastPlayer: Successfully seeked to saved position")
+            print("✅ PodcastPlayer: Successfully seeked to saved position - currentTime: \(currentTime)s, progress: \(currentProgress * 100)%")
+        } else if savedProgress > 0 && duration == 0 {
+            print("⚠️ PodcastPlayer: Have saved progress (\(savedProgress * 100)%) but duration is 0 - will seek when duration becomes available")
         } else {
             print("🔧 PodcastPlayer: No saved progress to seek to, starting from beginning")
             // Update Now Playing info even if starting from beginning
