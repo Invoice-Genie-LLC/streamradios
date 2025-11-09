@@ -893,7 +893,6 @@ class EpisodeStateManager: ObservableObject {
         
         let hasAnyData = hasProgressData || hasFavoritesData || hasDownloadsData || hasStatesData || hasLegacyData
         
-        print("📊 EpisodeStateManager: Existing data check - Progress: \(hasProgressData), Favorites: \(hasFavoritesData), Downloads: \(hasDownloadsData), States: \(hasStatesData), Legacy: \(hasLegacyData)")
         
         return hasAnyData
     }
@@ -1016,8 +1015,6 @@ class EpisodeStateManager: ObservableObject {
         let hasEpisodeData = hasExistingEpisodeData()
         
         let isUpgrade = hasStoredVersion || hasInitTimestamp || hasEpisodeData
-        
-        print("📊 EpisodeStateManager: Upgrade check - HasVersion: \(hasStoredVersion), HasInit: \(hasInitTimestamp), HasData: \(hasEpisodeData) = \(isUpgrade)")
         
         return isUpgrade
     }
@@ -1660,7 +1657,6 @@ class EpisodeStateManager: ObservableObject {
             if savedCount > 0 {
                 do {
                     try context.save()
-                    print("✅ CORE DATA SAVE: Successfully saved \(savedCount) episodes to Core Data")
                 } catch {
                     print("❌ EpisodeStateManager: Failed to save to Core Data: \(error)")
                     errorCount += 1

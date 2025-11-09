@@ -412,7 +412,6 @@ class PodcastFeedManager {
                     DispatchQueue.main.async {
                         do {
                             try CoreDataStack.shared.context.save()
-                            print("✅ Synchronized main context after feed save for: \(feed.title)")
                             
                             // Check if this is a fresh install before posting notification
                             let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
@@ -497,7 +496,6 @@ class PodcastFeedManager {
                     DispatchQueue.main.async {
                         do {
                             try CoreDataStack.shared.context.save()
-                            print("✅ Synchronized main context after feed update for: \(updatedFeed.title)")
                         } catch {
                             print("⚠️ Failed to sync main context: \(error)")
                         }

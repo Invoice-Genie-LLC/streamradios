@@ -595,15 +595,6 @@ class PodcastViewModel: ObservableObject {
             
             // Get episodes from isolation manager
             let isolatedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
-            print("📊 EPISODE SOURCE: Got \(isolatedEpisodes.count) episodes from isolation manager for feed \(feedId)")
-            
-            // Log first few episode titles to check formatting
-            if !isolatedEpisodes.isEmpty {
-                print("📋 EPISODE TITLES (first 3):")
-                for (index, episode) in isolatedEpisodes.prefix(3).enumerated() {
-                    print("   [\(index)] ID: \(episode.id.prefix(8))... Title: \(episode.title)")
-                }
-            }
             
             // 🛡️ SMART EMPTY STATE HANDLING: Check for available cache before returning empty
             if isolatedEpisodes.isEmpty {

@@ -447,14 +447,11 @@ class PodcastCoreDataManager {
         let totalEpisodes = uniqueEpisodes.count
         let duplicatesFound = parsedEpisodes.count - totalEpisodes
         
-        os_log("🔄 Starting reconciliation for feed %@ with %d episodes (%d duplicates removed from RSS)", log: self.log, type: .info, feedId, totalEpisodes, duplicatesFound)
         
         // Log first few parsed episode titles to check formatting from RSS
         if !uniqueEpisodes.isEmpty {
-            os_log("📋 PARSED FROM RSS (first 3):", log: self.log, type: .info)
             for (index, episode) in uniqueEpisodes.prefix(3).enumerated() {
                 let titlePreview = String(episode.title.prefix(60))
-                os_log("   [%d] ID: %@... Title: %@", log: self.log, type: .info, index, String(episode.id.prefix(8)), titlePreview)
             }
         }
         
@@ -608,7 +605,6 @@ class PodcastCoreDataManager {
                 // Save frequently to avoid large transactions and provide progress
                 if processed % chunkSize == 0 {
                     try backgroundContext.save()
-                    os_log("🔄 Processed %d/%d episodes for feed %@", log: self.log, type: .debug, processed, episodes.count, feedId)
                 }
             }
             

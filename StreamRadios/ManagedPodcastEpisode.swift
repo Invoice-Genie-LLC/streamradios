@@ -135,7 +135,6 @@ extension PodcastModel {
                         resolvedLocalFilePath = nil
                     }
                 } else {
-                    print("✅ PATH VALID: File exists at stored path")
                     resolvedLocalFilePath = localPath
                 }
                 
