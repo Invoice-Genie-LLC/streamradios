@@ -437,7 +437,22 @@ struct RadioPlayerSheetView: View {
     @ViewBuilder
     private func youtubePlayerContentView(videoId: String) -> some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 20)
+            // Beta badge at the top
+            HStack {
+                Spacer()
+                Text("BETA")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(white: 0.15).opacity(0.7))
+                    .cornerRadius(4)
+                    .padding(.trailing, 20)
+                    .padding(.top, 8)
+            }
+            
+            Spacer(minLength: 12)
             
             // Video player or error message
             if isValidVideoId(videoId) {
@@ -473,8 +488,8 @@ struct RadioPlayerSheetView: View {
             }
             
             // Song info
-            VStack(spacing: 8) {
-                Text(shazamViewModel.shazamMedia.title ?? "Unknown")
+            VStack(spacing: 12) {
+                Text(shazamViewModel.youtubeVideoTitle ?? shazamViewModel.shazamMedia.title ?? "Unknown")
                     .font(.title2)
                     .fontWeight(.semibold)
                     .foregroundColor(.adaptivePrimaryText)
@@ -486,9 +501,103 @@ struct RadioPlayerSheetView: View {
                     .foregroundColor(.adaptiveSecondaryText)
                     .multilineTextAlignment(.center)
                     .lineLimit(1)
+                
+                // Stats row (likes, views, date)
+                HStack(spacing: 12) {
+                    // Likes
+                    if let likes = shazamViewModel.youtubeLikes {
+                        VStack(spacing: 4) {
+                            Text(formatNumber(likes))
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.adaptivePrimaryText)
+                            Text("Likes")
+                                .font(.caption)
+                                .foregroundColor(.adaptiveSecondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.adaptiveSecondaryText.opacity(0.1))
+                        )
+                    }
+                    
+                    // Views
+                    if let views = shazamViewModel.youtubeVideoViews {
+                        VStack(spacing: 4) {
+                            Text(formatNumber(views))
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.adaptivePrimaryText)
+                            Text("Views")
+                                .font(.caption)
+                                .foregroundColor(.adaptiveSecondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.adaptiveSecondaryText.opacity(0.1))
+                        )
+                    }
+                    
+                    // Date
+                    if let date = shazamViewModel.youtubePublishDate {
+                        VStack(spacing: 4) {
+                            Text(formatDate(date).components(separatedBy: " ").first ?? "")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.adaptivePrimaryText)
+                            Text(formatDate(date).components(separatedBy: " ").last ?? "")
+                                .font(.caption)
+                                .foregroundColor(.adaptiveSecondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.adaptiveSecondaryText.opacity(0.1))
+                        )
+                    }
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
+            
+            // Description section
+            if let description = shazamViewModel.youtubeVideoDescription {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Description")
+                        .font(.headline)
+                        .foregroundColor(.adaptivePrimaryText)
+                    
+                    ScrollView {
+                        Text(description)
+                            .font(.subheadline)
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 120)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+            }
+            
+            // Disclaimer
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle")
+                    .font(.caption)
+                    .foregroundColor(.adaptiveSecondaryText.opacity(0.7))
+                
+                Text("Note: Depending on your country and language settings, the YouTube player may not always display the correct song.")
+                    .font(.caption)
+                    .foregroundColor(.adaptiveSecondaryText.opacity(0.7))
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
             
             Spacer()
             
@@ -542,6 +651,58 @@ struct RadioPlayerSheetView: View {
         !videoId.hasPrefix("SEARCH:") && 
         videoId.count == 11 &&
         !videoId.contains("-thumbnail-")
+    }
+    
+    // Helper to format numbers (5482335 -> 5.4M)
+    private func formatNumber(_ numberString: String) -> String {
+        // Remove commas and convert to Int
+        let cleanedString = numberString.replacingOccurrences(of: ",", with: "")
+        guard let number = Double(cleanedString) else { return numberString }
+        
+        if number >= 1_000_000_000 {
+            return String(format: "%.1fB", number / 1_000_000_000)
+        } else if number >= 1_000_000 {
+            return String(format: "%.1fM", number / 1_000_000)
+        } else if number >= 1_000 {
+            return String(format: "%.1fK", number / 1_000)
+        } else {
+            return String(format: "%.0f", number)
+        }
+    }
+    
+    // Helper to format date (2024-11-23 -> Nov23 2024)
+    private func formatDate(_ dateString: String) -> String {
+        // Try parsing as ISO date first (2024-11-23)
+        let isoFormatter = DateFormatter()
+        isoFormatter.dateFormat = "yyyy-MM-dd"
+        
+        if let date = isoFormatter.date(from: dateString) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "MMMdd yyyy"
+            return displayFormatter.string(from: date)
+        }
+        
+        // If it's a relative date like "3 years ago", "Nov 23, 2024", etc., return as-is
+        // Extract year if present
+        if let yearMatch = dateString.range(of: "[0-9]{4}", options: .regularExpression) {
+            let year = String(dateString[yearMatch])
+            
+            // Try to extract month
+            let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            for month in months {
+                if dateString.contains(month) {
+                    // Try to extract day
+                    if let dayMatch = dateString.range(of: "[0-9]{1,2}", options: .regularExpression) {
+                        let day = String(dateString[dayMatch])
+                        return "\(month)\(day) \(year)"
+                    }
+                    return "\(month) \(year)"
+                }
+            }
+            return year
+        }
+        
+        return dateString
     }
     
     // Get filtered stations based on current tab for skip/previous navigation

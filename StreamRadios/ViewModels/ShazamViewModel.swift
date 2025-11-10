@@ -31,6 +31,11 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
        @Published var appleMusicItem: MusicKit.Song?
     @Published var userPlaylists: MusicItemCollection<Playlist> = MusicItemCollection<Playlist>()
     @Published var youtubeVideoId: String?
+    @Published var youtubeVideoDescription: String?
+    @Published var youtubeVideoTitle: String?
+    @Published var youtubeVideoViews: String?
+    @Published var youtubeLikes: String?
+    @Published var youtubePublishDate: String?
 
     private var audioEngine = AVAudioEngine()
     private var session = SHSession()
@@ -139,6 +144,17 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                 self?.youtubeVideoId = videoId
                 if let videoId = videoId {
                     print("✅ YouTube: Video ID set: \(videoId)")
+                    
+                    // Fetch video metadata (description, title, views, likes, date)
+                    YouTubeService.shared.fetchVideoMetadata(videoId: videoId) { [weak self] video in
+                        DispatchQueue.main.async {
+                            self?.youtubeVideoTitle = video?.title
+                            self?.youtubeVideoDescription = video?.description
+                            self?.youtubeVideoViews = video?.viewCount
+                            self?.youtubeLikes = video?.likeCount
+                            self?.youtubePublishDate = video?.publishDate
+                        }
+                    }
                 } else {
                     print("❌ YouTube: No video found")
                 }

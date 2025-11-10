@@ -8,6 +8,17 @@
 import Foundation
 import UIKit
 
+// YouTube video metadata
+struct YouTubeVideo {
+    let videoId: String
+    let title: String?
+    let description: String?
+    let viewCount: String?
+    let likeCount: String?
+    let publishDate: String?
+    let channelName: String?
+}
+
 class YouTubeService {
     static let shared = YouTubeService()
     
@@ -366,6 +377,256 @@ class YouTubeService {
     /// - Returns: YouTube web video URL with autoplay enabled
     func getYouTubeWebURL(for videoId: String) -> URL? {
         return URL(string: "https://www.youtube.com/watch?v=\(videoId)&autoplay=1")
+    }
+    
+    /// Fetch video metadata (title, description, views) by scraping the video page
+    /// - Parameters:
+    ///   - videoId: The YouTube video ID
+    ///   - completion: Completion handler with YouTubeVideo metadata
+    func fetchVideoMetadata(videoId: String, completion: @escaping (YouTubeVideo?) -> Void) {
+        guard !videoId.hasPrefix("SEARCH:"), videoId.count == 11 else {
+            print("⚠️ YouTube Metadata: Invalid video ID")
+            completion(nil)
+            return
+        }
+        
+        let urlString = "https://www.youtube.com/watch?v=\(videoId)"
+        guard let url = URL(string: urlString) else {
+            completion(nil)
+            return
+        }
+        
+        print("📥 YouTube Metadata: Fetching from \(urlString)")
+        
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data, error == nil,
+                  let html = String(data: data, encoding: .utf8) else {
+                print("❌ YouTube Metadata: Failed to fetch page")
+                completion(nil)
+                return
+            }
+            
+            // Extract metadata from ytInitialData or ytInitialPlayerResponse
+            var title: String?
+            var description: String?
+            var viewCount: String?
+            var likeCount: String?
+            var publishDate: String?
+            var channelName: String?
+            
+            // Try to find title
+            if let titleMatch = html.range(of: "\"title\":\"([^\"]+)\"", options: .regularExpression) {
+                let titleText = String(html[titleMatch])
+                if let match = try? NSRegularExpression(pattern: "\"title\":\"([^\"]+)\"").firstMatch(
+                    in: titleText,
+                    range: NSRange(titleText.startIndex..., in: titleText)
+                ), let range = Range(match.range(at: 1), in: titleText) {
+                    title = String(titleText[range])
+                }
+            }
+            
+            // Try to find description - multiple patterns
+            if description == nil, let descMatch = html.range(of: "\"attributedDescriptionBodyText\":\\{\"content\":\"([^\"]+)\"", options: .regularExpression) {
+                let descText = String(html[descMatch])
+                if let match = try? NSRegularExpression(pattern: "\"content\":\"([^\"]+)\"").firstMatch(
+                    in: descText,
+                    range: NSRange(descText.startIndex..., in: descText)
+                ), let range = Range(match.range(at: 1), in: descText) {
+                    description = String(descText[range])
+                        .replacingOccurrences(of: "\\n", with: "\n")
+                        .replacingOccurrences(of: "\\/", with: "/")
+                }
+            }
+            
+            // Alternative description pattern
+            if description == nil, let descMatch = html.range(of: "\"description\":\\{\"simpleText\":\"([^\"]+)\"", options: .regularExpression) {
+                let descText = String(html[descMatch])
+                if let match = try? NSRegularExpression(pattern: "\"description\":\\{\"simpleText\":\"([^\"]+)\"").firstMatch(
+                    in: descText,
+                    range: NSRange(descText.startIndex..., in: descText)
+                ), let range = Range(match.range(at: 1), in: descText) {
+                    description = String(descText[range])
+                        .replacingOccurrences(of: "\\n", with: "\n")
+                        .replacingOccurrences(of: "\\/", with: "/")
+                }
+            }
+            
+            // Try to find view count
+            if let viewMatch = html.range(of: "\"viewCount\":\"([0-9,]+)\"", options: .regularExpression) {
+                let viewText = String(html[viewMatch])
+                if let match = try? NSRegularExpression(pattern: "\"viewCount\":\"([0-9,]+)\"").firstMatch(
+                    in: viewText,
+                    range: NSRange(viewText.startIndex..., in: viewText)
+                ), let range = Range(match.range(at: 1), in: viewText) {
+                    viewCount = String(viewText[range])
+                }
+            }
+            
+            // Try to find like count - multiple patterns
+            let likePatterns = [
+                "\"accessibilityText\":\"([0-9,]+) likes\"",
+                "\"label\":\"([0-9,]+) likes\"",
+                "\"defaultText\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([0-9,]+) likes",
+                "\"toggleButtonRenderer\".*?\"defaultText\".*?\"simpleText\":\"([0-9,]+)\"",
+                "\"likeCount\":\"([0-9,]+)\"",
+                "\"text\":\"([0-9KMB.]+)\".*?\"iconType\":\"LIKE\""
+            ]
+            
+            for pattern in likePatterns {
+                if likeCount == nil {
+                    if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+                       let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
+                        if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: html) {
+                            let extracted = String(html[range])
+                            if !extracted.isEmpty {
+                                likeCount = extracted
+                                print("✅ Found likes using pattern: \(pattern)")
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Try to find publish date - extensive patterns
+            let datePatterns = [
+                // ISO format dates
+                "\"publishDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                "\"uploadDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                
+                // Date text fields
+                "\"dateText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
+                "\"dateText\":\"([^\"]+)\"",
+                
+                // Published time variations
+                "\"publishedTimeText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
+                "\"publishedTimeText\":\"([^\"]+)\"",
+                
+                // Info row text (where date often appears)
+                "\"info\":\\[.*?\"text\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
+                
+                // Relative time patterns
+                "\"relativeDateText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
+                
+                // Video secondary info
+                "\"videoSecondaryInfoRenderer\".*?\"dateText\".*?\"simpleText\":\"([^\"]+)\"",
+                
+                // Plain text date patterns (e.g., "Nov 23, 2024", "3 years ago")
+                "\"text\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
+                "\"text\":\"([0-9]+ years? ago)\"",
+                "\"text\":\"([0-9]+ months? ago)\"",
+                "\"text\":\"([0-9]+ weeks? ago)\"",
+                "\"text\":\"([0-9]+ days? ago)\"",
+                
+                // Structured data
+                "\"structuredDescription\".*?\"dateText\".*?\"content\":\"([^\"]+)\"",
+                
+                // Meta info
+                "\"videoDetails\".*?\"publishDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                
+                // Accessibility labels for date
+                "\"dateText\".*?\"accessibility\".*?\"label\":\"([^\"]+)\""
+            ]
+            
+            print("🔍 Searching for publish date...")
+            for (index, pattern) in datePatterns.enumerated() {
+                if publishDate == nil {
+                    if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+                       let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
+                        if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: html) {
+                            let extracted = String(html[range])
+                            if !extracted.isEmpty && extracted.count < 50 {  // Sanity check
+                                publishDate = extracted
+                                print("✅ Found date using pattern \(index + 1): \(pattern)")
+                                print("   Extracted: '\(extracted)'")
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // FALLBACK: Aggressive search for any date-like patterns in HTML
+            if publishDate == nil {
+                print("⚠️ Primary patterns failed, trying aggressive fallback...")
+                
+                // Search for common date patterns anywhere in HTML
+                let fallbackPatterns = [
+                    "[A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4}",  // Nov 23, 2024
+                    "[0-9]{1,2}\\s+[A-Z][a-z]{2}\\s+[0-9]{4}",    // 23 Nov 2024
+                    "[0-9]{4}-[0-9]{2}-[0-9]{2}",                 // 2024-11-23
+                    "[0-9]+ years? ago",                          // 3 years ago
+                    "[0-9]+ months? ago",                         // 2 months ago
+                    "[0-9]+ weeks? ago",                          // 1 week ago
+                    "[0-9]+ days? ago",                           // 5 days ago
+                    "[0-9]+ hours? ago"                           // 12 hours ago
+                ]
+                
+                for pattern in fallbackPatterns {
+                    if publishDate == nil {
+                        if let regex = try? NSRegularExpression(pattern: pattern),
+                           let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
+                            if let range = Range(match.range, in: html) {
+                                let extracted = String(html[range])
+                                // Validate it looks like a reasonable date
+                                if extracted.count >= 4 && extracted.count < 50 {
+                                    publishDate = extracted
+                                    print("✅ Found date using aggressive fallback: '\(extracted)'")
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if publishDate == nil {
+                print("❌ Could not find publish date in HTML")
+                print("📋 HTML snippet for debugging (first 1000 chars):")
+                print(String(html.prefix(1000)))
+                print("...")
+                print("📋 Searching for 'date' keyword in HTML...")
+                if html.lowercased().contains("date") {
+                    print("✓ 'date' keyword found in HTML")
+                } else {
+                    print("✗ 'date' keyword NOT found in HTML")
+                }
+            }
+            
+            // Try to find channel name
+            if let channelMatch = html.range(of: "\"author\":\"([^\"]+)\"", options: .regularExpression) {
+                let channelText = String(html[channelMatch])
+                if let match = try? NSRegularExpression(pattern: "\"author\":\"([^\"]+)\"").firstMatch(
+                    in: channelText,
+                    range: NSRange(channelText.startIndex..., in: channelText)
+                ), let range = Range(match.range(at: 1), in: channelText) {
+                    channelName = String(channelText[range])
+                }
+            }
+            
+            let video = YouTubeVideo(
+                videoId: videoId,
+                title: title,
+                description: description,
+                viewCount: viewCount,
+                likeCount: likeCount,
+                publishDate: publishDate,
+                channelName: channelName
+            )
+            
+            print("✅ YouTube Metadata: Extracted")
+            print("   Title: \(title ?? "N/A")")
+            print("   Description: \(description?.prefix(50) ?? "N/A")...")
+            print("   Views: \(viewCount ?? "N/A")")
+            print("   Likes: \(likeCount ?? "N/A")")
+            print("   Date: \(publishDate ?? "N/A")")
+            print("   Channel: \(channelName ?? "N/A")")
+            
+            DispatchQueue.main.async {
+                completion(video)
+            }
+        }
+        task.resume()
     }
     
     /// Smart open YouTube video - tries YouTube app first, then falls back to browser
