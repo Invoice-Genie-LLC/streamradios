@@ -493,7 +493,7 @@ struct RadioStationListView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "globe")
                             .font(.system(size: 40))
-                            .foregroundColor(.blue)
+                            .foregroundColor(Color(red: 45/255, green: 59/255, blue: 70/255))
                         Text("Select a Country")
                             .font(.headline)
                             .foregroundColor(.adaptivePrimaryText)

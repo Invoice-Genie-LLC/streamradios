@@ -558,7 +558,7 @@ struct ContentView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "globe")
                                     .font(.headline)
-                                    .foregroundColor(.orange)
+                                    .foregroundColor(Color(red: 45/255, green: 59/255, blue: 70/255))
                                     .dynamicTypeSize(...DynamicTypeSize.large)
                                 
                                 Text("Browse by Country")
