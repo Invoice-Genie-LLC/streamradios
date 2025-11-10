@@ -9,6 +9,7 @@ import SwiftUI
 import AVKit
 import Combine
 import MusicKit
+import WebKit
 
 // MARK: - View Extension for Conditional Modifiers
 extension View {
@@ -111,8 +112,9 @@ struct RadioPlayerSheetView: View {
     @State private var showingConfirmationDialog = false
     @State private var showAlert = false
     @State private var alertMessage = ""
-    @State private var selectedTab = 0 // 0: Now Playing, 1: Shazam
+    @State private var selectedTab = 0 // 0: Now Playing, 1: Shazam, 2: YouTube
     @State private var activeSheet: ActiveSheetPlayer?
+    @State private var showYouTubePlayer = false
     @State private var forceTokenRefresh = false
     @State private var debugLog = ""
     @State private var debugMessage = ""
@@ -199,12 +201,20 @@ struct RadioPlayerSheetView: View {
                         shazamContentView
                             .tag(1)
                     }
+                    
+                    // YouTube player tab
+                    if showYouTubePlayer, let videoId = shazamViewModel.youtubeVideoId {
+                        youtubePlayerContentView(videoId: videoId)
+                            .tag(2)
+                    }
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.3), value: selectedTab)
                 
-                // Bottom controls
-                bottomControlsView
+                // Bottom controls (hidden when YouTube tab is active)
+                if selectedTab != 2 {
+                    bottomControlsView
+                }
             }
             .background(Color.adaptiveBackground)
             .navigationTitle("")
@@ -383,16 +393,17 @@ struct RadioPlayerSheetView: View {
                 
                 // YouTube button
                 Button(action: {
-                    if let videoId = shazamViewModel.youtubeVideoId {
-                        // Smart open: Try YouTube app first, fallback to browser
-                        YouTubeService.shared.openYouTubeVideo(videoId: videoId)
+                    if shazamViewModel.youtubeVideoId != nil {
+                        // Switch to YouTube tab
+                        selectedTab = 2
+                        showYouTubePlayer = true
                     }
                 }) {
                     VStack(spacing: 6) {
                         Image(systemName: "play.rectangle.fill")
                             .font(.title2)
                             .fontWeight(.medium)
-                        Text("Open in YouTube")
+                        Text("Play on YouTube")
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .multilineTextAlignment(.center)
@@ -420,6 +431,117 @@ struct RadioPlayerSheetView: View {
             Spacer()
         }
         .padding(.horizontal, 20)
+    }
+    
+    // YouTube Player Content View
+    @ViewBuilder
+    private func youtubePlayerContentView(videoId: String) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 20)
+            
+            // Video player or error message
+            if isValidVideoId(videoId) {
+                YouTubeWebView(videoId: videoId)
+                    .frame(height: 220)
+                    .cornerRadius(12)
+                    .clipped()
+                    .padding(.horizontal, 20)
+            } else {
+                // Show error if video ID is invalid
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 50))
+                        .foregroundColor(.yellow)
+                    
+                    Text("Unable to Play Video")
+                        .font(.headline)
+                        .foregroundColor(.adaptivePrimaryText)
+                    
+                    Text("This video cannot be embedded.\nTry opening in YouTube app instead.")
+                        .font(.subheadline)
+                        .foregroundColor(.adaptiveSecondaryText)
+                        .multilineTextAlignment(.center)
+                    
+                    if videoId.count == 11 {
+                        Text("Video ID: \(videoId)")
+                            .font(.caption)
+                            .foregroundColor(.adaptiveSecondaryText.opacity(0.7))
+                    }
+                }
+                .frame(height: 220)
+                .padding(.horizontal, 20)
+            }
+            
+            // Song info
+            VStack(spacing: 8) {
+                Text(shazamViewModel.shazamMedia.title ?? "Unknown")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.adaptivePrimaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                
+                Text(shazamViewModel.shazamMedia.artistName ?? "Unknown")
+                    .font(.subheadline)
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            
+            Spacer()
+            
+            // Open in YouTube button
+            Button(action: {
+                if isValidVideoId(videoId) {
+                    // Valid video ID - open directly
+                    YouTubeService.shared.openYouTubeVideo(videoId: videoId)
+                } else if videoId.hasPrefix("SEARCH:") {
+                    // Search query - open search
+                    let searchQuery = String(videoId.dropFirst(7))
+                    YouTubeService.shared.openYouTubeVideo(videoId: searchQuery)
+                }
+            }) {
+                HStack(spacing: 12) {
+                    Image(systemName: isValidVideoId(videoId) ? "arrow.up.forward.app" : "magnifyingglass")
+                        .font(.title3)
+                        .fontWeight(.medium)
+                    Text(isValidVideoId(videoId) ? "Open in YouTube App" : "Search on YouTube")
+                        .font(.headline)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.red, Color.red.opacity(0.8)]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .shadow(color: Color.red.opacity(0.3), radius: 8, x: 0, y: 4)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+        }
+        .onAppear {
+            print("🎬 YouTube Player Tab opened with video ID: '\(videoId)'")
+            print("   - Valid: \(isValidVideoId(videoId))")
+            print("   - Length: \(videoId.count)")
+            print("   - Song: '\(shazamViewModel.shazamMedia.title ?? "Unknown")' by '\(shazamViewModel.shazamMedia.artistName ?? "Unknown")'")
+        }
+    }
+    
+    // Helper to check if video ID is valid
+    private func isValidVideoId(_ videoId: String) -> Bool {
+        !videoId.hasPrefix("SEARCH:") && 
+        videoId.count == 11 &&
+        !videoId.contains("-thumbnail-")
     }
     
     // Get filtered stations based on current tab for skip/previous navigation
@@ -1221,6 +1343,103 @@ struct RadioSleepTimerSheet: View {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - YouTube WebView
+struct YouTubeWebView: UIViewRepresentable {
+    let videoId: String
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.scrollView.isScrollEnabled = false
+        webView.backgroundColor = .black
+        webView.isOpaque = false
+        
+        // Apply rounded corners to the webView layer
+        webView.layer.cornerRadius = 12
+        webView.layer.masksToBounds = true
+        webView.scrollView.layer.cornerRadius = 12
+        webView.scrollView.layer.masksToBounds = true
+        
+        return webView
+    }
+    
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        // Check if video ID is valid (not a search query)
+        guard !videoId.hasPrefix("SEARCH:") else {
+            print("⚠️ YouTube: Invalid video ID '\(videoId)', cannot embed")
+            return
+        }
+        
+        print("🎥 YouTube WebView: Loading video ID '\(videoId)'")
+        
+        // Use youtube-nocookie.com for better embed compatibility
+        let embedURL = "https://www.youtube-nocookie.com/embed/\(videoId)?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1"
+        print("🔗 Embed URL: \(embedURL)")
+        
+        let embedHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                * { margin: 0; padding: 0; }
+                body { background: #000; }
+                .video-container {
+                    position: relative;
+                    width: 100%;
+                    padding-bottom: 56.25%;
+                    height: 0;
+                }
+                .video-container iframe {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="video-container">
+                <iframe
+                    src="https://www.youtube-nocookie.com/embed/\(videoId)?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1"
+                    frameborder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowfullscreen>
+                </iframe>
+            </div>
+        </body>
+        </html>
+        """
+        
+        webView.loadHTMLString(embedHTML, baseURL: URL(string: "https://www.youtube-nocookie.com"))
+    }
+    
+    class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: YouTubeWebView
+        
+        init(_ parent: YouTubeWebView) {
+            self.parent = parent
+        }
+        
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            print("❌ YouTube Embed: Failed to load - \(error.localizedDescription)")
+        }
+        
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            print("❌ YouTube Embed: Navigation failed - \(error.localizedDescription)")
+        }
     }
 }
 
