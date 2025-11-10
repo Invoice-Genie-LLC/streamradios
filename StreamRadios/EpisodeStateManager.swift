@@ -652,7 +652,7 @@ class EpisodeStateManager: ObservableObject {
         print("   - Total episodes in states dict: \(episodeStates.count)")
     }
     
-    /// Create emergency backup of all episode data to multiple locations
+    /// Create emergency backup of CRITICAL data only to prevent CFPreferences overflow
     private func createEmergencyBackup() {
         // EMERGENCY PERFORMANCE: Move backup creation to background queue to prevent main thread hangs
         Task.detached(priority: .background) {
@@ -661,15 +661,14 @@ class EpisodeStateManager: ObservableObject {
             
             var emergencyData: [String: Any] = [:]
             
-            // Backup in-memory data (most current) - create a cache first
-            let statesSnapshot = self.episodeStates.mapValues { $0.rawValue }
-            let progressSnapshot = self.episodeProgress
+            // CRITICAL FIX: Only backup ESSENTIAL data to prevent CFPreferences 4MB limit
+            // Do NOT backup episodeStates or episodeProgress (can be 3829+ episodes = 4MB+)
+            // These are already in Core Data and will be restored from there
             let favoritesSnapshot = self.episodeFavorites
             let downloadsSnapshot = self.episodeDownloads
             let playingSnapshot = self.currentlyPlayingEpisodeId
             
-            emergencyData["episodeStates"] = statesSnapshot
-            emergencyData["episodeProgress"] = progressSnapshot
+            // Only backup critical data that's hard to recover
             emergencyData["episodeFavorites"] = favoritesSnapshot
             emergencyData["episodeDownloads"] = downloadsSnapshot
             emergencyData["currentlyPlaying"] = playingSnapshot
@@ -678,6 +677,14 @@ class EpisodeStateManager: ObservableObject {
             
             // Store in multiple backup locations
             if let emergencyBackupData = try? JSONSerialization.data(withJSONObject: emergencyData) {
+                let backupSize = emergencyBackupData.count
+                
+                // SAFETY CHECK: Only store if under 1MB to avoid CFPreferences overflow
+                guard backupSize < 1_000_000 else {
+                    print("⚠️ EpisodeStateManager: Emergency backup too large (\(backupSize) bytes), skipping to prevent CFPreferences overflow")
+                    return
+                }
+                
                 // Primary emergency backup
                 self.userDefaults.set(emergencyBackupData, forKey: emergencyKey)
                 
@@ -690,12 +697,12 @@ class EpisodeStateManager: ObservableObject {
                     iCloudStore.synchronize()
                 }
                 
-                print("💾 EpisodeStateManager: Created emergency backup with \(statesSnapshot.count) states, \(progressSnapshot.count) progress entries")
+                print("💾 EpisodeStateManager: Created emergency backup (\(backupSize) bytes) with \(favoritesSnapshot.count) favorites, \(downloadsSnapshot.count) downloads")
             }
         }
     }
     
-    /// Restore data from emergency backup after Core Data recreation
+    /// Restore CRITICAL data from emergency backup after Core Data recreation
     private func restoreFromEmergencyBackup() {
         // Try restoring from the most recent emergency backup
         guard let emergencyData = userDefaults.data(forKey: "CoreDataEmergencyBackup"),
@@ -706,29 +713,35 @@ class EpisodeStateManager: ObservableObject {
         
         print("🔄 EpisodeStateManager: Restoring from emergency backup")
         
-        // Restore episode states
+        // NOTE: episodeStates and episodeProgress are NOT in emergency backup (too large)
+        // These will be restored from Core Data instead
+        
+        // Restore episode states from old backups (if present for backward compatibility)
         if let statesDict = backup["episodeStates"] as? [String: String] {
             self.episodeStates = statesDict.compactMapValues { EpisodePlaybackState(rawValue: $0) }
+            print("🔄 Restored \(self.episodeStates.count) episode states from old backup format")
         }
         
-        // Restore episode progress
+        // Restore episode progress from old backups (if present for backward compatibility)
         if let progressDict = backup["episodeProgress"] as? [String: Double] {
             self.episodeProgress = progressDict
+            print("🔄 Restored \(self.episodeProgress.count) progress entries from old backup format")
         }
         
-        // Restore episode favorites
+        // Restore CRITICAL data that's in new backup format
         if let favoritesDict = backup["episodeFavorites"] as? [String: Bool] {
             self.episodeFavorites = favoritesDict
+            print("🔄 Restored \(self.episodeFavorites.count) favorites from backup")
         }
         
-        // Restore episode downloads
         if let downloadsDict = backup["episodeDownloads"] as? [String: Bool] {
             self.episodeDownloads = downloadsDict
+            print("🔄 Restored \(self.episodeDownloads.count) downloads from backup")
         }
         
-        // Restore currently playing
         if let currentlyPlaying = backup["currentlyPlaying"] as? String {
             self.currentlyPlayingEpisodeId = currentlyPlaying
+            print("🔄 Restored currently playing: \(currentlyPlaying)")
         }
         
         print("✅ EpisodeStateManager: Restored \(episodeStates.count) states, \(episodeProgress.count) progress entries from emergency backup")

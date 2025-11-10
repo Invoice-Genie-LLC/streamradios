@@ -743,11 +743,12 @@ class PodcastEpisodeManager {
             let finalDownloaded: Bool
             
             if isCloudKitPriorityMode {
-                // CloudKit data takes priority - use immediately
-                finalProgress = stateData.progress
-                finalState = stateData.state
-                finalFavorite = stateData.isFavorite
-                finalDownloaded = stateData.isDownloaded
+                // CloudKit data takes priority - use highest progress, merge favorites/downloads
+                finalProgress = max(coreDataProgress, stateData.progress)
+                finalState = finalProgress >= 0.99 ? .played : (finalProgress > 0 ? .inProgress : .new)
+                // UPGRADE FIX: Use OR logic to preserve favorites/downloads from BOTH sources
+                finalFavorite = episode.state.isFavorite || stateData.isFavorite
+                finalDownloaded = episode.state.isDownloaded || stateData.isDownloaded
             } else {
                 // Use Core Data with EpisodeStateManager fallback
                 finalProgress = max(coreDataProgress, stateData.progress) // Always take highest progress
@@ -845,17 +846,19 @@ class PodcastEpisodeManager {
             let finalDownloaded: Bool
             
             if isCloudKitPriorityMode {
-                // CLOUDKIT PRIORITY: Use highest progress, prioritize Core Data for other states
+                // CLOUDKIT PRIORITY: Use highest progress, merge favorites/downloads from both sources
                 finalProgress = max(coreDataProgress, stateData.progress)
                 finalState = finalProgress >= 0.99 ? .played : (finalProgress > 0 ? .inProgress : .new)
-                finalFavorite = managedEpisode.isFavorite
-                finalDownloaded = managedEpisode.isDownloaded
+                // UPGRADE FIX: Use OR logic to preserve favorites/downloads from BOTH sources
+                finalFavorite = managedEpisode.isFavorite || stateData.isFavorite
+                finalDownloaded = managedEpisode.isDownloaded || stateData.isDownloaded
             } else {
-                // NORMAL MODE: Use highest progress, EpisodeStateManager for other states
+                // NORMAL MODE: Use highest progress, merge favorites/downloads from both sources
                 finalProgress = max(stateData.progress, coreDataProgress)
                 finalState = finalProgress >= 0.99 ? .played : (finalProgress > 0 ? .inProgress : .new)
-                finalFavorite = stateData.isFavorite
-                finalDownloaded = stateData.isDownloaded
+                // UPGRADE FIX: Use OR logic to preserve favorites/downloads from BOTH sources
+                finalFavorite = managedEpisode.isFavorite || stateData.isFavorite
+                finalDownloaded = managedEpisode.isDownloaded || stateData.isDownloaded
             }
             
             // Apply the final values to the episode
