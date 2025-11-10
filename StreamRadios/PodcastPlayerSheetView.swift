@@ -37,6 +37,8 @@ struct PodcastPlayerSheetView: View {
     @State private var sleepTimerEndTime: Date? = nil
     @State private var sleepTimerActive = false
     @State private var sleepTimerMode: SleepTimerMode = .none
+    @State private var isDraggingProgress = false
+    @State private var draggedProgress: Double = 0
     @Environment(\.colorScheme) var colorScheme
     
     // UserDefaults keys for timer persistence
@@ -223,6 +225,7 @@ struct PodcastPlayerSheetView: View {
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.3), value: selectedTab)
+                .allowsHitTesting(!isDraggingProgress) // Disable swipe gestures when dragging progress bar
                 .onChange(of: selectedTab) { oldValue, newValue in
                     // Trigger scroll to current chapter when switching to Chapters tab
                     if newValue == 2 && hasChapters {
@@ -591,15 +594,53 @@ struct PodcastPlayerSheetView: View {
     // MARK: - Playback Controls
     private var playbackControlsView: some View {
         VStack(spacing: 16) {
-            // Progress bar
+            // Draggable Progress bar
             VStack(spacing: 8) {
-                ProgressView(value: podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0)
-                    .progressViewStyle(.linear)
-                    .tint(.blue)
-                    .scaleEffect(y: 2)
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        // Background track
+                        Capsule()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 4)
+                        
+                        // Progress fill
+                        Capsule()
+                            .fill(Color.blue)
+                            .frame(
+                                width: geometry.size.width * (isDraggingProgress ? draggedProgress : (podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0)),
+                                height: 4
+                            )
+                        
+                        // Draggable thumb
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: isDraggingProgress ? 16 : 12, height: isDraggingProgress ? 16 : 12)
+                            .offset(
+                                x: geometry.size.width * (isDraggingProgress ? draggedProgress : (podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0)) - (isDraggingProgress ? 8 : 6)
+                            )
+                            .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    }
+                    .frame(height: 4)
+                    .contentShape(Rectangle()) // Make entire area tappable/draggable
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                isDraggingProgress = true
+                                let progress = min(max(0, value.location.x / geometry.size.width), 1)
+                                draggedProgress = progress
+                            }
+                            .onEnded { value in
+                                let progress = min(max(0, value.location.x / geometry.size.width), 1)
+                                let seekTime = progress * podcastPlayer.duration
+                                podcastPlayer.seek(to: seekTime)
+                                isDraggingProgress = false
+                            }
+                    )
+                }
+                .frame(height: 20) // Give it enough height for easy dragging
                 
                 HStack {
-                    Text(formatTime(podcastPlayer.currentTime))
+                    Text(formatTime(isDraggingProgress ? draggedProgress * podcastPlayer.duration : podcastPlayer.currentTime))
                         .font(.caption)
                         .foregroundColor(.adaptiveSecondaryText)
                         .monospacedDigit()
