@@ -28,7 +28,28 @@ class YouTubeService {
     ///   - artist: The artist name
     ///   - completion: Completion handler with video ID
     func searchSong(title: String, artist: String, completion: @escaping (String?) -> Void) {
-        let searchQuery = "\(artist) \(title) official"
+        // Try multiple search query variations for better results
+        let searchQueries = [
+            "\(artist) \(title) official music video",  // Most specific
+            "\(artist) \(title) official",              // Common format
+            "\(title) \(artist)",                       // Reverse order
+            "\(artist) \(title)"                        // Basic search
+        ]
+        
+        print("🔍 YouTube: Searching for '\(title)' by '\(artist)'")
+        
+        // Try each search query until we find a good match
+        searchWithQueries(queries: searchQueries, title: title, artist: artist, completion: completion)
+    }
+    
+    /// Try multiple search queries and pick the best result
+    private func searchWithQueries(queries: [String], title: String, artist: String, completion: @escaping (String?) -> Void) {
+        guard !queries.isEmpty else {
+            completion(nil)
+            return
+        }
+        
+        let searchQuery = queries[0]
         
         guard let encodedQuery = searchQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://www.youtube.com/results?search_query=\(encodedQuery)") else {
@@ -37,7 +58,7 @@ class YouTubeService {
             return
         }
         
-        print("🔍 YouTube: Scraping search results for '\(searchQuery)'")
+        print("🔍 YouTube: Trying query '\(searchQuery)'")
         
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -52,13 +73,28 @@ class YouTubeService {
             
             print("📄 YouTube: Received \(html.count) characters of HTML")
             
-            // PRIORITY 1: Extract from ytInitialData section
-            if let videoId = self.extractFromYtInitialData(html: html) {
-                print("✅ YouTube: Found first video '\(videoId)' from ytInitialData")
-                DispatchQueue.main.async {
-                    completion(videoId)
+            // PRIORITY 1: Extract multiple videos from search results and verify each
+            let videoIds = self.extractMultipleVideosFromYtInitialData(html: html)
+            if !videoIds.isEmpty {
+                print("🔍 YouTube: Found \(videoIds.count) potential videos in search results")
+                
+                // Check each video until we find a good match
+                for (index, videoId) in videoIds.prefix(5).enumerated() {
+                    if let matchResult = self.verifyVideoMatchWithTitle(html: html, videoId: videoId, title: title, artist: artist) {
+                        if matchResult.isGoodMatch {
+                            print("✅ YouTube: Found matching video '\(videoId)' (checked \(index + 1) videos)")
+                            DispatchQueue.main.async {
+                                completion(videoId)
+                            }
+                            return
+                        } else {
+                            print("⏭️ YouTube: Video \(index + 1) '\(matchResult.videoTitle ?? "unknown")' doesn't match, checking next...")
+                        }
+                    }
                 }
-                return
+                print("⚠️ YouTube: Checked \(min(5, videoIds.count)) videos, none matched well enough")
+            } else {
+                print("⚠️ YouTube: No videos found in ytInitialData")
             }
             
             // PRIORITY 2: Search entire HTML for ANY videoId pattern
@@ -102,12 +138,21 @@ class YouTubeService {
                 return
             }
             
-            print("❌ YouTube: Could not extract any video ID from HTML")
-            print("📋 HTML sample (first 500 chars): \(String(html.prefix(500)))")
+            print("⚠️ YouTube: No video found with query '\(searchQuery)'")
             
-            // LAST RESORT: Return search query (will open search page)
-            DispatchQueue.main.async {
-                completion("SEARCH:\(searchQuery)")
+            // Try next query variation
+            let remainingQueries = Array(queries.dropFirst())
+            if !remainingQueries.isEmpty {
+                print("🔄 YouTube: Trying next search variation...")
+                DispatchQueue.main.async {
+                    self.searchWithQueries(queries: remainingQueries, title: title, artist: artist, completion: completion)
+                }
+            } else {
+                print("❌ YouTube: All search queries exhausted")
+                // LAST RESORT: Return search query (will open search page)
+                DispatchQueue.main.async {
+                    completion("SEARCH:\(artist) \(title)")
+                }
             }
         }.resume()
     }
@@ -353,6 +398,269 @@ class YouTubeService {
         
         print("⚠️ YouTube: No valid video IDs found in contextual search")
         return nil
+    }
+    
+    /// Extract multiple video IDs from YouTube search results
+    /// - Parameter html: The HTML content
+    /// - Returns: Array of video IDs found
+    private func extractMultipleVideosFromYtInitialData(html: String) -> [String] {
+        var videoIds: [String] = []
+        
+        // Find the ytInitialData section first
+        let markers = ["var ytInitialData", "window[\"ytInitialData\"]", "ytInitialData"]
+        var searchSection = html
+        
+        for marker in markers {
+            if let markerRange = html.range(of: marker) {
+                let startIndex = markerRange.upperBound
+                let searchLength = min(100000, html.distance(from: startIndex, to: html.endIndex))
+                let endIndex = html.index(startIndex, offsetBy: searchLength)
+                searchSection = String(html[startIndex..<endIndex])
+                break
+            }
+        }
+        
+        // Decode hex-encoded strings if present
+        var decodedSection = searchSection
+        if searchSection.contains("\\x") {
+            let pattern = "\\\\x([0-9a-fA-F]{2})"
+            if let hexRegex = try? NSRegularExpression(pattern: pattern, options: []) {
+                var result = searchSection
+                let matches = hexRegex.matches(in: searchSection, options: [], range: NSRange(searchSection.startIndex..., in: searchSection))
+                
+                for match in matches.reversed() {
+                    if let hexRange = Range(match.range(at: 1), in: searchSection),
+                       let fullRange = Range(match.range(at: 0), in: searchSection) {
+                        let hexString = String(searchSection[hexRange])
+                        if let hexValue = UInt8(hexString, radix: 16) {
+                            let char = String(UnicodeScalar(hexValue))
+                            result.replaceSubrange(fullRange, with: char)
+                        }
+                    }
+                }
+                decodedSection = result
+            }
+        }
+        
+        // Extract all videoId occurrences
+        let pattern = "\"videoId\"\\s*:\\s*\"([a-zA-Z0-9_-]{11})\""
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return []
+        }
+        
+        let matches = regex.matches(in: decodedSection, range: NSRange(decodedSection.startIndex..., in: decodedSection))
+        
+        for match in matches {
+            if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: decodedSection) {
+                let videoId = String(decodedSection[range])
+                
+                // Validate and avoid duplicates
+                if videoId.count == 11 && !videoIds.contains(videoId) {
+                    // Skip invalid patterns
+                    let invalidPatterns = ["-thumbnail-", "-default-", "align-items", "inline-flex"]
+                    if !invalidPatterns.contains(where: { videoId.lowercased().contains($0) }) {
+                        // Validate starts and ends with alphanumeric
+                        if let first = videoId.first, let last = videoId.last,
+                           (first.isLetter || first.isNumber),
+                           (last.isLetter || last.isNumber) {
+                            videoIds.append(videoId)
+                        }
+                    }
+                }
+            }
+        }
+        
+        return videoIds
+    }
+    
+    /// Match result with title information
+    struct VideoMatchResult {
+        let videoTitle: String?
+        let isGoodMatch: Bool
+    }
+    
+    /// Verify if a specific video matches the song by extracting its title from the HTML
+    /// - Parameters:
+    ///   - html: The HTML content
+    ///   - videoId: The specific video ID to check
+    ///   - title: Song title to match
+    ///   - artist: Artist name to match
+    /// - Returns: Match result with title and match status
+    private func verifyVideoMatchWithTitle(html: String, videoId: String, title: String, artist: String) -> VideoMatchResult? {
+        // Decode hex-encoded HTML first (same as extraction method)
+        var decodedHtml = html
+        if html.contains("\\x") {
+            let pattern = "\\\\x([0-9a-fA-F]{2})"
+            if let hexRegex = try? NSRegularExpression(pattern: pattern, options: []) {
+                var result = html
+                let matches = hexRegex.matches(in: html, options: [], range: NSRange(html.startIndex..., in: html))
+                
+                for match in matches.reversed() {
+                    if let hexRange = Range(match.range(at: 1), in: html),
+                       let fullRange = Range(match.range(at: 0), in: html) {
+                        let hexString = String(html[hexRange])
+                        if let hexValue = UInt8(hexString, radix: 16) {
+                            let char = String(UnicodeScalar(hexValue))
+                            result.replaceSubrange(fullRange, with: char)
+                        }
+                    }
+                }
+                decodedHtml = result
+            }
+        }
+        
+        // Find the video title near this specific videoId in decoded HTML
+        guard let videoIdRange = decodedHtml.range(of: "\"videoId\":\"\(videoId)\"") else {
+            print("   ⚠️ Could not find videoId '\(videoId)' in HTML")
+            return nil
+        }
+        
+        // Get larger context around the videoId (title can be far before the videoId)
+        let startOffset = max(0, decodedHtml.distance(from: decodedHtml.startIndex, to: videoIdRange.lowerBound) - 2000)
+        let endOffset = min(decodedHtml.count, decodedHtml.distance(from: decodedHtml.startIndex, to: videoIdRange.upperBound) + 1000)
+        
+        let contextStart = decodedHtml.index(decodedHtml.startIndex, offsetBy: startOffset)
+        let contextEnd = decodedHtml.index(decodedHtml.startIndex, offsetBy: endOffset)
+        let context = String(decodedHtml[contextStart..<contextEnd])
+        
+        print("   🔎 Context length: \(context.count) chars for videoId '\(videoId)'")
+        
+        // Extract title from this context - YouTube search uses "headline", not "title"
+        let titlePatterns = [
+            "\"headline\":\\{\"runs\":\\[\\{\"text\":\"([^\"]{5,200})\"",  // YouTube search results
+            "\"title\":\\{\"runs\":\\[\\{\"text\":\"([^\"]{5,200})\"",     // Video watch page
+            "\"title\":\\{\"simpleText\":\"([^\"]{5,200})\"",
+            "\"headline\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([^\"]{5,200})\"",
+            "\"title\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([^\"]{5,200})\"",
+        ]
+        
+        var videoTitle: String?
+        for (index, pattern) in titlePatterns.enumerated() {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+               let match = regex.firstMatch(in: context, range: NSRange(context.startIndex..., in: context)) {
+                if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: context) {
+                    let extracted = String(context[range])
+                    // Decode hex and unicode escapes
+                    let decoded = extracted
+                        .replacingOccurrences(of: "\\x22", with: "\"")
+                        .replacingOccurrences(of: "\\x27", with: "'")
+                        .replacingOccurrences(of: "\\u0026", with: "&")
+                        .replacingOccurrences(of: "\\u0027", with: "'")
+                        .replacingOccurrences(of: "`", with: "'")
+                    if decoded.count >= 5 && decoded.count < 200 {
+                        print("   ✅ Pattern \(index + 1) matched: '\(decoded.prefix(50))'")
+                        videoTitle = decoded
+                        break
+                    }
+                }
+            }
+        }
+        
+        guard let extractedTitle = videoTitle else {
+            print("   ⚠️ Could not extract title for videoId '\(videoId)' - no pattern matched")
+            return VideoMatchResult(videoTitle: nil, isGoodMatch: false)
+        }
+        
+        // Reject Mix videos - they aggregate multiple songs
+        let lowerTitle = extractedTitle.lowercased()
+        if lowerTitle.starts(with: "mix -") || lowerTitle.contains("- mix") || lowerTitle.contains("mix playlist") {
+            print("   ⏭️ Rejecting Mix/Playlist video: '\(extractedTitle.prefix(60))'")
+            return VideoMatchResult(videoTitle: extractedTitle, isGoodMatch: false)
+        }
+        
+        // Check match quality
+        let extractedTitleLower = extractedTitle.lowercased()
+        let songTitleLower = title.lowercased()
+        let artistLower = artist.lowercased()
+        
+        let songWords = songTitleLower.split(separator: " ").filter { $0.count > 2 }
+        let artistWords = artistLower.split(separator: " ").filter { $0.count > 2 }
+        
+        let songWordMatches = songWords.filter { extractedTitleLower.contains($0) }.count
+        let artistWordMatches = artistWords.filter { extractedTitleLower.contains($0) }.count
+        
+        let songMatchRatio = songWords.isEmpty ? 1.0 : Double(songWordMatches) / Double(songWords.count)
+        let hasArtistMatch = artistWordMatches > 0 || artistWords.isEmpty
+        
+        let isGoodMatch = songMatchRatio >= 0.5 && hasArtistMatch
+        
+        print("   🔍 '\(extractedTitle.prefix(60))' - Song: \(Int(songMatchRatio * 100))%, Artist: \(hasArtistMatch ? "✓" : "✗") = \(isGoodMatch ? "✅" : "❌")")
+        if !isGoodMatch {
+            print("      Expected: '\(title)' by '\(artist)'")
+        }
+        
+        return VideoMatchResult(videoTitle: extractedTitle, isGoodMatch: isGoodMatch)
+    }
+    
+    /// Verify if the video title in HTML matches the song title and artist
+    /// - Parameters:
+    ///   - html: The HTML content
+    ///   - title: Song title to match
+    ///   - artist: Artist name to match
+    /// - Returns: True if video appears to match the song
+    private func verifyVideoMatch(html: String, title: String, artist: String) -> Bool {
+        // Extract video title from HTML - search results have specific structure
+        let titlePatterns = [
+            // Search results specific patterns (most common)
+            "\"videoRenderer\".*?\"title\".*?\"runs\".*?\"text\":\"([^\"]{10,200})\"",
+            "\"videoRenderer\".*?\"title\":\\{\"runs\":\\[\\{\"text\":\"([^\"]+)\"",
+            "\"title\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([^\"]+)\"",
+            
+            // Decoded hex patterns
+            "\\\\x22text\\\\x22:\\\\x22([^\\\\]{10,200})\\\\x22",
+            
+            // General patterns
+            "\"title\":\\{\"simpleText\":\"([^\"]+)\"",
+            "\"title\":\"([^\"]{10,200})\"",
+        ]
+        
+        var videoTitle: String?
+        for pattern in titlePatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+               let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
+                if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: html) {
+                    let extracted = String(html[range])
+                    // Decode hex escapes if present
+                    let decoded = extracted.replacingOccurrences(of: "\\x22", with: "\"")
+                        .replacingOccurrences(of: "\\x27", with: "'")
+                    if decoded.count >= 10 && decoded.count < 200 {
+                        videoTitle = decoded
+                        print("🎯 YouTube: Extracted video title: '\(decoded)'")
+                        break
+                    }
+                }
+            }
+        }
+        
+        guard let extractedTitle = videoTitle?.lowercased() else {
+            // If we can't extract title, DON'T proceed - try next query
+            print("⚠️ YouTube: Could not extract video title for verification, trying next query")
+            return false
+        }
+        
+        let songTitleLower = title.lowercased()
+        let artistLower = artist.lowercased()
+        
+        // Check if video title contains significant parts of the song title
+        let songWords = songTitleLower.split(separator: " ").filter { $0.count > 2 } // Filter out short words
+        let artistWords = artistLower.split(separator: " ").filter { $0.count > 2 }
+        
+        // Count how many words from song title are in video title
+        let songWordMatches = songWords.filter { extractedTitle.contains($0) }.count
+        let artistWordMatches = artistWords.filter { extractedTitle.contains($0) }.count
+        
+        // Consider it a good match if at least 50% of song words and some artist words match
+        let songMatchRatio = songWords.isEmpty ? 1.0 : Double(songWordMatches) / Double(songWords.count)
+        let hasArtistMatch = artistWordMatches > 0 || artistWords.isEmpty
+        
+        let isGoodMatch = songMatchRatio >= 0.5 && hasArtistMatch
+        
+        print("🔍 YouTube: Video title '\(extractedTitle.prefix(50))...'")
+        print("   Song match: \(songWordMatches)/\(songWords.count) words (\(Int(songMatchRatio * 100))%)")
+        print("   Artist match: \(hasArtistMatch ? "✓" : "✗")")
+        print("   Result: \(isGoodMatch ? "✅ Good match" : "❌ Poor match")")
+        
+        return isGoodMatch
     }
     
     /// Generate YouTube embed URL from video ID

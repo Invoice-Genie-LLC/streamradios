@@ -428,6 +428,14 @@ struct RadioPlayerSheetView: View {
             }
             .padding(.horizontal, 20)
             
+            // Shazam disclaimer
+            Text("Note: Depending on your country and language settings, Shazam may not always discover the correct song.")
+                .font(.caption)
+                .foregroundColor(.adaptiveSecondaryText.opacity(0.7))
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+            
             Spacer()
         }
         .padding(.horizontal, 20)
@@ -586,9 +594,6 @@ struct RadioPlayerSheetView: View {
             
             // Disclaimer
             HStack(spacing: 8) {
-                Image(systemName: "info.circle")
-                    .font(.caption)
-                    .foregroundColor(.adaptiveSecondaryText.opacity(0.7))
                 
                 Text("Note: Depending on your country and language settings, the YouTube player may not always display the correct song.")
                     .font(.caption)
