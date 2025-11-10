@@ -1560,12 +1560,14 @@ struct YouTubeWebView: UIViewRepresentable {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 * { margin: 0; padding: 0; }
-                body { background: #000; }
+                body { background: #000; overflow: hidden; }
                 .video-container {
                     position: relative;
                     width: 100%;
                     padding-bottom: 56.25%;
                     height: 0;
+                    border-radius: 12px;
+                    overflow: hidden;
                 }
                 .video-container iframe {
                     position: absolute;
@@ -1573,6 +1575,7 @@ struct YouTubeWebView: UIViewRepresentable {
                     left: 0;
                     width: 100%;
                     height: 100%;
+                    border-radius: 12px;
                 }
             </style>
         </head>
