@@ -346,24 +346,28 @@ struct RadioPlayerSheetView: View {
             }
             .padding(.horizontal, 20)
             
-            // Shazam action button
-            if shazamViewModel.shazamMedia.title != nil {
+            // Shazam action buttons (always visible, but disabled until ready)
+            HStack(spacing: 10) {
+                // Apple Music button
                 Button(action: {
-                    requestMusicAuthorization()
+                    if shazamViewModel.shazamMedia.title != nil && !shazamViewModel.shazamMedia.title!.isEmpty {
+                        requestMusicAuthorization()
+                    }
                 }) {
-                    HStack(spacing: 12) {
+                    VStack(spacing: 6) {
                         Image(systemName: "apple.logo")
                             .font(.title2)
                             .fontWeight(.medium)
                         Text("Save to Apple Music")
-                            .font(.headline)
+                            .font(.subheadline)
                             .fontWeight(.medium)
+                            .multilineTextAlignment(.center)
                     }
                     .foregroundColor(.white)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
                     .background(
-                        RoundedRectangle(cornerRadius: 25)
+                        RoundedRectangle(cornerRadius: 20)
                             .fill(
                                 LinearGradient(
                                     gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
@@ -373,8 +377,45 @@ struct RadioPlayerSheetView: View {
                             )
                     )
                     .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .opacity((shazamViewModel.shazamMedia.title != nil && !shazamViewModel.shazamMedia.title!.isEmpty) ? 1.0 : 0.6)
                 }
+                .disabled(shazamViewModel.shazamMedia.title == nil || shazamViewModel.shazamMedia.title!.isEmpty)
+                
+                // YouTube button
+                Button(action: {
+                    if let videoId = shazamViewModel.youtubeVideoId {
+                        // Smart open: Try YouTube app first, fallback to browser
+                        YouTubeService.shared.openYouTubeVideo(videoId: videoId)
+                    }
+                }) {
+                    VStack(spacing: 6) {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.title2)
+                            .fontWeight(.medium)
+                        Text("Open in YouTube")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .multilineTextAlignment(.center)
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.red, Color.red.opacity(0.8)]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                    )
+                    .shadow(color: Color.red.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .opacity(shazamViewModel.youtubeVideoId == nil ? 0.6 : 1.0)
+                }
+                .disabled(shazamViewModel.youtubeVideoId == nil)
             }
+            .padding(.horizontal, 20)
             
             Spacer()
         }

@@ -54,6 +54,7 @@
 	<array>
 		<string>music</string>
 		<string>https</string>
+		<string>youtube</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>

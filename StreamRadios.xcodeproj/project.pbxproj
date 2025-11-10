@@ -82,8 +82,9 @@
 		77B4E0F32E086FEF0034F886 /* PodcastEpisodeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */; };
 		77B4E0F42E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EF2E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld */; };
 		77B4E0F52E086FEF0034F886 /* PodcastCloudKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EB2E086FEF0034F886 /* PodcastCloudKitManager.swift */; };
-		77B4E0F72E086FEF0034F888 /* FeedIsolationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0F82E086FEF0034F888 /* FeedIsolationManager.swift */; };
 		77B4E0F62E086FEF0034F887 /* RadioStationCloudKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EC2E086FEF0034F887 /* RadioStationCloudKitManager.swift */; };
+		77B4E0F72E086FEF0034F888 /* FeedIsolationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0F82E086FEF0034F888 /* FeedIsolationManager.swift */; };
+		77BAA2A92EC10D0C0022DE76 /* YouTubeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BAA2A82EC10D0C0022DE76 /* YouTubeService.swift */; };
 		77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */; };
 		77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */; };
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
@@ -216,8 +217,9 @@
 		77B4E0EC2E086FEF0034F887 /* RadioStationCloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationCloudKitManager.swift; sourceTree = "<group>"; };
 		77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastEpisodeManager.swift; sourceTree = "<group>"; };
 		77B4E0EE2E086FEF0034F886 /* PodcastFeedManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastFeedManager.swift; sourceTree = "<group>"; };
-		77B4E0F82E086FEF0034F888 /* FeedIsolationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedIsolationManager.swift; sourceTree = "<group>"; };
 		77B4E0F02E086FEF0034F886 /* StreamRadiosModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamRadiosModel.xcdatamodel; sourceTree = "<group>"; };
+		77B4E0F82E086FEF0034F888 /* FeedIsolationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedIsolationManager.swift; sourceTree = "<group>"; };
+		77BAA2A82EC10D0C0022DE76 /* YouTubeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeService.swift; sourceTree = "<group>"; };
 		77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
@@ -347,6 +349,7 @@
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
 				778F746F2C2F13CE00AB81CD /* PlayerView.swift */,
 				779352212C1A118A008F8416 /* AlbumArtView.swift */,
+				77BAA2A82EC10D0C0022DE76 /* YouTubeService.swift */,
 				77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */,
 				CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */,
 				77AE62EB2C16063500F02B33 /* RadioPlayerSheetView.swift */,
@@ -621,6 +624,7 @@
 				77B4E0F42E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld in Sources */,
 				7709599F2E0A592700478E7C /* DataSyncManager.swift in Sources */,
 				778610662E50A8A700108721 /* PodcastPreviewView.swift in Sources */,
+				77BAA2A92EC10D0C0022DE76 /* YouTubeService.swift in Sources */,
 				770959A02E0A592700478E7C /* DataSyncProgressView.swift in Sources */,
 				77B4E0F52E086FEF0034F886 /* PodcastCloudKitManager.swift in Sources */,
 				77B4E0F62E086FEF0034F887 /* RadioStationCloudKitManager.swift in Sources */,

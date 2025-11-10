@@ -30,6 +30,7 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     @Published var appleMusicURL: URL?
        @Published var appleMusicItem: MusicKit.Song?
     @Published var userPlaylists: MusicItemCollection<Playlist> = MusicItemCollection<Playlist>()
+    @Published var youtubeVideoId: String?
 
     private var audioEngine = AVAudioEngine()
     private var session = SHSession()
@@ -124,6 +125,26 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                 throw error
             }
         }
+    
+    func fetchYouTubeVideo() {
+        guard let songTitle = shazamMedia.title, let artistName = shazamMedia.artistName else {
+            print("❌ YouTube: Cannot search - missing song title or artist")
+            return
+        }
+        
+        print("🔍 YouTube: Searching for '\(songTitle)' by '\(artistName)'")
+        
+        YouTubeService.shared.searchSong(title: songTitle, artist: artistName) { [weak self] videoId in
+            DispatchQueue.main.async {
+                self?.youtubeVideoId = videoId
+                if let videoId = videoId {
+                    print("✅ YouTube: Video ID set: \(videoId)")
+                } else {
+                    print("❌ YouTube: No video found")
+                }
+            }
+        }
+    }
     
     private func setupAudioEngine() {
         // Stop and reset the audio engine first to clear any previous state
@@ -373,6 +394,9 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                     print("🎵 Manual Shazam: Posted artwork notification for '\(title)' by '\(artist)'")
                     print("   - Artwork URL: \(artworkURL.absoluteString)")
                 }
+                
+                // Automatically search for YouTube video after Shazam identification
+                self.fetchYouTubeVideo()
             }
         }
     }
