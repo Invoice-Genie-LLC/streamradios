@@ -98,8 +98,6 @@ struct PodcastListView: View {
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
     @Binding var selectedPodcast: PodcastFeed?
-    @State private var searchText = ""
-    @State private var isSearchPresented = false
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
     @State private var expandedFeedId: String?
@@ -136,7 +134,6 @@ struct PodcastListView: View {
     // Animation state for deletion progress overlay
     @State private var animationScale: CGFloat = 1.0
     @State private var currentDeletingFeedTitle: String = ""
-    @State private var lastSearchText: String = ""
     @State private var lastPodcastFeedsCount: Int = 0
     
     // PERFORMANCE: Fast feed lookup cache
@@ -154,168 +151,6 @@ struct PodcastListView: View {
         self.isFooterMenuHidden = .constant(false)
     }
     
-    // Episode results list shown while typing in search
-    private var episodeResultsList: some View {
-        let _ = uiRefreshObserver // Force SwiftUI to observe uiRefreshTrigger
-        return List {
-            if viewModel.globalEpisodeSearchResults.isEmpty {
-                Text("No matching episodes")
-                    .foregroundColor(.adaptiveSecondaryText)
-            } else {
-                ForEach(viewModel.globalEpisodeSearchResults, id: \.id) { ep in
-                    HStack(alignment: .top, spacing: 10) {
-                        // Artwork
-                        if let feed = viewModel.podcastFeeds.first(where: { $0.id == ep.feedId }) {
-                            if let imageData = feed.imageData, let uiImage = UIImage(data: imageData) {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .aspectRatio(1, contentMode: .fill)
-                                    .frame(width: 40, height: 40)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                            } else if let urlString = feed.artworkUrl, let url = URL(string: urlString) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image.resizable().aspectRatio(1, contentMode: .fill)
-                                    default:
-                                        Color.gray.opacity(0.2)
-                                    }
-                                }
-                                .frame(width: 40, height: 40)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                            } else {
-                                Color.gray.opacity(0.2)
-                                    .frame(width: 40, height: 40)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                            }
-                        } else {
-                            Color.gray.opacity(0.2)
-                                .frame(width: 40, height: 40)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            highlightedText(in: ep.title, query: searchText)
-                                .font(.body)
-                                .foregroundColor(.primary)
-                                .lineLimit(2)
-                            if let feed = viewModel.podcastFeeds.first(where: { $0.id == ep.feedId }) {
-                                HStack(spacing: 6) {
-                                    Text(feed.title)
-                                    Text(ep.publicationDate, format: .dateTime.year().month().day().hour().minute())
-                                }
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                            }
-                            // Description or notes snippet with highlighting (HTML stripped)
-                            if !searchText.isEmpty {
-                                let descPlain = htmlToPlainText(ep.descriptionText)
-                                if descPlain.localizedCaseInsensitiveContains(searchText) {
-                                    let s = snippet(from: descPlain, query: searchText)
-                                    highlightedText(in: s, query: searchText)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(2)
-                                } else if let notesContent = ep.notes?.content {
-                                    let plain = htmlToPlainText(notesContent)
-                                    if plain.localizedCaseInsensitiveContains(searchText) {
-                                        let s = snippet(from: plain, query: searchText)
-                                        highlightedText(in: s, query: searchText)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        print("🔎 Tapped episode result: \(ep.title)")
-                        guard let feed = viewModel.podcastFeeds.first(where: { $0.id == ep.feedId }) else { return }
-                        DispatchQueue.main.async {
-                            PodcastPlayer.shared.playEpisode(ep, feed: feed)
-                            selectedPodcast = feed
-                            // PERFORMANCE: Use optimized feed refresh instead of expensive loadEpisodesForFeed
-                            viewModel.requestFeedRefresh(feed.id)
-                            scrollToEpisodeID = ep.id
-                        }
-                    }
-                }
-                // Extra bottom space for easier scrolling
-                Color.clear.frame(height: 100)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            }
-        }
-        .listStyle(.plain)
-    }
-
-    // MARK: - Search Result Helpers
-    private func highlightedText(in text: String, query: String) -> Text {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else { return Text(text) }
-        var result = Text("")
-        var currentIndex = text.startIndex
-        while let range = text.range(of: trimmedQuery, options: [.caseInsensitive, .diacriticInsensitive], range: currentIndex..<text.endIndex) {
-            let prefix = String(text[currentIndex..<range.lowerBound])
-            if !prefix.isEmpty { result = result + Text(prefix) }
-            let match = String(text[range])
-            result = result + Text(match).foregroundColor(.accentColor).bold()
-            currentIndex = range.upperBound
-            if range.lowerBound == range.upperBound { break }
-        }
-        if currentIndex < text.endIndex {
-            let suffix = String(text[currentIndex..<text.endIndex])
-            result = result + Text(suffix)
-        }
-        return result
-    }
-
-    private func snippet(from text: String, query: String, maxLength: Int = 120, context: Int = 40) -> String {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else { return String(text.prefix(maxLength)) }
-        guard let range = text.range(of: trimmedQuery, options: [.caseInsensitive, .diacriticInsensitive]) else {
-            return String(text.prefix(maxLength))
-        }
-        let prefixLen = min(context, text.distance(from: text.startIndex, to: range.lowerBound))
-        let suffixLen = min(context, text.distance(from: range.upperBound, to: text.endIndex))
-        let start = text.index(range.lowerBound, offsetBy: -prefixLen)
-        let end = text.index(range.upperBound, offsetBy: suffixLen)
-        var snippet = String(text[start..<end])
-        if start > text.startIndex { snippet = "…" + snippet }
-        if end < text.endIndex { snippet += "…" }
-        return snippet
-    }
-
-    private func htmlToPlainText(_ html: String) -> String {
-        // Fast path: no tags
-        guard html.contains("<") else { return decodeHTMLEntities(html) }
-        // Remove script/style blocks to avoid noisy text
-        let withoutScript = html.replacingOccurrences(of: "<script[\\s\\S]*?>[\\s\\S]*?<\\/script>", with: " ", options: [.regularExpression, .caseInsensitive])
-        let withoutStyle = withoutScript.replacingOccurrences(of: "<style[\\s\\S]*?>[\\s\\S]*?<\\/style>", with: " ", options: [.regularExpression, .caseInsensitive])
-        // Strip all tags
-        let noTags = withoutStyle.replacingOccurrences(of: "<[^>]+>", with: " ", options: [.regularExpression, .caseInsensitive])
-        // Collapse whitespace
-        let collapsed = noTags.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
-        return decodeHTMLEntities(collapsed)
-    }
-
-    private func decodeHTMLEntities(_ text: String) -> String {
-        var s = text
-        // Common entities
-        let entities: [String: String] = [
-            "&nbsp;": " ",
-            "&amp;": "&",
-            "&quot;": "\"",
-            "&#39;": "'",
-            "&apos;": "'",
-            "&lt;": "<",
-            "&gt;": ">"
-        ]
-        for (k, v) in entities { s = s.replacingOccurrences(of: k, with: v) }
-        return s
-    }
 
     // Initializer with binding
     init(selectedPodcast: Binding<PodcastFeed?>) {
@@ -365,28 +200,15 @@ struct PodcastListView: View {
                            // FORCE UI REFRESH: Hidden view that observes uiRefreshTrigger
                            Text("").hidden().id(uiRefreshObserver)
                            
-                           // Custom Search Bar (when presented)
-                           if isSearchPresented {
-                               CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search episodes in saved podcasts")
-                                   .padding(.horizontal, 16)
-                                   .padding(.top, -10)
-                                   .padding(.bottom, 12)
-                                   .transition(.move(edge: .top).combined(with: .opacity))
-                           }
-                           
                            // Only show instruction text when there are no podcasts at all
                            if viewModel.podcastFeeds.isEmpty {
                                instructionText
                            }
                            
-                           if !searchText.isEmpty {
-                               episodeResultsList
-                           } else {
-                               // Podcast progress banner - shows sync operations in real-time (including episode sync)
-                               MainPodcastListBanner()
-                               
-                               podcastList
-                           }
+                           // Podcast progress banner - shows sync operations in real-time (including episode sync)
+                           MainPodcastListBanner()
+                           
+                           podcastList
                        }
                        .contentShape(Rectangle())
                        .simultaneousGesture(
@@ -412,58 +234,26 @@ struct PodcastListView: View {
                .toolbar {
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
                        if !isEditing && selectedPodcast == nil {
-                           Group {
-                               if isSearchPresented {
-                                   // Cancel button when search is active
-                                   Button("Cancel") {
-                                       withAnimation(.easeInOut(duration: 0.3)) {
-                                           isSearchPresented = false
-                                           searchText = ""
-                                           UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                       }
-                                   }
-                                   .foregroundColor(.blue)
-                                   .padding(.horizontal, 16)
-                                   .padding(.vertical, 8)
-                                   .background(
-                                       Capsule()
-                                           .fill(Color.clear)
-                                   )
-                               } else {
-                                   HStack(spacing: 8) {
-                                       // Search button
-                                       Button(action: {
-                                           withAnimation(.easeInOut(duration: 0.3)) {
-                                               isSearchPresented = true
-                                           }
-                                       }) {
-                                           Image(systemName: "magnifyingglass")
-                                               .foregroundColor(.adaptivePrimaryText)
-                                               .font(.system(size: 16, weight: .medium))
-                                               .frame(width: 32, height: 32)
-                                       }
-                                       
-                                       // Sort button
-                                       Button(action: {
-                                           // Show confirmation alert for podcast sorting
-                                           alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
-                                               viewModel.sortFeedsAlphabetically()
-                                           })
-                                       }) {
-                                           Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                               .foregroundColor(.adaptivePrimaryText)
-                                               .font(.system(size: 16, weight: .medium))
-                                               .frame(width: 32, height: 32)
-                                       }
-                                       
-                                       // Plus button
-                                       Button(action: { showingSearchPodcasts = true }) {
-                                           Image(systemName: "plus")
-                                               .foregroundColor(.adaptivePrimaryText)
-                                               .font(.system(size: 16, weight: .medium))
-                                               .frame(width: 32, height: 32)
-                                       }
-                                   }
+                           HStack(spacing: 8) {
+                               // Sort button
+                               Button(action: {
+                                   // Show confirmation alert for podcast sorting
+                                   alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
+                                       viewModel.sortFeedsAlphabetically()
+                                   })
+                               }) {
+                                   Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                       .foregroundColor(.adaptivePrimaryText)
+                                       .font(.system(size: 16, weight: .medium))
+                                       .frame(width: 32, height: 32)
+                               }
+                               
+                               // Plus button
+                               Button(action: { showingSearchPodcasts = true }) {
+                                   Image(systemName: "plus")
+                                       .foregroundColor(.adaptivePrimaryText)
+                                       .font(.system(size: 16, weight: .medium))
+                                       .frame(width: 32, height: 32)
                                }
                            }
                        }
@@ -1322,7 +1112,6 @@ struct PodcastListView: View {
         
         // Initialize filtered caches
         cachedFilteredPodcasts = viewModel.podcastFeeds
-        lastSearchText = searchText
         lastPodcastFeedsCount = viewModel.podcastFeeds.count
         filteredFeedOrderCache = viewModel.podcastFeedOrder
     }
@@ -1339,8 +1128,7 @@ struct PodcastListView: View {
     // PERFORMANCE: Get filtered feed order without expensive nested lookups
     private func getFilteredFeedOrder() -> [String] {
         // SORTING FIX: Invalidate cache when podcastFeedOrder changes to ensure sorting updates are visible
-        if searchText == lastSearchText &&
-           viewModel.podcastFeeds.count == lastPodcastFeedsCount &&
+        if viewModel.podcastFeeds.count == lastPodcastFeedsCount &&
            filteredFeedOrderCache.count == viewModel.podcastFeedOrder.count {
             
             // Additional check: verify the order hasn't changed by checking first few items
@@ -1359,7 +1147,6 @@ struct PodcastListView: View {
         // Cache the result
         DispatchQueue.main.async {
             self.filteredFeedOrderCache = result
-            self.lastSearchText = self.searchText
             self.lastPodcastFeedsCount = self.viewModel.podcastFeeds.count
         }
         
@@ -1368,31 +1155,13 @@ struct PodcastListView: View {
     
     // PERFORMANCE: Optimized memoized filtered podcasts
     private var filteredPodcasts: [PodcastFeed] {
-        // Use cached result if search text and podcast count haven't changed
-        if searchText == lastSearchText && viewModel.podcastFeeds.count == lastPodcastFeedsCount {
+        // Use cached result if podcast count hasn't changed
+        if viewModel.podcastFeeds.count == lastPodcastFeedsCount {
             return cachedFilteredPodcasts
         }
         
-        // Update cache
-        let result: [PodcastFeed]
-        if searchText.isEmpty {
-            result = viewModel.podcastFeeds
-        } else {
-            let searchLower = searchText.lowercased()
-            result = viewModel.podcastFeeds.filter { feed in
-                feed.title.lowercased().contains(searchLower) ||
-                (feed.descriptionText?.lowercased().contains(searchLower) ?? false)
-            }
-        }
-        
-        // Cache the result
-        DispatchQueue.main.async {
-            self.cachedFilteredPodcasts = result
-            self.lastSearchText = self.searchText
-            self.lastPodcastFeedsCount = self.viewModel.podcastFeeds.count
-        }
-        
-        return result
+        // Return all feeds (no global search anymore)
+        return viewModel.podcastFeeds
     }
     
     // MARK: - Auto-focus on newly added podcast
@@ -3158,6 +2927,10 @@ struct PodcastPlayerView: View {
     @State private var showSuccessToast = false
     @State private var successMessage = ""
     
+    // Search state
+    @State private var searchText = ""
+    @State private var isSearchPresented = false
+    
     // MARK: - Bindings
     @Binding var selectedPodcast: PodcastFeed?
     @Binding var episodeToScrollTo: PodcastEpisode?
@@ -3177,13 +2950,28 @@ struct PodcastPlayerView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                // About section - displayed above episodes
-                aboutSection
+                // Search Bar (when presented)
+                if isSearchPresented {
+                    CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search episodes in \(feed.title)")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 
-                episodeFilterTabs
+                // About section - displayed above episodes
+                if !isSearchPresented {
+                    aboutSection
+                }
+                
+                if !isSearchPresented {
+                    episodeFilterTabs
+                }
                 
                 // Podcast progress banner - shows sync operations in real-time
-                UnifiedPodcastProgressBanner()
+                if !isSearchPresented {
+                    UnifiedPodcastProgressBanner()
+                }
                 
                 episodeListContent
             }
@@ -3227,6 +3015,30 @@ struct PodcastPlayerView: View {
                 })
                 .allowsHitTesting(true) // Ensure button is always tappable
                 .zIndex(1000) // Ensure button is above all other content
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if isSearchPresented {
+                    Button("Cancel") {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isSearchPresented = false
+                            searchText = ""
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                    }
+                    .foregroundColor(.blue)
+                } else {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isSearchPresented = true
+                        }
+                    }) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.adaptivePrimaryText)
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(width: 32, height: 32)
+                    }
+                }
             }
         }
                 .onAppear(perform: handleOnAppear)
@@ -3356,7 +3168,10 @@ struct PodcastPlayerView: View {
     
     private var episodeListContent: some View {
         Group {
-            if viewModel.isLoadingEpisodes && viewModel.currentEpisodes.isEmpty {
+            if isSearchPresented && !searchText.isEmpty {
+                // Show search results list
+                searchResultsList
+            } else if viewModel.isLoadingEpisodes && viewModel.currentEpisodes.isEmpty {
                 VStack(spacing: 16) {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .blue))
@@ -4057,6 +3872,205 @@ struct PodcastPlayerView: View {
                 print("🔄 BUTTON DEBUG 2: Playing different episode normally: \(episode.title)")
                 podcastPlayer.playEpisode(episode, feed: feed)
             }
+        }
+    }
+    
+    // MARK: - Search Results List
+    
+    private var searchResultsList: some View {
+        let allEpisodes = viewModel.selectedFeedId == feed.id ? viewModel.currentEpisodes : []
+        let trimmedQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let results = allEpisodes.filter { episode in
+            if episode.title.localizedCaseInsensitiveContains(trimmedQuery) {
+                return true
+            }
+            if htmlToPlainText(episode.descriptionText).localizedCaseInsensitiveContains(trimmedQuery) {
+                return true
+            }
+            if let notesContent = episode.notes?.content {
+                let plain = htmlToPlainText(notesContent)
+                if plain.localizedCaseInsensitiveContains(trimmedQuery) {
+                    return true
+                }
+            }
+            return false
+        }
+        
+        return Group {
+            if results.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 48))
+                        .foregroundColor(.secondary)
+                    Text("No matching episodes")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text("Try a different search term")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 100)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(results, id: \.id) { episode in
+                            searchResultRow(episode: episode, query: trimmedQuery)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    playEpisode(episode)
+                                }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func searchResultRow(episode: PodcastEpisode, query: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Episode title with highlighting
+            highlightedText(episode.title, query: query)
+                .font(.headline)
+                .foregroundColor(.primary)
+                .lineLimit(2)
+            
+            // Snippet from description or notes
+            if let snippetText = snippet(for: episode, query: query) {
+                highlightedText(snippetText, query: query)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(3)
+            }
+            
+            // Episode metadata
+            HStack(spacing: 8) {
+                Text(formatDate(episode.publicationDate))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                if episode.duration > 0 {
+                    Text("•")
+                        .foregroundColor(.secondary)
+                    Text(formatDuration(episode.duration))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(Color(UIColor.systemBackground))
+        .overlay(
+            Rectangle()
+                .fill(Color.adaptiveSeparator)
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+    
+    // MARK: - Search Helper Methods
+    
+    private func highlightedText(_ text: String, query: String) -> Text {
+        guard !query.isEmpty else { return Text(text) }
+        
+        let parts = text.components(separatedBy: query)
+        if parts.count == 1 {
+            // Try case-insensitive
+            let lowerText = text.lowercased()
+            let lowerQuery = query.lowercased()
+            if let range = lowerText.range(of: lowerQuery) {
+                let beforeMatch = String(text[..<range.lowerBound])
+                let match = String(text[range])
+                let afterMatch = String(text[range.upperBound...])
+                return Text(beforeMatch) + Text(match).foregroundColor(.blue).bold() + highlightedText(afterMatch, query: query)
+            }
+            return Text(text)
+        }
+        
+        var result = Text("")
+        for (index, part) in parts.enumerated() {
+            result = result + Text(part)
+            if index < parts.count - 1 {
+                result = result + Text(query).foregroundColor(.blue).bold()
+            }
+        }
+        return result
+    }
+    
+    private func snippet(for episode: PodcastEpisode, query: String) -> String? {
+        let lowerQuery = query.lowercased()
+        
+        // Try description first
+        let descPlain = htmlToPlainText(episode.descriptionText)
+        if let range = descPlain.lowercased().range(of: lowerQuery) {
+            return extractSnippet(from: descPlain, around: range)
+        }
+        
+        // Try notes
+        if let notesContent = episode.notes?.content {
+            let notesPlain = htmlToPlainText(notesContent)
+            if let range = notesPlain.lowercased().range(of: lowerQuery) {
+                return extractSnippet(from: notesPlain, around: range)
+            }
+        }
+        
+        // Fallback to start of description
+        if !descPlain.isEmpty {
+            return String(descPlain.prefix(150))
+        }
+        
+        return nil
+    }
+    
+    private func extractSnippet(from text: String, around range: Range<String.Index>) -> String {
+        let snippetLength = 150
+        let start = text.index(range.lowerBound, offsetBy: -snippetLength / 2, limitedBy: text.startIndex) ?? text.startIndex
+        let end = text.index(range.upperBound, offsetBy: snippetLength / 2, limitedBy: text.endIndex) ?? text.endIndex
+        var snippet = String(text[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if start != text.startIndex { snippet = "..." + snippet }
+        if end != text.endIndex { snippet = snippet + "..." }
+        return snippet
+    }
+    
+    private func htmlToPlainText(_ html: String) -> String {
+        // Fast path: no tags
+        guard html.contains("<") else { return decodeHTMLEntities(html) }
+        // Remove script/style blocks to avoid noisy text
+        let withoutScript = html.replacingOccurrences(of: "<script[\\s\\S]*?>[\\s\\S]*?<\\/script>", with: " ", options: [.regularExpression, .caseInsensitive])
+        let withoutStyle = withoutScript.replacingOccurrences(of: "<style[\\s\\S]*?>[\\s\\S]*?<\\/style>", with: " ", options: [.regularExpression, .caseInsensitive])
+        // Strip all tags
+        let noTags = withoutStyle.replacingOccurrences(of: "<[^>]+>", with: " ", options: [.regularExpression, .caseInsensitive])
+        // Collapse whitespace
+        let collapsed = noTags.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+        return decodeHTMLEntities(collapsed)
+    }
+
+    private func decodeHTMLEntities(_ text: String) -> String {
+        var s = text
+        // Common entities
+        let entities: [String: String] = [
+            "&nbsp;": " ",
+            "&amp;": "&",
+            "&quot;": "\"",
+            "&#39;": "'",
+            "&apos;": "'",
+            "&lt;": "<",
+            "&gt;": ">"
+        ]
+        for (k, v) in entities { s = s.replacingOccurrences(of: k, with: v) }
+        return s
+    }
+    
+    private func formatDuration(_ duration: Double) -> String {
+        let hours = Int(duration) / 3600
+        let minutes = (Int(duration) % 3600) / 60
+        let seconds = Int(duration) % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
         }
     }
 }

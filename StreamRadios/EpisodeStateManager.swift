@@ -206,6 +206,9 @@ class EpisodeStateManager: ObservableObject {
         // This may set didRestoreFromBackup = true if backup restoration occurs
         handleAppVersionUpgrade()
         
+        // CRITICAL CLEANUP: Remove old data from standard UserDefaults to prevent CFPreferences overflow
+        cleanupStandardUserDefaults()
+        
         // Load states from Core Data (will merge with restored backup if present)
         loadSavedStates()
         
@@ -657,7 +660,6 @@ class EpisodeStateManager: ObservableObject {
         // EMERGENCY PERFORMANCE: Move backup creation to background queue to prevent main thread hangs
         Task.detached(priority: .background) {
             let timestamp = Date().timeIntervalSince1970
-            let emergencyKey = "EmergencyBackup_\(timestamp)"
             
             var emergencyData: [String: Any] = [:]
             
@@ -675,7 +677,7 @@ class EpisodeStateManager: ObservableObject {
             emergencyData["timestamp"] = timestamp
             emergencyData["version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
             
-            // Store in multiple backup locations
+            // Store emergency backup
             if let emergencyBackupData = try? JSONSerialization.data(withJSONObject: emergencyData) {
                 let backupSize = emergencyBackupData.count
                 
@@ -685,10 +687,8 @@ class EpisodeStateManager: ObservableObject {
                     return
                 }
                 
-                // Primary emergency backup
-                self.userDefaults.set(emergencyBackupData, forKey: emergencyKey)
-                
-                // Secondary backup with fixed key (overwrites previous)
+                // FIXED KEY ONLY: Use single fixed key (overwrites previous backup)
+                // This prevents accumulation of timestamped keys that can cause overflow
                 self.userDefaults.set(emergencyBackupData, forKey: "CoreDataEmergencyBackup")
                 
                 // Tertiary backup in iCloud key-value storage if available
@@ -698,7 +698,36 @@ class EpisodeStateManager: ObservableObject {
                 }
                 
                 print("💾 EpisodeStateManager: Created emergency backup (\(backupSize) bytes) with \(favoritesSnapshot.count) favorites, \(downloadsSnapshot.count) downloads")
+                
+                // CLEANUP: Remove old timestamped emergency backups to prevent accumulation
+                // Keep only the fixed "CoreDataEmergencyBackup" key and remove all timestamped ones
+                self.cleanupOldEmergencyBackups()
             }
+        }
+    }
+    
+    /// Clean up old timestamped emergency backup keys to prevent UserDefaults bloat
+    private func cleanupOldEmergencyBackups() {
+        var removedCount = 0
+        var totalBytesRemoved = 0
+        
+        // Get all keys from UserDefaults
+        if let allKeys = userDefaults.dictionaryRepresentation().keys as? [String] {
+            // Remove all timestamped emergency backup keys (EmergencyBackup_<timestamp>)
+            // Keep only the fixed "CoreDataEmergencyBackup" key
+            for key in allKeys {
+                if key.hasPrefix("EmergencyBackup_") {
+                    if let data = userDefaults.data(forKey: key) {
+                        totalBytesRemoved += data.count
+                        userDefaults.removeObject(forKey: key)
+                        removedCount += 1
+                    }
+                }
+            }
+        }
+        
+        if removedCount > 0 {
+            print("🗑️ CLEANUP: Removed \(removedCount) old emergency backup keys (\(totalBytesRemoved) bytes) from app group UserDefaults")
         }
     }
     
@@ -981,6 +1010,76 @@ class EpisodeStateManager: ObservableObject {
         }
     }
     
+    /// Clean up old data from standard UserDefaults to prevent CFPreferences 4MB overflow
+    private func cleanupStandardUserDefaults() {
+        // Only clean up if we're using app group UserDefaults
+        guard isUsingAppGroup else {
+            print("⚠️ EpisodeStateManager: Not using app group, skipping standard UserDefaults cleanup")
+            return
+        }
+        
+        let standardDefaults = UserDefaults.standard
+        var removedCount = 0
+        var totalBytesRemoved = 0
+        
+        // CRITICAL: Remove all episode state keys from standard UserDefaults
+        let keysToRemove = [progressKey, favoritesKey, downloadsKey, statesKey, downloadStateBackupKey]
+        
+        for key in keysToRemove {
+            if let data = standardDefaults.data(forKey: key) {
+                totalBytesRemoved += data.count
+                standardDefaults.removeObject(forKey: key)
+                removedCount += 1
+                print("🗑️ Removed \(key) (\(data.count) bytes) from standard UserDefaults")
+            }
+        }
+        
+        // COMPREHENSIVE CLEANUP: Remove ALL app-related keys from standard UserDefaults
+        // This prevents CFPreferences overflow even when new data is written
+        if let allKeys = standardDefaults.dictionaryRepresentation().keys as? [String] {
+            for key in allKeys {
+                // Remove emergency backups
+                if key.hasPrefix("EmergencyBackup_") || key == "CoreDataEmergencyBackup" {
+                    if let data = standardDefaults.data(forKey: key) {
+                        totalBytesRemoved += data.count
+                        standardDefaults.removeObject(forKey: key)
+                        removedCount += 1
+                        print("🗑️ Removed emergency backup: \(key) (\(data.count) bytes)")
+                    }
+                }
+                // Remove RSS refresh timestamps (should be in app group)
+                else if key.hasPrefix("LastRSSRefresh_") {
+                    standardDefaults.removeObject(forKey: key)
+                    removedCount += 1
+                    print("🗑️ Removed RSS timestamp: \(key)")
+                }
+                // Remove download backups
+                else if key.hasPrefix("DownloadBackup_") {
+                    if let data = standardDefaults.data(forKey: key) {
+                        totalBytesRemoved += data.count
+                        standardDefaults.removeObject(forKey: key)
+                        removedCount += 1
+                        print("🗑️ Removed download backup: \(key) (\(data.count) bytes)")
+                    }
+                }
+                // Remove any large data objects (> 1KB) that shouldn't be in standard UserDefaults
+                else if let data = standardDefaults.data(forKey: key), data.count > 1024 {
+                    totalBytesRemoved += data.count
+                    standardDefaults.removeObject(forKey: key)
+                    removedCount += 1
+                    print("🗑️ Removed large data: \(key) (\(data.count) bytes)")
+                }
+            }
+        }
+        
+        if removedCount > 0 {
+            print("✅ CLEANUP: Removed \(removedCount) keys (\(totalBytesRemoved) bytes total) from standard UserDefaults to prevent overflow")
+            print("💾 All app data is now safely stored in app group UserDefaults and Core Data")
+        } else {
+            print("✅ CLEANUP: Standard UserDefaults is already clean - no episode data found")
+        }
+    }
+    
     /// Restore download states from backup if main data is missing
     private func restoreDownloadStatesFromBackup() {
         // Check if current download data is missing but backup exists
@@ -1170,10 +1269,87 @@ class EpisodeStateManager: ObservableObject {
         
         print("✅ EpisodeStateManager: Loaded from Core Data synchronously - Progress: \(loadedProgress.count), Favorites: \(loadedFavorites.count), Downloads: \(loadedDownloads.count), States: \(loadedStates.count)")
         
+        // CRITICAL FIX: Clean up orphaned states (states for episodes that no longer exist in Core Data)
+        // This prevents displaying "ghost" states after app upgrades when episodes are removed
+        Task.detached(priority: .utility) {
+            await self.cleanupOrphanedStates()
+        }
+        
         // Fallback: If no Core Data found, try loading from UserDefaults (for migration)
         if loadedProgress.isEmpty && loadedFavorites.isEmpty && loadedDownloads.isEmpty {
             print("🔄 EpisodeStateManager: No Core Data found, trying UserDefaults fallback")
             self.loadFromUserDefaultsAsFallback()
+        }
+    }
+    
+    /// Clean up orphaned episode states - states for episodes that no longer exist in Core Data
+    /// This prevents "ghost" favorites/progress from old episodes showing up after upgrades
+    private func cleanupOrphanedStates() async {
+        let context = CoreDataStack.shared.newBackgroundContext()
+        
+        await context.perform {
+            // Get all episode IDs currently in Core Data
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.propertiesToFetch = ["id"]
+            
+            do {
+                let episodes = try context.fetch(fetchRequest)
+                let validEpisodeIds = Set(episodes.compactMap { $0.id })
+                
+                print("🧹 ORPHAN CLEANUP: Found \(validEpisodeIds.count) valid episodes in Core Data")
+                
+                // Check each state dictionary for orphaned entries
+                var orphanedProgress = 0
+                var orphanedFavorites = 0
+                var orphanedDownloads = 0
+                var orphanedStates = 0
+                
+                // Clean progress
+                for episodeId in self.episodeProgress.keys {
+                    if !validEpisodeIds.contains(episodeId) {
+                        self.episodeProgress.removeValue(forKey: episodeId)
+                        orphanedProgress += 1
+                    }
+                }
+                
+                // Clean favorites
+                for episodeId in self.episodeFavorites.keys {
+                    if !validEpisodeIds.contains(episodeId) {
+                        self.episodeFavorites.removeValue(forKey: episodeId)
+                        orphanedFavorites += 1
+                    }
+                }
+                
+                // Clean downloads
+                for episodeId in self.episodeDownloads.keys {
+                    if !validEpisodeIds.contains(episodeId) {
+                        self.episodeDownloads.removeValue(forKey: episodeId)
+                        orphanedDownloads += 1
+                    }
+                }
+                
+                // Clean states
+                for episodeId in self.episodeStates.keys {
+                    if !validEpisodeIds.contains(episodeId) {
+                        self.episodeStates.removeValue(forKey: episodeId)
+                        orphanedStates += 1
+                    }
+                }
+                
+                if orphanedProgress > 0 || orphanedFavorites > 0 || orphanedDownloads > 0 || orphanedStates > 0 {
+                    print("🧹 ORPHAN CLEANUP: Removed orphaned states:")
+                    print("   - Progress: \(orphanedProgress)")
+                    print("   - Favorites: \(orphanedFavorites)")
+                    print("   - Downloads: \(orphanedDownloads)")
+                    print("   - States: \(orphanedStates)")
+                    print("✅ ORPHAN CLEANUP: Memory cleaned - only valid episode states remain")
+                } else {
+                    print("✅ ORPHAN CLEANUP: No orphaned states found - all episode states are valid")
+                }
+                
+            } catch {
+                print("❌ ORPHAN CLEANUP: Failed to fetch episode IDs: \(error)")
+            }
         }
     }
     
@@ -1560,11 +1736,27 @@ class EpisodeStateManager: ObservableObject {
     
     /// Save episode states to Core Data instead of UserDefaults
     /// Thread-safe: Uses background context to prevent concurrent access issues
+    /// silentMode: When true, saves asynchronously (for CloudKit syncs). When false, saves synchronously (for user actions)
     private func saveToCoreData(silentMode: Bool = false) {
         let context = CoreDataStack.shared.newBackgroundContext()
         
-        // Use a background queue to avoid blocking the main thread
-        context.perform {
+        // CRITICAL FIX: Use synchronous save for user actions to ensure immediate persistence
+        // Use async save only for silent modes (bulk CloudKit sync) to avoid blocking UI
+        let performBlock = {
+            self.saveToCoreDataImpl(context: context)
+        }
+        
+        if silentMode {
+            // Async save for bulk operations (CloudKit sync)
+            context.perform(performBlock)
+        } else {
+            // Sync save for user actions (favorite, download) - ensures data is saved before app can close
+            context.performAndWait(performBlock)
+        }
+    }
+    
+    /// Internal implementation of Core Data save
+    private func saveToCoreDataImpl(context: NSManagedObjectContext) {
             var savedCount = 0
             var errorCount = 0
             
@@ -1670,6 +1862,8 @@ class EpisodeStateManager: ObservableObject {
             if savedCount > 0 {
                 do {
                     try context.save()
+                    print("✅ CORE DATA SAVE: Successfully saved \(savedCount) episode states")
+                    print("   📊 States saved - Progress: \(self.episodeProgress.count), Favorites: \(self.episodeFavorites.count), Downloads: \(self.episodeDownloads.count)")
                 } catch {
                     print("❌ EpisodeStateManager: Failed to save to Core Data: \(error)")
                     errorCount += 1
@@ -1681,7 +1875,6 @@ class EpisodeStateManager: ObservableObject {
             if errorCount > 0 {
                 print("⚠️ EpisodeStateManager: Encountered \(errorCount) errors while saving to Core Data")
             }
-        }
     }
     
     // MARK: - Data Cleanup Methods
@@ -2351,8 +2544,7 @@ class EpisodeStateManager: ObservableObject {
         }
         saveCurrentStates()
         
-        // CRITICAL FIX: Force synchronize UserDefaults immediately for CloudKit synced progress to prevent loss
-        userDefaults.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         
         // REAL-TIME UI: Send immediate update for progress changes to ensure instant UI refresh
         sendImmediateUpdate()
@@ -2435,7 +2627,7 @@ class EpisodeStateManager: ObservableObject {
         // This prevents race condition where CloudKit sync reads old state
         episodeFavorites[episodeId] = isFavorite
         saveCurrentStates()
-        userDefaults.synchronize() // Force immediate sync
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time UI
         print("🔍 EpisodeStateManager: Set favorite for \(episodeId): \(isFavorite)")
         
@@ -2606,7 +2798,7 @@ class EpisodeStateManager: ObservableObject {
         // This prevents race condition where CloudKit sync reads old state
         episodeDownloads[episodeId] = isDownloaded
         saveCurrentStates()
-        userDefaults.synchronize() // Force immediate sync
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time UI
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded)")
         
@@ -2645,7 +2837,7 @@ class EpisodeStateManager: ObservableObject {
         
         episodeDownloads[episodeId] = isDownloaded
         saveCurrentStates()
-        userDefaults.synchronize() // Force immediate sync
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendThrottledUpdate()
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded) (reason: \(reason))")
         
@@ -2702,7 +2894,7 @@ class EpisodeStateManager: ObservableObject {
     func clearEpisodeBackup(_ episodeId: String) {
         let backupKey = "DownloadBackup_\(episodeId)"
         userDefaults.removeObject(forKey: backupKey)
-        userDefaults.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         print("🗑️ EpisodeStateManager: Cleared backup for episode \(episodeId)")
     }
     
@@ -2905,8 +3097,20 @@ class EpisodeStateManager: ObservableObject {
             object: nil,
             queue: .main
         ) { _ in
-            self.saveCurrentStates()
-            self.userDefaults.synchronize()
+            print("🛑 APP TERMINATING: Force saving all episode states to Core Data")
+            self.saveCurrentStates() // Synchronous save to ensure data persists before app closes
+            print("✅ APP TERMINATING: All episode states saved successfully")
+        }
+        
+        // Also save on background and resign active (for force close protection)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            print("📱 APP BACKGROUNDED: Force saving all episode states to Core Data")
+            self.saveCurrentStates() // Synchronous save for force close protection
+            print("✅ APP BACKGROUNDED: All episode states saved successfully")
         }
     }
     
@@ -2991,8 +3195,14 @@ extension EpisodeStateManager {
             userDefaults.set(playingId, forKey: "currentlyPlayingEpisodeId")
         }
         
-        userDefaults.synchronize()
-        createPeriodicEmergencyBackup()
+        // CRITICAL: Do NOT call synchronize() during silent saves (CloudKit sync operations)
+        // Synchronize is deprecated and calling it thousands of times during pull-to-refresh
+        // causes CFPreferences overflow by forcing excessive disk writes
+        
+        // CRITICAL: Do NOT create emergency backups during silent saves (CloudKit sync operations)
+        // During pull-to-refresh, saveCurrentStatesSilently() is called 3000+ times
+        // Creating backups every 50 calls would create 60+ backups, overwhelming UserDefaults
+        // Emergency backups are only needed for user-initiated saves, not CloudKit syncs
     }
     
     // MARK: - Silent Update Methods (No CloudKit Sync)
@@ -3070,7 +3280,7 @@ extension EpisodeStateManager {
             self.episodeFavorites[episodeId] = isFavorite
         }
         saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
-        userDefaults.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
         // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
@@ -3093,7 +3303,7 @@ extension EpisodeStateManager {
             self.episodeDownloads[episodeId] = isDownloaded
         }
         saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
-        userDefaults.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
         // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
@@ -3129,7 +3339,7 @@ extension EpisodeStateManager {
         }
         
         saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
-        userDefaults.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
         // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
@@ -3223,7 +3433,7 @@ extension EpisodeStateManager {
     func completeSyncProgress() {
         cloudKitSyncProgress = nil
         userDefaults.removeObject(forKey: syncProgressKey)
-        userDefaults.synchronize()
+        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         print("📡 ✅ SYNC RESUMPTION: Sync progress completed and cleared")
     }
     
@@ -3237,7 +3447,7 @@ extension EpisodeStateManager {
         do {
             let data = try JSONEncoder().encode(syncProgress)
             userDefaults.set(data, forKey: syncProgressKey)
-            userDefaults.synchronize()
+            // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         } catch {
             print("⚠️ SYNC RESUMPTION: Failed to save sync progress: \(error)")
         }

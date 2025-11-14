@@ -2476,7 +2476,13 @@ class PodcastViewModel: ObservableObject {
             await MainActor.run {
                 let currentTime = Date().timeIntervalSince1970
                 let lastRefreshKey = "LastRSSRefresh_\(feedId)"
-                UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+                // Use app group UserDefaults to prevent CFPreferences overflow in standard domain
+                if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
+                    appGroupDefaults.set(currentTime, forKey: lastRefreshKey)
+                } else {
+                    // Fallback to standard UserDefaults if app group not available
+                    UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+                }
             }
             
         } catch {
@@ -3848,6 +3854,75 @@ class PodcastViewModel: ObservableObject {
                                  EpisodeStateManager.shared.episodeDownloads.count > 0) {
             print("⚠️ STATES MISMATCH: EpisodeStateManager has states but none found in episodes")
             EpisodeStateManager.shared.diagnoseEpisodeStates(for: episodes.map { $0.id })
+        }
+        
+        // CRITICAL DIAGNOSTIC: Log episode IDs that have states in THIS feed
+        if episodes.count > 0 {
+            // Get IDs from THIS feed that have states
+            let episodesWithStatesInThisFeed = episodesWithFreshStates.filter { 
+                $0.state.progress > 0 || $0.state.isFavorite || $0.state.isDownloaded || $0.state.isPlayed 
+            }
+            
+            if !episodesWithStatesInThisFeed.isEmpty {
+                let stateEpisodeIds = episodesWithStatesInThisFeed.prefix(5).map { $0.id }
+                print("📊 EPISODE STATE BREAKDOWN for \(feedId):")
+                print("   Episodes with states in this feed: \(episodesWithStatesInThisFeed.count)")
+                print("   Sample IDs with states: \(stateEpisodeIds)")
+                
+                // CRITICAL: Separate progress from other states
+                let episodesWithProgress = episodesWithStatesInThisFeed.filter { $0.state.progress > 0 }
+                let episodesWithFavorites = episodesWithStatesInThisFeed.filter { $0.state.isFavorite }
+                print("   📊 Progress breakdown: \(episodesWithProgress.count) episodes with progress")
+                print("   ❤️ Favorites breakdown: \(episodesWithFavorites.count) episodes marked as favorite")
+                
+                // Show what states they have
+                for episode in episodesWithStatesInThisFeed.prefix(3) {
+                    var stateTypes: [String] = []
+                    if episode.state.progress > 0 { stateTypes.append("Progress: \(Int(episode.state.progress * 100))%") }
+                    if episode.state.isFavorite { stateTypes.append("Favorite") }
+                    if episode.state.isDownloaded { stateTypes.append("Downloaded") }
+                    if episode.state.isPlayed { stateTypes.append("Played") }
+                    print("   - \(episode.id.prefix(8)): \(stateTypes.joined(separator: ", "))")
+                }
+                
+                // CRITICAL DIAGNOSTIC: Check if progress is in EpisodeStateManager but not applied
+                if episodesWithProgress.count < EpisodeStateManager.shared.episodeProgress.count {
+                    print("⚠️ PROGRESS MISMATCH: EpisodeStateManager has \(EpisodeStateManager.shared.episodeProgress.count) progress entries")
+                    print("   But only \(episodesWithProgress.count) episodes in this feed have progress applied")
+                    
+                    // Show which episode IDs in EpisodeStateManager have progress
+                    let progressEpisodeIds = Array(EpisodeStateManager.shared.episodeProgress.keys.prefix(5))
+                    print("   📋 Episode IDs with progress in EpisodeStateManager:")
+                    for episodeId in progressEpisodeIds {
+                        let progress = EpisodeStateManager.shared.episodeProgress[episodeId] ?? 0
+                        let isInThisFeed = episodes.contains { $0.id == episodeId }
+                        if isInThisFeed {
+                            print("      ✅ \(episodeId.prefix(30)): \(Int(progress * 100))% (IN THIS FEED)")
+                        } else {
+                            print("      ❌ \(episodeId.prefix(30)): \(Int(progress * 100))% (different feed)")
+                        }
+                    }
+                    
+                    // Check if ANY episodes in THIS feed should have progress
+                    var foundMissedProgress = false
+                    for episode in episodes.prefix(50) {
+                        let managerProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                        if managerProgress > 0 && episode.state.progress == 0 {
+                            print("   🔴 MISSED PROGRESS: Episode \(episode.id.prefix(30)) has \(Int(managerProgress * 100))% in manager but 0% in episode")
+                            foundMissedProgress = true
+                        }
+                    }
+                    
+                    if !foundMissedProgress {
+                        print("   ℹ️ None of the progress entries belong to THIS feed - they're for other feeds")
+                    }
+                }
+            } else {
+                print("📊 EPISODE STATE BREAKDOWN for \(feedId):")
+                print("   No episodes with states found in this feed")
+                print("   Total favorites in memory: \(EpisodeStateManager.shared.episodeFavorites.count)")
+                print("   Total progress in memory: \(EpisodeStateManager.shared.episodeProgress.count)")
+            }
         }
         
         // CRITICAL FIX: Sync episode states from EpisodeStateManager to Core Data
