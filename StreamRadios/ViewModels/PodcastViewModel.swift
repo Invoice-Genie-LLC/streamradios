@@ -459,6 +459,7 @@ class PodcastViewModel: ObservableObject {
     // 🛡️ RAPID ACCESS CACHE: Prevent contamination during rapid UI getter calls
     private var _episodeCache: [PodcastEpisode]?
     private var _episodeCacheFeedId: String?
+    private var _episodeCacheTab: Int?
     private var _feedTransitionInProgress: Bool = false
     
     // PERFORMANCE: Lazy loading support for large feeds
@@ -572,18 +573,25 @@ class PodcastViewModel: ObservableObject {
                 }
             }
             
-            // Return cached episodes if available and valid
-            if let cached = _episodeCache, _episodeCacheFeedId == feedId {
+            // Return cached episodes if available and valid for current feed AND tab
+            if let cached = _episodeCache, _episodeCacheFeedId == feedId, _episodeCacheTab == currentTab {
                 // Double-verify cache integrity before returning
                 let cleanCached = cached.filter { $0.feedId == feedId }
                 if cleanCached.count != cached.count {
                     print("🚨 EPISODE GETTER: Cache contaminated, clearing and reloading")
                     _episodeCache = nil
                     _episodeCacheFeedId = nil
+                    _episodeCacheTab = nil
                     // Fall through to reload
                 } else {
                     return cached
                 }
+            } else if _episodeCacheFeedId == feedId && _episodeCacheTab != currentTab {
+                // Tab changed - invalidate cache
+                print("🔄 EPISODE GETTER: Tab changed (\(_episodeCacheTab ?? -1) -> \(currentTab)), clearing cache")
+                _episodeCache = nil
+                _episodeCacheFeedId = nil
+                _episodeCacheTab = nil
             }
             
             // Ensure feed is registered before getting episodes
@@ -606,10 +614,22 @@ class PodcastViewModel: ObservableObject {
                     feedIsolationManager.replaceEpisodesForFeed(cachedEpisodes, feedId: feedId)
                     // Clear transition flag since we found episodes
                     _feedTransitionInProgress = false
-                    // Cache the result
-                    _episodeCache = cachedEpisodes
+                    
+                    // CRITICAL FIX: Apply current tab filter before returning cached episodes
+                    let filter = EpisodeFilter(rawValue: currentTab) ?? .all
+                    let filteredCached: [PodcastEpisode]
+                    switch filter {
+                    case .currentEpisodes:
+                        filteredCached = cachedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
+                    case .all:
+                        filteredCached = cachedEpisodes
+                    }
+                    
+                    // Cache the filtered result with tab tracking
+                    _episodeCache = filteredCached
                     _episodeCacheFeedId = feedId
-                    return cachedEpisodes
+                    _episodeCacheTab = currentTab
+                    return filteredCached
                 } else {
                     print("🚨 EPISODE GETTER: No episodes in cache for feed \(feedId) - returning empty")
                 }
@@ -660,16 +680,29 @@ class PodcastViewModel: ObservableObject {
                 feedIsolationManager.replaceEpisodesForFeed(deduplicatedEpisodes, feedId: feedId)
             }
             
-            // Cache the deduplicated result
-            _episodeCache = deduplicatedEpisodes
-            _episodeCacheFeedId = feedId
+            // CRITICAL FIX: Apply current tab filter to episodes before returning
+            // This ensures the UI always shows the correct filtered episodes even during scroll/refresh
+            let filter = EpisodeFilter(rawValue: currentTab) ?? .all
+            let finalEpisodes: [PodcastEpisode]
+            switch filter {
+            case .currentEpisodes:
+                finalEpisodes = deduplicatedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
+            case .all:
+                finalEpisodes = deduplicatedEpisodes
+            }
             
-            return deduplicatedEpisodes
+            // Cache the filtered result with tab tracking
+            _episodeCache = finalEpisodes
+            _episodeCacheFeedId = feedId
+            _episodeCacheTab = currentTab
+            
+            return finalEpisodes
         }
         set {
             // Clear cache when episodes are being set
             _episodeCache = nil
             _episodeCacheFeedId = nil
+            _episodeCacheTab = nil
             
             // Always use isolation manager
             guard let feedId = selectedFeedId else { 
@@ -692,11 +725,20 @@ class PodcastViewModel: ObservableObject {
                 // Validate episodes before assigning
                 let validEpisodes = newValue.filter { $0.feedId == feedId }
                 if validEpisodes.count != newValue.count {
+                    print("🚨 SETTER: Filtering out \(newValue.count - validEpisodes.count) episodes that don't belong to feed \(feedId)")
                 }
                 
-                // Let isolation manager handle all validation and assignment
-                feedIsolationManager.replaceEpisodesForFeed(validEpisodes, feedId: feedId)
-                let finalCount = feedIsolationManager.getEpisodesForFeed(feedId).count
+                // CRITICAL FIX: Only update isolation manager if we're setting MORE episodes than currently exist
+                // This prevents filtered subsets from overwriting the full episode list
+                let existingCount = feedIsolationManager.getEpisodesForFeed(feedId).count
+                if validEpisodes.count >= existingCount || existingCount == 0 {
+                    // Let isolation manager handle all validation and assignment
+                    feedIsolationManager.replaceEpisodesForFeed(validEpisodes, feedId: feedId)
+                    let finalCount = feedIsolationManager.getEpisodesForFeed(feedId).count
+                    print("🔄 SETTER: Updated isolation manager with \(finalCount) episodes for feed \(feedId)")
+                } else {
+                    print("⚠️ SETTER: Skipping isolation manager update - trying to set \(validEpisodes.count) episodes but manager has \(existingCount) (likely a filtered subset)")
+                }
             }
         }
     }
@@ -709,7 +751,7 @@ class PodcastViewModel: ObservableObject {
     @Published var error: String?
     @Published var currentTab = 0
     @Published var searchQuery = ""
-    @Published var episodeCounts = (all: 0, favorites: 0, downloads: 0)
+    @Published var episodeCounts = (all: 0, currentEpisodes: 0)
     @Published var uiRefreshTrigger: UUID = UUID() // Force UI refresh trigger
     @Published var showNoEpisodesAlert = false
     @Published var noEpisodesAlertMessage = ""
@@ -805,7 +847,19 @@ class PodcastViewModel: ObservableObject {
     
     // PERFORMANCE OPTIMIZATION: Cache filtered results and counts to avoid re-filtering and re-counting
     private var tabFilterCache: [String: [Int: [PodcastEpisode]]] = [:] // feedId -> [tabIndex -> episodes]
-    private var tabFilterCounts: [String: (all: Int, favorites: Int, downloads: Int)] = [:] // feedId -> episode counts
+    private var tabFilterCounts: [String: (all: Int, currentEpisodes: Int)] = [:] // feedId -> episode counts
+    
+    // MARK: - Helper Functions
+    
+    /// Check if an episode was released in the last 2 weeks
+    private func isEpisodeFromLastTwoWeeks(_ episode: PodcastEpisode) -> Bool {
+        let calendar = Calendar.current
+        let now = Date()
+        guard let twoWeeksAgo = calendar.date(byAdding: .weekOfYear, value: -2, to: now) else {
+            return false
+        }
+        return episode.publicationDate >= twoWeeksAgo
+    }
     
     // CORE DATA + IN-MEMORY CACHE: Track when feeds were last loaded for cache management
     // FeedIsolationManager serves as the in-memory cache
@@ -1873,18 +1927,9 @@ class PodcastViewModel: ObservableObject {
     private func applyTabFiltering(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?) {
         let filter = EpisodeFilter(rawValue: currentTab) ?? .all
         switch filter {
-        case .favorites:
-            // If we're on favorites tab and unfavoriting, remove the episode
-            if let isFavorite = isFavorite, !isFavorite {
-                currentEpisodes.removeAll { $0.id == episodeId }
-                print("🔄 UI UPDATE: Removed unfavorited episode from favorites tab")
-            }
-        case .downloads:
-            // If we're on downloads tab and un-downloading, remove the episode
-            if let isDownloaded = isDownloaded, !isDownloaded {
-                currentEpisodes.removeAll { $0.id == episodeId }
-                print("🔄 UI UPDATE: Removed non-downloaded episode from downloads tab")
-            }
+        case .currentEpisodes:
+            // If we're on current episodes tab (last 2 weeks), no removal logic needed - date doesn't change
+            break
         case .all:
             // All tab shows everything, no filtering needed
             break
@@ -1956,12 +2001,10 @@ class PodcastViewModel: ObservableObject {
         // Apply the current tab's filter
         let filteredEpisodes: [PodcastEpisode]
         switch currentFilter {
+        case .currentEpisodes:
+            filteredEpisodes = allEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
         case .all:
             filteredEpisodes = allEpisodes
-        case .favorites:
-            filteredEpisodes = allEpisodes.filter { $0.state.isFavorite }
-        case .downloads:
-            filteredEpisodes = allEpisodes.filter { $0.state.isDownloaded }
         }
         
         // Update the current episodes with filtered results
@@ -2447,12 +2490,10 @@ class PodcastViewModel: ObservableObject {
                     let filter = EpisodeFilter(rawValue: currentTab) ?? .all
                     let filteredEpisodes: [PodcastEpisode]
                     switch filter {
+                    case .currentEpisodes:
+                        filteredEpisodes = refreshedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
                     case .all:
                         filteredEpisodes = refreshedEpisodes
-                    case .favorites:
-                        filteredEpisodes = refreshedEpisodes.filter { $0.state.isFavorite }
-                    case .downloads:
-                        filteredEpisodes = refreshedEpisodes.filter { $0.state.isDownloaded }
                     }
                     
                     // Update UI with synced episodes
@@ -2460,9 +2501,8 @@ class PodcastViewModel: ObservableObject {
                     
                     // Update episode counts
                     let allCount = refreshedEpisodes.count
-                    let favoritesCount = refreshedEpisodes.filter { $0.state.isFavorite }.count
-                    let downloadsCount = refreshedEpisodes.filter { $0.state.isDownloaded }.count
-                    episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
+                    let currentEpisodesCount = refreshedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }.count
+                    episodeCounts = (all: allCount, currentEpisodes: currentEpisodesCount)
                     
                     // Clear episode cache to force UI refresh with new data
                     _episodeCache = nil
@@ -2537,12 +2577,10 @@ class PodcastViewModel: ObservableObject {
                         let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
                         let filteredEpisodes: [PodcastEpisode]
                         switch filter {
+                        case .currentEpisodes:
+                            filteredEpisodes = updatedCache.filter { isEpisodeFromLastTwoWeeks($0) }
                         case .all:
                             filteredEpisodes = updatedCache
-                        case .favorites:
-                            filteredEpisodes = updatedCache.filter { $0.state.isFavorite }
-                        case .downloads:
-                            filteredEpisodes = updatedCache.filter { $0.state.isDownloaded }
                         }
                         
                         self.currentEpisodes = filteredEpisodes
@@ -2669,10 +2707,8 @@ class PodcastViewModel: ObservableObject {
                     switch filter {
                     case .all:
                         filteredEpisodes = completeEpisodeList
-                    case .favorites:
-                        filteredEpisodes = completeEpisodeList.filter { $0.state.isFavorite }
-                    case .downloads:
-                        filteredEpisodes = completeEpisodeList.filter { $0.state.isDownloaded }
+                    case .currentEpisodes:
+                        filteredEpisodes = completeEpisodeList.filter { isEpisodeFromLastTwoWeeks($0) }
                     }
                     
                     self.currentEpisodes = filteredEpisodes
@@ -3542,7 +3578,16 @@ class PodcastViewModel: ObservableObject {
                     
                     await MainActor.run {
                         if self.selectedFeedId == feedId {
-                            self.currentEpisodes = updatedEpisodes
+                            // Apply current tab filter before updating episodes
+                            let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+                            let filteredEpisodes: [PodcastEpisode]
+                            switch filter {
+                            case .all:
+                                filteredEpisodes = updatedEpisodes
+                            case .currentEpisodes:
+                                filteredEpisodes = updatedEpisodes.filter { self.isEpisodeFromLastTwoWeeks($0) }
+                            }
+                            self.currentEpisodes = filteredEpisodes
                         }
                         self.forceUIUpdate()
                         print("🗑️ EPISODE LIMIT: Set limit of \(maxEpisodes) episodes for feed \(feedId)")
@@ -4021,6 +4066,9 @@ class PodcastViewModel: ObservableObject {
     func loadEpisodesForFeed(_ feedId: String, isInitialLoad: Bool = false) async {
         print("🔄 LOAD EPISODES: Starting load for feedId '\(feedId)' (isInitialLoad: \(isInitialLoad))")
         
+        // CPU MONITORING: Track performance during episode loading
+        CPUMonitor.shared.logCPUUsage(label: "[LOAD START] Episode load beginning for feed \(feedId.prefix(8))")
+        
         // 🚀 PREVENT DUPLICATE OPERATIONS: Skip if already processing this feed
         if feedsBeingProcessed.contains(feedId) {
             print("⚡ DUPLICATE PREVENTION: Skipping load - feed \(feedId) already being processed")
@@ -4080,33 +4128,34 @@ class PodcastViewModel: ObservableObject {
                 switch filter {
                 case .all:
                     filteredEpisodes = validCachedEpisodes // Already sorted newest first
-                case .favorites:
-                    filteredEpisodes = validCachedEpisodes.filter { $0.state.isFavorite }
-                case .downloads:
-                    filteredEpisodes = validCachedEpisodes.filter { $0.state.isDownloaded }
+                case .currentEpisodes:
+                    filteredEpisodes = validCachedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
                 }
                 
-                // Update UI instantly with cached episodes using isolation manager
-                feedIsolationManager.replaceEpisodesForFeed(filteredEpisodes, feedId: feedId)
+                // Update UI instantly with filtered episodes
+                currentEpisodes = filteredEpisodes
                 selectedFeedId = feedId
                 isLoadingEpisodes = false
                 operationInProgress = false
                 
                 // Update episode counts immediately with validated episodes
                 let allCount = validCachedEpisodes.count
-                let favoritesCount = validCachedEpisodes.filter { $0.state.isFavorite }.count
-                let downloadsCount = validCachedEpisodes.filter { $0.state.isDownloaded }.count
-                episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
+                let currentEpisodesCount = validCachedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }.count
+                episodeCounts = (all: allCount, currentEpisodes: currentEpisodesCount)
                 
                 print("⚡ INSTANT SUCCESS: Displaying \(filteredEpisodes.count) validated cached episodes immediately")
-            }
             
-            // BACKGROUND REFRESH: Check for new episodes from RSS without blocking UI
+            // CPU MONITORING: Track CPU after episodes displayed
+            CPUMonitor.shared.logCPUUsage(label: "[LOAD COMPLETE] Episodes displayed (\(filteredEpisodes.count) episodes)")
+        }
+        
+        // BACKGROUND REFRESH: Check for new episodes from RSS without blocking UI
             // Use higher priority when user opens feed for faster updates
             Task.detached(priority: isInitialLoad ? .userInitiated : .background) {
                 await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
             }
             
+// ... (rest of the code remains the same)
             return
         }
     }
@@ -4160,12 +4209,10 @@ class PodcastViewModel: ObservableObject {
                 let filter = EpisodeFilter(rawValue: currentTab) ?? .all
                 let filteredEpisodes: [PodcastEpisode]
                 switch filter {
+                case .currentEpisodes:
+                    filteredEpisodes = validCachedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
                 case .all:
                     filteredEpisodes = validCachedEpisodes
-                case .favorites:
-                    filteredEpisodes = validCachedEpisodes.filter { $0.state.isFavorite }
-                case .downloads:
-                    filteredEpisodes = validCachedEpisodes.filter { $0.state.isDownloaded }
                 }
                 
                 // CRITICAL: Clear any contaminated episodes from wrong feeds
@@ -4335,8 +4382,16 @@ class PodcastViewModel: ObservableObject {
                         // CRITICAL: Update isolation manager so UI shows new data
                         self.feedIsolationManager.replaceEpisodesForFeed(episodesWithStates, feedId: feedId)
                         
-                        // Update current episodes immediately for UI refresh
-                        self.currentEpisodes = episodesWithStates
+                        // Update current episodes immediately for UI refresh - apply current filter
+                        let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+                        let filteredEpisodes: [PodcastEpisode]
+                        switch filter {
+                        case .all:
+                            filteredEpisodes = episodesWithStates
+                        case .currentEpisodes:
+                            filteredEpisodes = episodesWithStates.filter { self.isEpisodeFromLastTwoWeeks($0) }
+                        }
+                        self.currentEpisodes = filteredEpisodes
                         
                         // Clear episode cache to force UI refresh with new data
                         self._episodeCache = nil
@@ -4892,7 +4947,8 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 // PERFORMANCE: Only refresh filtered list if actually needed to reduce CPU usage
-                if self.currentTab == EpisodeFilter.favorites.rawValue || self.currentTab == EpisodeFilter.downloads.rawValue {
+                // For current episodes filter, refresh to get updated episode list
+                if self.currentTab == EpisodeFilter.currentEpisodes.rawValue {
                     await self.refreshCurrentFilteredList()
                 }
             }
@@ -4983,10 +5039,8 @@ class PodcastViewModel: ObservableObject {
         switch filter {
         case .all:
             filteredEpisodes = availableEpisodes
-        case .favorites:
-            filteredEpisodes = availableEpisodes.filter { $0.state.isFavorite }
-        case .downloads:
-            filteredEpisodes = availableEpisodes.filter { $0.state.isDownloaded }
+        case .currentEpisodes:
+            filteredEpisodes = availableEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
         }
         
         // Sort and cache the results
@@ -4994,18 +5048,16 @@ class PodcastViewModel: ObservableObject {
         
         // PERFORMANCE: Pre-compute and cache episode counts to avoid expensive filtering on future accesses
         let allEpisodes = availableEpisodes
-        let favoriteEpisodes = allEpisodes.filter { $0.state.isFavorite }
-        let downloadedEpisodes = allEpisodes.filter { $0.state.isDownloaded }
+        let currentEpisodesFiltered = allEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
         
-        let precomputedCounts = (all: allEpisodes.count, favorites: favoriteEpisodes.count, downloads: downloadedEpisodes.count)
+        let precomputedCounts = (all: allEpisodes.count, currentEpisodes: currentEpisodesFiltered.count)
         
         // Cache both the filtered results AND the pre-computed counts
         if tabFilterCache[feedId] == nil {
             tabFilterCache[feedId] = [:]
         }
-        tabFilterCache[feedId]?[0] = allEpisodes  // All episodes
-        tabFilterCache[feedId]?[1] = favoriteEpisodes  // Favorites
-        tabFilterCache[feedId]?[2] = downloadedEpisodes  // Downloads
+        tabFilterCache[feedId]?[0] = currentEpisodesFiltered  // Current episodes (last 2 weeks)
+        tabFilterCache[feedId]?[1] = allEpisodes  // All episodes
         tabFilterCache[feedId]?[newTab] = sortedEpisodes  // Current tab (may be redundant but ensures consistency)
         
         // Cache the counts for instant access
@@ -5036,7 +5088,7 @@ class PodcastViewModel: ObservableObject {
         if availableEpisodes.isEmpty {
             print("⚠️ ULTRA-MINIMAL: No current episodes available - showing empty state")
             currentEpisodes = []
-            episodeCounts = (all: 0, favorites: 0, downloads: 0)
+            episodeCounts = (all: 0, currentEpisodes: 0)
             isLoadingEpisodes = false
             operationInProgress = false
             return
@@ -5047,12 +5099,10 @@ class PodcastViewModel: ObservableObject {
         let filteredEpisodes: [PodcastEpisode]
         
         switch filter {
+        case .currentEpisodes:
+            filteredEpisodes = availableEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
         case .all:
             filteredEpisodes = availableEpisodes
-        case .favorites:
-            filteredEpisodes = availableEpisodes.filter { $0.state.isFavorite }
-        case .downloads:
-            filteredEpisodes = availableEpisodes.filter { $0.state.isDownloaded }
         }
         
         // Update UI immediately with filtered results
@@ -5060,25 +5110,22 @@ class PodcastViewModel: ObservableObject {
         hasMoreEpisodes = false
         
         // Update episode counts
-        let allCount = filteredEpisodes.count
-        let favoritesCount = filteredEpisodes.filter { $0.state.isFavorite }.count
-        let downloadsCount = filteredEpisodes.filter { $0.state.isDownloaded }.count
-        episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
+        let allCount = availableEpisodes.count
+        let currentEpisodesCount = availableEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }.count
+        episodeCounts = (all: allCount, currentEpisodes: currentEpisodesCount)
         
         // PERFORMANCE: Pre-compute all filter types and counts for instant future access
         let allEpisodes = availableEpisodes
-        let favoriteEpisodes = allEpisodes.filter { EpisodeStateManager.shared.isFavorite($0.id) }
-        let downloadedEpisodes = allEpisodes.filter { EpisodeStateManager.shared.isDownloaded($0.id) }
+        let currentEpisodesFiltered = allEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
         
-        let precomputedCounts = (all: allEpisodes.count, favorites: favoriteEpisodes.count, downloads: downloadedEpisodes.count)
+        let precomputedCounts = (all: allEpisodes.count, currentEpisodes: currentEpisodesFiltered.count)
         
-        // Cache all three filter types at once to avoid future expensive operations
+        // Cache both filter types at once to avoid future expensive operations
         if tabFilterCache[feedId] == nil {
             tabFilterCache[feedId] = [:]
         }
-        tabFilterCache[feedId]?[0] = allEpisodes  // All episodes
-        tabFilterCache[feedId]?[1] = favoriteEpisodes  // Favorites
-        tabFilterCache[feedId]?[2] = downloadedEpisodes  // Downloads
+        tabFilterCache[feedId]?[0] = currentEpisodesFiltered  // Current episodes (last 2 weeks)
+        tabFilterCache[feedId]?[1] = allEpisodes  // All episodes
         
         // Cache the counts for instant access
         tabFilterCounts[feedId] = precomputedCounts
@@ -5173,12 +5220,10 @@ class PodcastViewModel: ObservableObject {
                         let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
                         let filteredEpisodes: [PodcastEpisode]
                         switch filter {
+                        case .currentEpisodes:
+                            filteredEpisodes = updatedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
                         case .all:
                             filteredEpisodes = updatedEpisodes
-                        case .favorites:
-                            filteredEpisodes = updatedEpisodes.filter { $0.state.isFavorite }
-                        case .downloads:
-                            filteredEpisodes = updatedEpisodes.filter { $0.state.isDownloaded }
                         }
                         
                         self.currentEpisodes = filteredEpisodes
@@ -5451,12 +5496,10 @@ class PodcastViewModel: ObservableObject {
                         let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
                         let filteredEpisodes: [PodcastEpisode]
                         switch filter {
+                        case .currentEpisodes:
+                            filteredEpisodes = allCurrentEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }
                         case .all:
                             filteredEpisodes = allCurrentEpisodes // Already sorted newest first
-                        case .favorites:
-                            filteredEpisodes = allCurrentEpisodes.filter { $0.state.isFavorite }
-                        case .downloads:
-                            filteredEpisodes = allCurrentEpisodes.filter { $0.state.isDownloaded }
                         }
                         
                         self.currentEpisodes = filteredEpisodes
@@ -6545,10 +6588,16 @@ class PodcastViewModel: ObservableObject {
         // PERFORMANCE: Run counting operations on background queue to avoid main thread blocking
         let counts = await Task.detached(priority: .utility) {
             let allCount = episodes.count
-            let favCount = episodes.filter { $0.state.isFavorite }.count
-            let dlCount = episodes.filter { $0.state.isDownloaded }.count
+            let currentEpisodesCount = episodes.filter { episode in
+                let calendar = Calendar.current
+                let now = Date()
+                guard let twoWeeksAgo = calendar.date(byAdding: .weekOfYear, value: -2, to: now) else {
+                    return false
+                }
+                return episode.publicationDate >= twoWeeksAgo
+            }.count
             
-            return (all: allCount, favorites: favCount, downloads: dlCount)
+            return (all: allCount, currentEpisodes: currentEpisodesCount)
         }.value
         
         // Update cache and UI on main thread
@@ -6557,7 +6606,7 @@ class PodcastViewModel: ObservableObject {
             self.tabFilterCounts[feedId] = counts
             self.episodeCounts = counts
             
-            print("📊 COUNTS: Updated for feed \(feedId) - All: \(counts.all), Favorites: \(counts.favorites), Downloads: \(counts.downloads)")
+            print("📊 COUNTS: Updated for feed \(feedId) - Current Episodes: \(counts.currentEpisodes), All: \(counts.all)")
         }
     }
     
@@ -6568,7 +6617,7 @@ class PodcastViewModel: ObservableObject {
         if let cachedCounts = tabFilterCounts[feedId] {
             await MainActor.run {
                 self.episodeCounts = cachedCounts
-                print("⚡ PERFORMANCE: Using cached episode counts - All: \(cachedCounts.all), Favorites: \(cachedCounts.favorites), Downloads: \(cachedCounts.downloads)")
+                print("⚡ PERFORMANCE: Using cached episode counts - Current Episodes: \(cachedCounts.currentEpisodes), All: \(cachedCounts.all)")
             }
             return
         }
@@ -6576,12 +6625,11 @@ class PodcastViewModel: ObservableObject {
         // Fallback: Calculate counts manually only if cache is not available
         do {
             let allCount = currentEpisodes.count
-            let favoritesCount = currentEpisodes.filter { $0.state.isFavorite }.count
-            let downloadsCount = currentEpisodes.filter { $0.state.isDownloaded }.count
+            let currentEpisodesCount = currentEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }.count
             
             await MainActor.run {
-                self.episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
-                print("🔄 FALLBACK: Calculated episode counts manually - All: \(allCount), Favorites: \(favoritesCount), Downloads: \(downloadsCount)")
+                self.episodeCounts = (all: allCount, currentEpisodes: currentEpisodesCount)
+                print("🔄 FALLBACK: Calculated episode counts manually - Current Episodes: \(currentEpisodesCount), All: \(allCount)")
             }
         } catch {
             os_log("❌ Failed to update episode counts: %@", log: log, type: .error, error.localizedDescription)
@@ -8441,11 +8489,7 @@ class PodcastViewModel: ObservableObject {
                 // Update UI state for instant visual feedback
                 self.updateEpisodeUIStateImmediate(episodeId: episode.id, isFavorite: nil, isDownloaded: false)
                 
-                // If we're on downloads tab, remove immediately
-                if self.currentTab == EpisodeFilter.downloads.rawValue {
-                    self.currentEpisodes.removeAll { $0.id == episode.id }
-                    print("🔄 UI UPDATE: Immediately removed deleted download from downloads tab")
-                }
+                // No special handling needed for favorites/all tabs
                 
                 // Force UI refresh with aggressive change detection
                 self.forceUIRefresh()
@@ -9052,11 +9096,7 @@ extension PodcastViewModel {
         print("🔍 DEBUG: About to call updateEpisodeUIStateImmediate for episode \(episode.id)")
         updateEpisodeUIStateImmediate(episodeId: episode.id, isFavorite: newState, isDownloaded: nil)
         
-        // ⚡ IMMEDIATE FILTER: If we're on favorites tab and unfavoriting, remove immediately
-        if currentTab == EpisodeFilter.favorites.rawValue && !newState {
-            currentEpisodes.removeAll { $0.id == episode.id }
-            print("🔄 UI UPDATE: Immediately removed unfavorited episode from favorites tab")
-        }
+        // No need to remove episodes from tabs when favorite state changes
         
         // ⚡ FORCE UI REFRESH: Trigger all refresh strategies
         print("🔍 DEBUG: About to call forceUIRefresh()")
@@ -9081,12 +9121,10 @@ extension PodcastViewModel {
         // Get the current filter
         let currentFilter: EpisodeFilter
         switch currentTab {
+        case EpisodeFilter.currentEpisodes.rawValue:
+            currentFilter = .currentEpisodes
         case EpisodeFilter.all.rawValue:
             currentFilter = .all
-        case EpisodeFilter.favorites.rawValue:
-            currentFilter = .favorites
-        case EpisodeFilter.downloads.rawValue:
-            currentFilter = .downloads
         default:
             currentFilter = .all
         }
@@ -9109,11 +9147,7 @@ extension PodcastViewModel {
         print("🔍 DEBUG: About to call updateEpisodeUIStateImmediate for episode \(episode.id)")
         updateEpisodeUIStateImmediate(episodeId: episode.id, isFavorite: nil, isDownloaded: newState)
         
-        // ⚡ IMMEDIATE FILTER: If we're on downloads tab and removing download, remove immediately
-        if currentTab == EpisodeFilter.downloads.rawValue && !newState {
-            currentEpisodes.removeAll { $0.id == episode.id }
-            print("🔄 UI UPDATE: Immediately removed non-downloaded episode from downloads tab")
-        }
+        // No need to remove episodes from tabs when download state changes
         
         // ⚡ FORCE UI REFRESH: Trigger all refresh strategies
         print("🔍 DEBUG: About to call forceUIRefresh()")
@@ -9848,7 +9882,7 @@ extension PodcastViewModel {
             self.podcastFeeds.removeAll()
             self.podcastFeedOrder.removeAll()
             self.currentEpisodes.removeAll()
-            self.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+            self.episodeCounts = (all: 0, currentEpisodes: 0)
             self.throttledUIUpdate()
             print("📡 ✅ Immediately cleared podcast feeds from UI")
             print("🔍 DEBUG: After immediate clearing - podcastFeeds count: \(self.podcastFeeds.count)")
@@ -10039,7 +10073,7 @@ extension PodcastViewModel {
                     self.podcastFeeds.removeAll()
                     self.podcastFeedOrder.removeAll()
                     self.currentEpisodes.removeAll()
-                    self.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+                    self.episodeCounts = (all: 0, currentEpisodes: 0)
                     self.throttledUIUpdate()
                     print("📡 ✅ Cleared in-memory data after Core Data deletion")
                     print("🔍 DEBUG: After clearing - podcastFeeds count: \(self.podcastFeeds.count)")

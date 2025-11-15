@@ -1850,8 +1850,8 @@ struct EpisodeRowView: View {
                     
                     // Download button
                     Group {
-                        if viewModel.currentTab == 2 && currentEpisode.state.isDownloaded {
-                            // Downloads tab: Show trash can for downloaded episodes
+                        if currentEpisode.state.isDownloaded {
+                            // Show trash can for downloaded episodes
                             Button(action: {
                                 showingDeleteConfirmation = true
                             }) {
@@ -1859,11 +1859,6 @@ struct EpisodeRowView: View {
                                     .foregroundColor(.red)
                                     .frame(width: buttonSize, height: buttonSize)
                             }
-                        } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && currentEpisode.state.isDownloaded {
-                            // All tab and Favorites tab: Show filled green download icon for downloaded episodes (not clickable)
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                                .frame(width: buttonSize, height: buttonSize)
                         } else {
                             // All other cases: Show regular download button
                             simplifiedDownloadButton
@@ -2413,7 +2408,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
         .id(refreshTrigger) // Force view refresh when progress/played state changes
         .contextMenu {
-            if viewModel.currentTab == 2 && episode.state.isDownloaded {
+            if episode.state.isDownloaded {
                 // Export Audio button
                 Button(action: {
                     exportEpisodeFile()
@@ -2645,8 +2640,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 
                 // Download button
                 Group {
-                    if viewModel.currentTab == 2 && currentEpisode.state.isDownloaded {
-                        // Downloads tab: Show trash can for downloaded episodes
+                    if currentEpisode.state.isDownloaded {
+                        // Show trash can for downloaded episodes
                         Button(action: {
                             showingDeleteConfirmation = true
                         }) {
@@ -2654,11 +2649,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .foregroundColor(.red)
                                 .frame(width: buttonSize, height: buttonSize)
                         }
-                    } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && currentEpisode.state.isDownloaded {
-                        // All tab and Favorites tab: Show filled green download icon for downloaded episodes (not clickable)
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .frame(width: buttonSize, height: buttonSize)
                     } else {
                         // All other cases: Show regular download button
                         simplifiedDownloadButton
@@ -3129,9 +3119,8 @@ struct PodcastPlayerView: View {
             
             // Enhanced filter tabs
             Picker("", selection: $selectedTab) {
-                Text("All").tag(0)
-                Text("Favorites").tag(1)
-                Text("Downloads").tag(2)
+                Text("Current Episodes").tag(0)
+                Text("All Episodes").tag(1)
             }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal, 20)
@@ -3515,10 +3504,20 @@ struct PodcastPlayerView: View {
         .simultaneousGesture(
             DragGesture()
                 .onChanged { _ in
+                    // CPU MONITORING: Track CPU usage during scrolling
+                    let isPlaying = podcastPlayer.isPlaying
+                    let playbackState = isPlaying ? "PLAYING" : "NOT PLAYING"
+                    CPUMonitor.shared.logCPUUsage(label: "[SCROLL START] Episode list scrolling - Podcast: \(playbackState)")
+                    
                     // Post notification that episode list is scrolling
                     NotificationCenter.default.post(name: .episodeListScrolling, object: nil)
                 }
                 .onEnded { _ in
+                    // CPU MONITORING: Track CPU when scrolling stops
+                    let isPlaying = podcastPlayer.isPlaying
+                    let playbackState = isPlaying ? "PLAYING" : "NOT PLAYING"
+                    CPUMonitor.shared.logCPUUsage(label: "[SCROLL END] Episode list scroll stopped - Podcast: \(playbackState)")
+                    
                     // Post notification that episode list stopped scrolling
                     NotificationCenter.default.post(name: .episodeListScrollingStopped, object: nil)
                     
@@ -3638,6 +3637,11 @@ struct PodcastPlayerView: View {
     }
     
     private func handleOnAppear() {
+        // CPU MONITORING: Track CPU when feed view appears
+        let isPlaying = podcastPlayer.isPlaying
+        let playbackState = isPlaying ? "PLAYING" : "NOT PLAYING"
+        CPUMonitor.shared.logCPUUsage(label: "[VIEW APPEAR] Feed view appeared - \(feed.title.prefix(20)) - Podcast: \(playbackState)")
+        
         // CRITICAL FIX: Sync live progress from currently playing episode to cache
         // This ensures the episode list shows current live progress, not stale saved progress
         syncCurrentPlayingProgress()
@@ -3734,6 +3738,9 @@ struct PodcastPlayerView: View {
     }
     
     private func loadInitialEpisodes() {
+        // CPU MONITORING: Track CPU when initial episodes are requested
+        CPUMonitor.shared.logCPUUsage(label: "[INITIAL LOAD] Requesting initial episodes for feed \(feed.id.prefix(8))")
+        
         // PERFORMANCE: Use optimized feed refresh to leverage snapshots
         viewModel.requestFeedRefresh(feed.id)
     }

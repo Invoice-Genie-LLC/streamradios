@@ -3073,7 +3073,7 @@ struct InternalDataManagementView: View {
                 self.podcastViewModel.podcastFeeds.removeAll()
                 self.podcastViewModel.podcastFeedOrder.removeAll()
                 self.podcastViewModel.currentEpisodes.removeAll()
-                self.podcastViewModel.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+                self.podcastViewModel.episodeCounts = (all: 0, currentEpisodes: 0)
                 
                 print("✅ DATA MANAGEMENT: Local podcast data cleared and UI immediately refreshed")
             }
@@ -3424,7 +3424,7 @@ struct InternalDataManagementView: View {
                 self.podcastViewModel.podcastFeeds.removeAll()
                 self.podcastViewModel.podcastFeedOrder.removeAll()
                 self.podcastViewModel.currentEpisodes.removeAll()
-                self.podcastViewModel.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+                self.podcastViewModel.episodeCounts = (all: 0, currentEpisodes: 0)
                 
                 print("✅ DATA MANAGEMENT: Local podcast data cleared and UI immediately refreshed")
             }
@@ -3551,7 +3551,7 @@ struct InternalDataManagementView: View {
         podcastViewModel.podcastFeeds.removeAll()
         podcastViewModel.podcastFeedOrder.removeAll()
         podcastViewModel.currentEpisodes.removeAll()
-        podcastViewModel.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+        podcastViewModel.episodeCounts = (all: 0, currentEpisodes: 0)
         podcastViewModel.isLoading = false
         podcastViewModel.loadFeedsFromCoreData()
         

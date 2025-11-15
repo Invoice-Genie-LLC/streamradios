@@ -515,8 +515,7 @@ class PodcastEpisodeManager {
                     
                     let counts = EpisodeCounts(
                         all: allCount,
-                        favorites: favoritesCount,
-                        downloads: downloadsCount
+                        currentEpisodes: 0 // TODO: Calculate current episodes (last 2 weeks)
                     )
                     
                     continuation.resume(returning: counts)
@@ -623,10 +622,13 @@ class PodcastEpisodeManager {
         var predicates = [NSPredicate(format: "feedId == %@", feedId)]
         
         switch filter {
-        case .favorites:
-            predicates.append(NSPredicate(format: "isFavorite == YES"))
-        case .downloads:
-            predicates.append(NSPredicate(format: "isDownloaded == YES"))
+        case .currentEpisodes:
+            // Show episodes from last 2 weeks
+            let calendar = Calendar.current
+            let now = Date()
+            if let twoWeeksAgo = calendar.date(byAdding: .weekOfYear, value: -2, to: now) {
+                predicates.append(NSPredicate(format: "publicationDate >= %@", twoWeeksAgo as NSDate))
+            }
         case .all:
             break
         }
@@ -879,12 +881,16 @@ class PodcastEpisodeManager {
     /// Apply filtering based on EpisodeStateManager (source of truth) after Core Data fetch
     private func applyStateBasedFiltering(_ episodes: [PodcastEpisode], filter: EpisodeFilter) -> [PodcastEpisode] {
         switch filter {
+        case .currentEpisodes:
+            // Show episodes from last 2 weeks
+            let calendar = Calendar.current
+            let now = Date()
+            guard let twoWeeksAgo = calendar.date(byAdding: .weekOfYear, value: -2, to: now) else {
+                return episodes
+            }
+            return episodes.filter { $0.publicationDate >= twoWeeksAgo }
         case .all:
             return episodes
-        case .favorites:
-            return episodes.filter { $0.state.isFavorite }
-        case .downloads:
-            return episodes.filter { $0.state.isDownloaded }
         }
     }
     
@@ -912,17 +918,12 @@ class PodcastEpisodeManager {
         fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         fetchRequest.includesSubentities = false
         
-        // For state-based filters (favorites, downloads), we need to check EpisodeStateManager
+        // For date-based filters (favorites), we can use Core Data count directly since predicate handles it
+        // For downloads, we need to check EpisodeStateManager
         switch filter {
-        case .all:
-            // For 'all', we can use Core Data count directly
+        case .currentEpisodes, .all:
+            // For these filters, we can use Core Data count directly (predicate handles currentEpisodes filtering)
             return try context.count(for: fetchRequest)
-        case .favorites, .downloads:
-            // For state-based filters, fetch episodes and apply EpisodeStateManager filtering
-            let managedEpisodes = try context.fetch(fetchRequest)
-            let episodes = convertToEpisodes(managedEpisodes, feedId: feedId)
-            let filteredEpisodes = applyStateBasedFiltering(episodes, filter: filter)
-            return filteredEpisodes.count
         }
     }
 }
@@ -930,15 +931,13 @@ class PodcastEpisodeManager {
 // MARK: - Supporting Types
 
 enum EpisodeFilter: Int, CaseIterable {
-    case all = 0
-    case favorites = 1
-    case downloads = 2
+    case currentEpisodes = 0  // Last 2 weeks
+    case all = 1              // All episodes
     
     var displayName: String {
         switch self {
-        case .all: return "All"
-        case .favorites: return "Favorites"
-        case .downloads: return "Downloads"
+        case .currentEpisodes: return "Current Episodes" // Shows last 2 weeks
+        case .all: return "All Episodes"
         }
     }
 }
@@ -951,8 +950,7 @@ struct EpisodeLoadResult {
 
 struct EpisodeCounts {
     let all: Int
-    let favorites: Int
-    let downloads: Int
+    let currentEpisodes: Int
 }
 
 // MARK: - Persistent Cache Manager
