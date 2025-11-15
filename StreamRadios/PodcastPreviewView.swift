@@ -401,6 +401,20 @@ struct PodcastPreviewView: View {
                 // Stage 2: Download and parse RSS feed
                 await updateProgress(0.3, "Downloading podcast RSS feed...")
                 
+                // Start granular progress updates driven by DataSyncManager while the feed is being added
+                let progressTask = Task {
+                    while isAddingPodcast {
+                        let parsingProgress = DataSyncManager.shared.feedParsingProgress
+                        let parsingMessage = DataSyncManager.shared.feedParsingMessage
+                        if parsingProgress > 0.0 && parsingProgress < 1.0 {
+                            let mappedProgress = 0.3 + (parsingProgress * 0.6)
+                            let messageToShow = parsingMessage.isEmpty ? "Downloading podcast RSS feed..." : parsingMessage
+                            await updateProgress(mappedProgress, messageToShow)
+                        }
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                }
+                
                 // Add the podcast feed using the ViewModel with custom title
                 let customTitle = newPodcastTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                 let customTitleToUse = customTitle.isEmpty ? nil : customTitle
@@ -408,6 +422,7 @@ struct PodcastPreviewView: View {
                     url: newPodcastURL.trimmingCharacters(in: .whitespacesAndNewlines), 
                     customTitle: customTitleToUse
                 )
+                progressTask.cancel()
                 
                 if success {
                     // Stage 3: Processing episodes and artwork
@@ -484,10 +499,30 @@ struct PodcastPreviewView: View {
     }
     
     @MainActor
-    private func updateProgress(_ progress: Double, _ text: String) {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            addingProgress = progress
-            addingStageText = text
+    private func updateProgress(_ progress: Double, _ text: String) async {
+        let startProgress = addingProgress
+        let targetProgress = max(0.0, min(progress, 1.0))
+        let step: Double = 0.01
+        let delay: UInt64 = 20_000_000 // 20ms per step for smooth animation
+        
+        if targetProgress <= startProgress {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                addingProgress = targetProgress
+                addingStageText = text
+            }
+            return
+        }
+        
+        var current = startProgress
+        while current < targetProgress {
+            current = min(current + step, targetProgress)
+            withAnimation(.easeInOut(duration: 0.2)) {
+                addingProgress = current
+                addingStageText = text
+            }
+            if current < targetProgress {
+                try? await Task.sleep(nanoseconds: delay)
+            }
         }
     }
 }
