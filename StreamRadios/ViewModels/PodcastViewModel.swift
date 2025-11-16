@@ -9570,11 +9570,17 @@ extension PodcastViewModel {
                     }
                     
                     self.downloadProgress[episode.id] = 1.0
+                    
+                    // CRITICAL: Force UI refresh to show download badge immediately
+                    self.uiRefreshTrigger = UUID()
+                    self.objectWillChange.send()
+                    
                     completion(.success(true))
                     
                     // CRITICAL: Trigger CloudKit sync for the download state change
                     self.updateEpisodeState(episode.id, isDownloaded: true)
                     print("💾 Triggered CloudKit sync for downloaded episode: \(episode.title)")
+                    print("🔄 Triggered UI refresh to update download badge")
                     
                     // Clear download progress and observation after a delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {

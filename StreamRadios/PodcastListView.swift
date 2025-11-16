@@ -1665,6 +1665,13 @@ struct EpisodeRowView: View {
         viewModel.downloadProgress[episode.id] != nil && viewModel.downloadProgress[episode.id]! > 0 && viewModel.downloadProgress[episode.id]! < 1
     }
     
+    // REAL-TIME DOWNLOAD STATE: Always check EpisodeStateManager for current download status
+    private var isDownloaded: Bool {
+        // Force refresh trigger to re-evaluate when downloads change
+        let _ = viewModel.uiRefreshTrigger
+        return EpisodeStateManager.shared.isDownloaded(episode.id)
+    }
+    
     // Computed property for checking if episode is marked as played
     private var isEpisodePlayed: Bool {
         EpisodeStateManager.shared.getState(for: episode.id) == .played
@@ -2008,7 +2015,7 @@ struct EpisodeRowView: View {
                 
                 // Visual status indicators (download/favorite badges)
                 VStack(alignment: .trailing, spacing: 4) {
-                    if currentEpisode.state.isDownloaded {
+                    if isDownloaded {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.body)
                             .foregroundColor(.green)
@@ -2067,7 +2074,7 @@ struct EpisodeRowView: View {
             }
             
             // Download/Delete button
-            if currentEpisode.state.isDownloaded {
+            if isDownloaded {
                 Button {
                     showingDeleteConfirmation = true
                 } label: {
@@ -2461,6 +2468,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
         viewModel.downloadProgress[episode.id] != nil && viewModel.downloadProgress[episode.id]! > 0 && viewModel.downloadProgress[episode.id]! < 1
     }
     
+    // REAL-TIME DOWNLOAD STATE: Always check EpisodeStateManager for current download status
+    private var isDownloaded: Bool {
+        // Force refresh trigger to re-evaluate when downloads change
+        let _ = viewModel.uiRefreshTrigger
+        return EpisodeStateManager.shared.isDownloaded(episode.id)
+    }
+    
     // Real-time computed properties for dynamic updates
     private var currentStatusText: String {
         if isPlaying {
@@ -2817,7 +2831,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             }
             
             // Download/Delete button
-            if currentEpisode.state.isDownloaded {
+            if isDownloaded {
                 Button {
                     showingDeleteConfirmation = true
                 } label: {
@@ -3008,7 +3022,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             
             // Visual status indicators (download/favorite badges)
             VStack(alignment: .trailing, spacing: 4) {
-                if currentEpisode.state.isDownloaded {
+                if isDownloaded {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.body)
                         .foregroundColor(.green)
