@@ -1937,8 +1937,11 @@ struct UnifiedPodcastPlayerView: View {
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(Color.adaptiveSecondaryBackground)
-                    .contentShape(RoundedRectangle(cornerRadius: 16))
             )
+            .contentShape(Rectangle()) // Define tappable area to block tap-through
+            .onTapGesture {
+                // Consume taps on empty areas to prevent pass-through to views underneath
+            }
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
             .sheet(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
