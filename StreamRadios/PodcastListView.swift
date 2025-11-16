@@ -3951,6 +3951,18 @@ struct PodcastPlayerView: View {
                     }
                 }
             }
+            .simultaneousGesture(
+                // Detect scroll gestures to close any active swipe
+                DragGesture(minimumDistance: 5)
+                    .onChanged { _ in
+                        // Close any swiped row when user starts scrolling
+                        if viewModel.swipedEpisodeId != nil {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                viewModel.swipedEpisodeId = nil
+                            }
+                        }
+                    }
+            )
             .background(Color.adaptiveBackground)
             .onAppear {
                 // Start end indicator animation
