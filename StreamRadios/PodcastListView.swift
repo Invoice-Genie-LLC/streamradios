@@ -4381,7 +4381,8 @@ struct PodcastPlayerView: View {
     // MARK: - Search Results List
     
     private var searchResultsList: some View {
-        let allEpisodes = viewModel.selectedFeedId == feed.id ? viewModel.currentEpisodes : []
+        // Search across ALL episodes in the feed, not just current tab
+        let allEpisodes = feed.episodes
         let trimmedQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let results = allEpisodes.filter { episode in
             if episode.title.localizedCaseInsensitiveContains(trimmedQuery) {
