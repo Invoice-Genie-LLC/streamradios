@@ -1607,6 +1607,19 @@ struct PodcastIconView: View {
     }
 }
 
+// Use a class to persist the export URL across SwiftUI state invalidations
+class ExportURLHolder: ObservableObject {
+    @Published var exportURL: URL?
+    
+    func setURL(_ url: URL) {
+        exportURL = url
+    }
+    
+    func clearURL() {
+        exportURL = nil
+    }
+}
+
 struct EpisodeRowView: View {
     let episode: PodcastEpisode
     var isPlaying: Bool
@@ -1623,6 +1636,10 @@ struct EpisodeRowView: View {
     @State private var localLoadingState = false // For play button loading animation
     @State private var swipeOffset: CGFloat = 0 // Track swipe position for custom swipe actions
     @State private var isSwipeGestureActive = false // Track if we're in a horizontal swipe
+    @State private var showingShareSheet = false
+    @State private var shareURL: URL?
+    @State private var pendingExportURL: URL?
+    @StateObject private var exportURLHolder = ExportURLHolder()
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
     private let swipeActionWidth: CGFloat = 180 // Width for action buttons area (circular design)
@@ -1637,16 +1654,17 @@ struct EpisodeRowView: View {
             return episode
         }
         
-        // 🚀 PERFORMANCE: Use passed episode directly instead of searching through all episodes
-        // The parent view already passed us the correct episode from currentEpisodes
-        let foundEpisode = episode
-        
-        // Debug logging to track UI refresh
-        if foundEpisode.state.isFavorite != episode.state.isFavorite {
-            print("🎯 EPISODE ROW: Episode \(episode.id) favorite changed: \(episode.state.isFavorite) -> \(foundEpisode.state.isFavorite) (trigger: \(refreshTrigger))")
+        // 🔄 REAL-TIME UPDATE: Search for updated episode in currentEpisodes to get latest state
+        // This ensures we have the updated localFilePath after downloads complete
+        if let foundEpisode = viewModel.currentEpisodes.first(where: { $0.id == episode.id }) {
+            // Debug logging to track UI refresh
+            if foundEpisode.state.isFavorite != episode.state.isFavorite {
+                print("🎯 EPISODE ROW: Episode \(episode.id) favorite changed: \(episode.state.isFavorite) -> \(foundEpisode.state.isFavorite) (trigger: \(refreshTrigger))")
+            }
+            return foundEpisode
         }
         
-        return foundEpisode
+        return episode
     }
     
     // REAL-TIME PROGRESS: Use computed property that always reflects current state
@@ -1744,8 +1762,8 @@ struct EpisodeRowView: View {
                     )
                     .cornerRadius(8)
                     .offset(x: swipeOffset)
-                    .highPriorityGesture(
-                        // High priority ensures buttons are tappable when revealed
+                    .gesture(
+                        // Use regular gesture to allow context menu long press to work
                         DragGesture(minimumDistance: 20)
                             .onChanged { value in
                                 let horizontalDrag = value.translation.width
@@ -1813,6 +1831,45 @@ struct EpisodeRowView: View {
             .clipped() // Clip the action buttons that extend beyond the row
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            if isDownloaded {
+                // Export Audio button
+                Button(action: {
+                    exportEpisodeFile()
+                }) {
+                    Label("Export Audio", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            // Try URLs in order of preference: persistent holder first, then fallbacks
+            if let fileURL = exportURLHolder.exportURL ?? shareURL ?? pendingExportURL {
+                ExportSheet(fileURL: fileURL) {
+                    showingShareSheet = false
+                    // Clean up temp file after sharing
+                    if fileURL.path.contains("tmp/") {
+                        try? FileManager.default.removeItem(at: fileURL)
+                    }
+                    // Clear all URL references
+                    self.exportURLHolder.clearURL()
+                    self.shareURL = nil
+                    self.pendingExportURL = nil
+                }
+            } else {
+                VStack {
+                    Text("Error: No file to share")
+                        .foregroundColor(.red)
+                    Text("Export URL was lost. Please try again.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button("Dismiss") {
+                        showingShareSheet = false
+                    }
+                    .padding(.top)
+                }
+                .padding()
+            }
+        }
         .alert(isPresented: $showingDeleteConfirmation) {
             Alert(
                 title: Text("Delete Downloaded Episode"),
@@ -2289,6 +2346,57 @@ struct EpisodeRowView: View {
         }
     }
     
+    private func exportEpisodeFile() {
+        // Check if episode has a local file path
+        guard let localFilePath = currentEpisode.localFilePath,
+              !localFilePath.isEmpty,
+              FileManager.default.fileExists(atPath: localFilePath) else {
+            showBannerAlert(message: "Downloaded file not found")
+            return
+        }
+        
+        let fileURL = URL(fileURLWithPath: localFilePath)
+        
+        // Create a temporary copy with .mp3 extension to ensure compatibility
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = currentEpisode.title.replacingOccurrences(of: "[^a-zA-Z0-9 ]", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "_")
+        let tempURL = tempDir.appendingPathComponent("\(fileName).mp3")
+        
+        do {
+            // Remove existing temp file if it exists
+            if FileManager.default.fileExists(atPath: tempURL.path) {
+                try FileManager.default.removeItem(at: tempURL)
+            }
+            
+            // Copy the file to temp directory with .mp3 extension
+            try FileManager.default.copyItem(at: fileURL, to: tempURL)
+            
+            // Verify the file was copied successfully
+            guard FileManager.default.fileExists(atPath: tempURL.path) else {
+                showBannerAlert(message: "Failed to prepare file for export")
+                return
+            }
+            
+            // Set the export URL using the persistent holder and show the share sheet
+            DispatchQueue.main.async {
+                // Use the persistent holder that won't be affected by SwiftUI state invalidation
+                self.exportURLHolder.setURL(tempURL)
+                
+                // Also set the state variables as backup (though they may get invalidated)
+                self.shareURL = tempURL
+                self.pendingExportURL = tempURL
+                
+                // Present the sheet
+                self.showingShareSheet = true
+            }
+            
+        } catch {
+            showBannerAlert(message: "Failed to prepare file for export")
+        }
+    }
+    
     private func formatTimeInfo() -> String? {
         let remainingDuration: Double
         if isPlaying {
@@ -2376,20 +2484,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var pendingExportURL: URL?
     @State private var swipeOffset: CGFloat = 0 // Track swipe position for custom swipe actions
     @State private var isSwipeGestureActive = false // Track if we're in a horizontal swipe
-    
-    // Use a class to persist the export URL across SwiftUI state invalidations
-    private class ExportURLHolder: ObservableObject {
-        @Published var exportURL: URL?
-        
-        func setURL(_ url: URL) {
-            exportURL = url
-        }
-        
-        func clearURL() {
-            exportURL = nil
-        }
-    }
-    
     @StateObject private var exportURLHolder = ExportURLHolder()
     
     // FORCE UI REFRESH: Get real-time episode state from viewModel
@@ -2402,15 +2496,16 @@ struct OptimizedEpisodeRowView: View, Equatable {
             return episode
         }
         
-        // 🚀 PERFORMANCE: Use passed episode directly instead of searching through all episodes
-        // The parent view already passed us the correct episode from currentEpisodes
-        let foundEpisode = episode
-        
-        // Debug logging to track UI refresh
-        if foundEpisode.state.isFavorite != episode.state.isFavorite {
+        // 🔄 REAL-TIME UPDATE: Search for updated episode in currentEpisodes to get latest state
+        // This ensures we have the updated localFilePath after downloads complete
+        if let foundEpisode = viewModel.currentEpisodes.first(where: { $0.id == episode.id }) {
+            // Debug logging to track UI refresh
+            if foundEpisode.state.isFavorite != episode.state.isFavorite {
+            }
+            return foundEpisode
         }
         
-        return foundEpisode
+        return episode
     }
     @State private var refreshTrigger = UUID() // Force UI refresh when progress/played state changes
     @State private var downloadButtonPressed = false // For download button press animation
@@ -2620,7 +2715,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
         .id(refreshTrigger) // Force view refresh when progress/played state changes
         .contextMenu {
-            if episode.state.isDownloaded {
+            if isDownloaded {
                 // Export Audio button
                 Button(action: {
                     exportEpisodeFile()
@@ -2734,8 +2829,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
             )
             .cornerRadius(8)
             .offset(x: swipeOffset)
-            .highPriorityGesture(
-                // High priority ensures buttons are tappable when revealed
+            .gesture(
+                // Use regular gesture to allow context menu long press to work
                 DragGesture(minimumDistance: 20)
                     .onChanged { value in
                         let horizontalDrag = value.translation.width
