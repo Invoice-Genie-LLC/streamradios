@@ -1625,7 +1625,7 @@ struct EpisodeRowView: View {
     @State private var isSwipeGestureActive = false // Track if we're in a horizontal swipe
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
-    private let swipeActionWidth: CGFloat = 160 // Width for action buttons area
+    private let swipeActionWidth: CGFloat = 180 // Width for action buttons area (circular design)
     
     // FORCE UI REFRESH: Get real-time episode state from viewModel
     private var currentEpisode: PodcastEpisode {
@@ -1699,13 +1699,24 @@ struct EpisodeRowView: View {
         VStack(spacing: 0) {
             
             if showingBannerAlert {
-                Text(bannerAlertMessage)
-                    .font(.caption)
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
-                    .foregroundColor(.white)
-                    .padding(4)
-                    .frame(maxWidth: .infinity)
-                    .background(bannerAlertMessage.hasPrefix("Download started") ? Color.blue : Color.red)
+                let progressPercent = Int((viewModel.downloadProgress[episode.id] ?? 0) * 100)
+                let isDownloadBanner = bannerAlertMessage.hasPrefix("Download")
+                
+                HStack(spacing: 8) {
+                    Text(isDownloadBanner && isDownloading ? "Downloading: \(progressPercent)%" : bannerAlertMessage)
+                        .font(.caption)
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                        .foregroundColor(.white)
+                    
+                    if isDownloadBanner && isDownloading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.7)
+                    }
+                }
+                .padding(4)
+                .frame(maxWidth: .infinity)
+                .background(isDownloadBanner ? Color.blue : Color.red)
             }
             
             // ZStack for swipe-to-reveal action buttons
@@ -1979,17 +1990,17 @@ struct EpisodeRowView: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     if currentEpisode.state.isDownloaded {
                         Image(systemName: "arrow.down.circle.fill")
-                            .font(.caption)
+                            .font(.body)
                             .foregroundColor(.green)
                     }
                     
                     if currentEpisode.state.isFavorite {
                         Image(systemName: "bookmark.fill")
-                            .font(.caption)
-                            .foregroundColor(.blue)
+                            .font(.body)
+                            .foregroundColor(.orange)
                     }
                 }
-                .frame(width: 20)
+                .frame(width: 28)
                 .padding(.top, 2)
             }
             .frame(minHeight: 64) // Minimum height for touch targets
@@ -2009,7 +2020,7 @@ struct EpisodeRowView: View {
     
     // Swipe action buttons that appear behind the row
     private var swipeActionButtons: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 16) {
             // Favorite button
             Button {
                 viewModel.toggleFavorite(for: episode)
@@ -2017,15 +2028,21 @@ struct EpisodeRowView: View {
                     swipeOffset = 0
                 }
             } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
-                        .font(.title3)
+                VStack(spacing: 6) {
+                    ZStack {
+                        Circle()
+                            .fill(currentEpisode.state.isFavorite ? Color.orange : Color.purple)
+                            .frame(width: 56, height: 56)
+                        
+                        Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                    }
+                    
                     Text(currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite")
                         .font(.caption2)
+                        .foregroundColor(.primary)
                 }
-                .foregroundColor(.white)
-                .frame(width: 80, height: 64)
-                .background(currentEpisode.state.isFavorite ? Color.orange : Color.yellow)
             }
             
             // Download/Delete button
@@ -2033,15 +2050,21 @@ struct EpisodeRowView: View {
                 Button {
                     showingDeleteConfirmation = true
                 } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "trash.fill")
-                            .font(.title3)
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 56, height: 56)
+                            
+                            Image(systemName: "trash.fill")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                        }
+                        
                         Text("Delete")
                             .font(.caption2)
+                            .foregroundColor(.primary)
                     }
-                    .foregroundColor(.white)
-                    .frame(width: 80, height: 64)
-                    .background(Color.red)
                 }
             } else {
                 Button {
@@ -2050,19 +2073,26 @@ struct EpisodeRowView: View {
                         swipeOffset = 0
                     }
                 } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
-                            .font(.title3)
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(isDownloading ? Color.gray : Color.blue)
+                                .frame(width: 56, height: 56)
+                            
+                            Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                        }
+                        
                         Text("Download")
                             .font(.caption2)
+                            .foregroundColor(.primary)
                     }
-                    .foregroundColor(.white)
-                    .frame(width: 80, height: 64)
-                    .background(isDownloading ? Color.gray : Color.blue)
                 }
                 .disabled(isDownloading)
             }
         }
+        .padding(.horizontal, 12)
     }
     
     
@@ -2191,11 +2221,15 @@ struct EpisodeRowView: View {
         .disabled(isDownloading) // Disable button during download
     }
     
-    private func showBannerAlert(message: String) {
+    private func showBannerAlert(message: String, autoDismiss: Bool = true) {
         bannerAlertMessage = message
         showingBannerAlert = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            showingBannerAlert = false
+        
+        // Only auto-dismiss if specified (not for download banners)
+        if autoDismiss {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                showingBannerAlert = false
+            }
         }
     }
     
@@ -2211,12 +2245,17 @@ struct EpisodeRowView: View {
                 return
             }
             
-            // Show immediate feedback with a brief message
-            showBannerAlert(message: "Download started for \(episode.title)")
+            // Show download banner that stays visible during download
+            showBannerAlert(message: "Download started for \(episode.title)", autoDismiss: false)
             
             viewModel.downloadEpisode(episode) { result in
                 // Download state is managed by the progress tracking
                 print("Download completed for episode: \(episode.title)")
+                
+                // Hide banner when download completes
+                DispatchQueue.main.async {
+                    showingBannerAlert = false
+                }
             }
         }
     }
@@ -2393,7 +2432,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }()
     
     private let buttonSize: CGFloat = 22
-    private let swipeActionWidth: CGFloat = 160 // Width for action buttons area
+    private let swipeActionWidth: CGFloat = 180 // Width for action buttons area (circular design)
     
     // Computed property for checking download state
     private var isDownloading: Bool {
@@ -2598,15 +2637,26 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }
     
     private var bannerAlertView: some View {
-        Text(bannerAlertMessage)
-            .font(.caption)
-            .foregroundColor(.white)
-            .padding(8)
-            .frame(maxWidth: .infinity)
-            .background(bannerAlertMessage.hasPrefix("Download started") ? Color.blue : Color.red)
-            .cornerRadius(6)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 4)
+        let progressPercent = Int((viewModel.downloadProgress[episode.id] ?? 0) * 100)
+        let isDownloadBanner = bannerAlertMessage.hasPrefix("Download")
+        
+        return HStack(spacing: 8) {
+            Text(isDownloadBanner && isDownloading ? "Downloading: \(progressPercent)%" : bannerAlertMessage)
+                .font(.caption)
+                .foregroundColor(.white)
+            
+            if isDownloadBanner && isDownloading {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(0.7)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity)
+        .background(isDownloadBanner ? Color.blue : Color.red)
+        .cornerRadius(6)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 4)
     }
     
     // MARK: - Optimized Episode Card Design
@@ -2691,7 +2741,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     
     // Swipe action buttons that appear behind the row
     private var swipeActionButtons: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 16) {
             // Favorite button
             Button {
                 viewModel.toggleFavorite(for: episode)
@@ -2699,15 +2749,21 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     swipeOffset = 0
                 }
             } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
-                        .font(.title3)
+                VStack(spacing: 6) {
+                    ZStack {
+                        Circle()
+                            .fill(currentEpisode.state.isFavorite ? Color.orange : Color.purple)
+                            .frame(width: 56, height: 56)
+                        
+                        Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                    }
+                    
                     Text(currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite")
                         .font(.caption2)
+                        .foregroundColor(.primary)
                 }
-                .foregroundColor(.white)
-                .frame(width: 80, height: 64)
-                .background(currentEpisode.state.isFavorite ? Color.orange : Color.yellow)
             }
             
             // Download/Delete button
@@ -2715,15 +2771,21 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 Button {
                     showingDeleteConfirmation = true
                 } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "trash.fill")
-                            .font(.title3)
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 56, height: 56)
+                            
+                            Image(systemName: "trash.fill")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                        }
+                        
                         Text("Delete")
                             .font(.caption2)
+                            .foregroundColor(.primary)
                     }
-                    .foregroundColor(.white)
-                    .frame(width: 80, height: 64)
-                    .background(Color.red)
                 }
             } else {
                 Button {
@@ -2732,19 +2794,26 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         swipeOffset = 0
                     }
                 } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
-                            .font(.title3)
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(isDownloading ? Color.gray : Color.blue)
+                                .frame(width: 56, height: 56)
+                            
+                            Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                        }
+                        
                         Text("Download")
                             .font(.caption2)
+                            .foregroundColor(.primary)
                     }
-                    .foregroundColor(.white)
-                    .frame(width: 80, height: 64)
-                    .background(isDownloading ? Color.gray : Color.blue)
                 }
                 .disabled(isDownloading)
             }
         }
+        .padding(.horizontal, 12)
     }
     
     private var episodeContent: some View {
@@ -2890,17 +2959,17 @@ struct OptimizedEpisodeRowView: View, Equatable {
             VStack(alignment: .trailing, spacing: 4) {
                 if currentEpisode.state.isDownloaded {
                     Image(systemName: "arrow.down.circle.fill")
-                        .font(.caption)
+                        .font(.body)
                         .foregroundColor(.green)
                 }
                 
                 if currentEpisode.state.isFavorite {
                     Image(systemName: "bookmark.fill")
-                        .font(.caption)
-                        .foregroundColor(.blue)
+                        .font(.body)
+                        .foregroundColor(.orange)
                 }
             }
-            .frame(width: 20)
+            .frame(width: 28)
             .padding(.top, 2)
         }
         .frame(minHeight: 64) // Minimum height for touch targets
@@ -3067,12 +3136,17 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 return
             }
             
-            // Show immediate feedback with a brief message
-            showBannerAlert(message: "Download started for \(episode.title)")
+            // Show download banner that stays visible during download
+            showBannerAlert(message: "Download started for \(episode.title)", autoDismiss: false)
             
             viewModel.downloadEpisode(episode) { result in
                 // Download state is managed by the progress tracking
                 print("Download completed for episode: \(episode.title)")
+                
+                // Hide banner when download completes
+                DispatchQueue.main.async {
+                    showingBannerAlert = false
+                }
             }
         }
     }
@@ -3128,11 +3202,15 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
     
-    private func showBannerAlert(message: String) {
+    private func showBannerAlert(message: String, autoDismiss: Bool = true) {
         bannerAlertMessage = message
         showingBannerAlert = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            showingBannerAlert = false
+        
+        // Only auto-dismiss if specified (not for download banners)
+        if autoDismiss {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                showingBannerAlert = false
+            }
         }
     }
 
