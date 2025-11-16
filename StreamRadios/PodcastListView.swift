@@ -3787,19 +3787,26 @@ struct PodcastPlayerView: View {
         // PERFORMANCE: LazyVStack already handles virtualization, no need to manually limit episodes
         // Just display all episodes and let SwiftUI handle the rendering optimization
         return ForEach(episodes, id: \.id) { episode in
-            OptimizedEpisodeRowView(
-                episode: episode,
-                isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                onPlay: {
-                    print("🎬 EPISODE LIST LOADING: Setting loading state for episode: \(episode.title)")
-                    // Set loading state in PodcastPlayer for immediate feedback
-                    podcastPlayer.loadingEpisodeId = episode.id
-                    playEpisode(episode)
-                },
-                onStop: { podcastPlayer.togglePlayPause() },
-                viewModel: viewModel,
-                podcastPlayer: podcastPlayer
-            )
+            VStack(spacing: 0) {
+                OptimizedEpisodeRowView(
+                    episode: episode,
+                    isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                    onPlay: {
+                        print("🎬 EPISODE LIST LOADING: Setting loading state for episode: \(episode.title)")
+                        // Set loading state in PodcastPlayer for immediate feedback
+                        podcastPlayer.loadingEpisodeId = episode.id
+                        playEpisode(episode)
+                    },
+                    onStop: { podcastPlayer.togglePlayPause() },
+                    viewModel: viewModel,
+                    podcastPlayer: podcastPlayer
+                )
+                
+                // Subtle divider between episodes for better readability
+                Divider()
+                    .background(Color.adaptiveBorder.opacity(0.3))
+                    .padding(.horizontal, 16)
+            }
             .id(episode.id)
         }
     }
@@ -3807,7 +3814,7 @@ struct PodcastPlayerView: View {
     private var episodeList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 8) {
                     episodeRows
                 
                 // Loading indicator and invisible trigger area for pull-up gesture
@@ -4415,7 +4422,7 @@ struct PodcastPlayerView: View {
                 .padding(.top, 100)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: 8) {
                         ForEach(results, id: \.id) { episode in
                             searchResultRow(episode: episode, query: trimmedQuery)
                                 .contentShape(Rectangle())
