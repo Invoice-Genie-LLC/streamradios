@@ -981,8 +981,17 @@ class EpisodeStateManager: ObservableObject {
         backupData["version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         
         if let backupDataEncoded = try? JSONSerialization.data(withJSONObject: backupData) {
+            let backupSize = backupDataEncoded.count
+            
+            // SAFETY CHECK: Only store if under 1MB to avoid CFPreferences overflow
+            guard backupSize < 1_000_000 else {
+                print("⚠️ EpisodeStateManager: Download state backup too large (\(backupSize) bytes), skipping to prevent CFPreferences overflow")
+                print("💾 Download states are safely stored in Core Data - backup not needed")
+                return
+            }
+            
             userDefaults.set(backupDataEncoded, forKey: downloadStateBackupKey)
-            print("💾 EpisodeStateManager: Created backup of episode states")
+            print("💾 EpisodeStateManager: Created backup of episode states (\(backupSize) bytes)")
         }
     }
     
@@ -999,9 +1008,18 @@ class EpisodeStateManager: ObservableObject {
         
         for key in keysToMigrate {
             if userDefaults.data(forKey: key) == nil, let data = standardDefaults.data(forKey: key) {
+                // SAFETY CHECK: Don't migrate if data is too large (> 1MB)
+                guard data.count < 1_000_000 else {
+                    print("⚠️ EpisodeStateManager: Skipping migration of \(key) - too large (\(data.count) bytes)")
+                    print("💾 Data will be loaded from Core Data instead")
+                    // Remove the large data from standard UserDefaults to prevent overflow
+                    standardDefaults.removeObject(forKey: key)
+                    continue
+                }
+                
                 userDefaults.set(data, forKey: key)
                 migratedCount += 1
-                print("🔄 EpisodeStateManager: Migrated \(key) from standard to app group UserDefaults")
+                print("🔄 EpisodeStateManager: Migrated \(key) from standard to app group UserDefaults (\(data.count) bytes)")
             }
         }
         
@@ -1092,26 +1110,45 @@ class EpisodeStateManager: ObservableObject {
         print("🔄 EpisodeStateManager: Restoring download states from backup")
         
         // Restore each data type from backup (convert from base64 strings back to Data)
+        // SAFETY CHECK: Only restore if data is reasonable size (< 500KB per key)
         if let progressString = backup["progress"] as? String,
            let progressData = Data(base64Encoded: progressString) {
-            userDefaults.set(progressData, forKey: progressKey)
+            if progressData.count < 500_000 {
+                userDefaults.set(progressData, forKey: progressKey)
+            } else {
+                print("⚠️ Skipping progress restore - too large (\(progressData.count) bytes)")
+            }
         }
         
         if let favoritesString = backup["favorites"] as? String,
            let favoritesData = Data(base64Encoded: favoritesString) {
-            userDefaults.set(favoritesData, forKey: favoritesKey)
+            if favoritesData.count < 500_000 {
+                userDefaults.set(favoritesData, forKey: favoritesKey)
+            } else {
+                print("⚠️ Skipping favorites restore - too large (\(favoritesData.count) bytes)")
+            }
         }
         
         if let downloadsString = backup["downloads"] as? String,
            let downloadsData = Data(base64Encoded: downloadsString) {
-            userDefaults.set(downloadsData, forKey: downloadsKey)
-            print("✅ EpisodeStateManager: Restored download states from backup")
+            if downloadsData.count < 500_000 {
+                userDefaults.set(downloadsData, forKey: downloadsKey)
+                print("✅ EpisodeStateManager: Restored download states from backup (\(downloadsData.count) bytes)")
+            } else {
+                print("⚠️ Skipping downloads restore - too large (\(downloadsData.count) bytes)")
+            }
         }
         
         if let statesString = backup["states"] as? String,
            let statesData = Data(base64Encoded: statesString) {
-            userDefaults.set(statesData, forKey: statesKey)
+            if statesData.count < 500_000 {
+                userDefaults.set(statesData, forKey: statesKey)
+            } else {
+                print("⚠️ Skipping states restore - too large (\(statesData.count) bytes)")
+            }
         }
+        
+        print("💾 All episode data will be loaded from Core Data if backup was too large")
     }
     
     /// Check if this is a definite upgrade scenario (not fresh install)
