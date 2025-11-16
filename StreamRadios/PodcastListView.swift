@@ -2021,11 +2021,10 @@ struct EpisodeRowView: View {
                         .multilineTextAlignment(.leading)
                         .layoutPriority(1) // Give title priority in layout
                     
-                    // Progress bar for episodes with progress (embedded in content)
-                    // CRITICAL FIX: Hide progress bar when episode is marked as played
-                    if currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
+                    // Progress bar - only show on currently playing episode
+                    if isPlaying && currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
                         ProgressView(value: currentProgress)
-                            .progressViewStyle(LinearProgressViewStyle(tint: isPlaying ? .blue : .gray))
+                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                             .frame(height: 3)
                             .background(Color.adaptiveBorder)
                             .cornerRadius(1.5)
@@ -3052,11 +3051,10 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     .multilineTextAlignment(.leading)
                     .layoutPriority(1) // Give title priority in layout
                 
-                // Progress bar for episodes with progress (embedded in content)
-                // CRITICAL FIX: Hide progress bar when episode is marked as played
-                if currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
+                // Progress bar - only show on currently playing episode
+                if isPlaying && currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
                     ProgressView(value: currentProgress)
-                        .progressViewStyle(LinearProgressViewStyle(tint: isPlaying ? .blue : .gray))
+                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                         .frame(height: 3)
                         .background(Color.adaptiveBorder)
                         .cornerRadius(1.5)
