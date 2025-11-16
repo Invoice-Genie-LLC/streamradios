@@ -1749,6 +1749,11 @@ struct EpisodeRowView: View {
                                     // Check if this is clearly a horizontal swipe
                                     if abs(horizontalDrag) > 20 && abs(horizontalDrag) > abs(verticalDrag) * 2 {
                                         isSwipeGestureActive = true
+                                        
+                                        // Close any other swiped row when starting a new swipe
+                                        if viewModel.swipedEpisodeId != nil && viewModel.swipedEpisodeId != episode.id {
+                                            viewModel.swipedEpisodeId = nil
+                                        }
                                     }
                                 }
                                 
@@ -1773,8 +1778,13 @@ struct EpisodeRowView: View {
                                         // If swiped more than halfway, snap to open; otherwise close
                                         if swipeOffset < -swipeActionWidth / 2 {
                                             swipeOffset = -swipeActionWidth
+                                            viewModel.swipedEpisodeId = episode.id // Mark this row as swiped
                                         } else {
                                             swipeOffset = 0
+                                            // Clear if this was the swiped row
+                                            if viewModel.swipedEpisodeId == episode.id {
+                                                viewModel.swipedEpisodeId = nil
+                                            }
                                         }
                                     }
                                 }
@@ -1783,6 +1793,14 @@ struct EpisodeRowView: View {
                                 isSwipeGestureActive = false
                             }
                     )
+                    .onChange(of: viewModel.swipedEpisodeId) { newId in
+                        // Close this row if another row was swiped
+                        if newId != episode.id && swipeOffset != 0 {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                swipeOffset = 0
+                            }
+                        }
+                    }
             }
             .frame(maxWidth: .infinity)
             .clipped() // Clip the action buttons that extend beyond the row
@@ -1798,11 +1816,13 @@ struct EpisodeRowView: View {
                     }
                     withAnimation {
                         swipeOffset = 0
+                        viewModel.swipedEpisodeId = nil
                     }
                 },
                 secondaryButton: .cancel() {
                     withAnimation {
                         swipeOffset = 0
+                        viewModel.swipedEpisodeId = nil
                     }
                 }
             )
@@ -2026,6 +2046,7 @@ struct EpisodeRowView: View {
                 viewModel.toggleFavorite(for: episode)
                 withAnimation {
                     swipeOffset = 0
+                    viewModel.swipedEpisodeId = nil
                 }
             } label: {
                 VStack(spacing: 6) {
@@ -2071,6 +2092,7 @@ struct EpisodeRowView: View {
                     handleDownloadAction()
                     withAnimation {
                         swipeOffset = 0
+                        viewModel.swipedEpisodeId = nil
                     }
                 } label: {
                     VStack(spacing: 6) {
@@ -2630,8 +2652,17 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     Task {
                         await viewModel.deleteDownloadedEpisode(episode)
                     }
+                    withAnimation {
+                        swipeOffset = 0
+                        viewModel.swipedEpisodeId = nil
+                    }
                 },
-                secondaryButton: .cancel()
+                secondaryButton: .cancel() {
+                    withAnimation {
+                        swipeOffset = 0
+                        viewModel.swipedEpisodeId = nil
+                    }
+                }
             )
         }
     }
@@ -2701,6 +2732,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
                             // Check if this is clearly a horizontal swipe
                             if abs(horizontalDrag) > 20 && abs(horizontalDrag) > abs(verticalDrag) * 2 {
                                 isSwipeGestureActive = true
+                                
+                                // Close any other swiped row when starting a new swipe
+                                if viewModel.swipedEpisodeId != nil && viewModel.swipedEpisodeId != episode.id {
+                                    viewModel.swipedEpisodeId = nil
+                                }
                             }
                         }
                         
@@ -2725,8 +2761,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 // If swiped more than halfway, snap to open; otherwise close
                                 if swipeOffset < -swipeActionWidth / 2 {
                                     swipeOffset = -swipeActionWidth
+                                    viewModel.swipedEpisodeId = episode.id // Mark this row as swiped
                                 } else {
                                     swipeOffset = 0
+                                    // Clear if this was the swiped row
+                                    if viewModel.swipedEpisodeId == episode.id {
+                                        viewModel.swipedEpisodeId = nil
+                                    }
                                 }
                             }
                         }
@@ -2735,6 +2776,14 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         isSwipeGestureActive = false
                     }
             )
+            .onChange(of: viewModel.swipedEpisodeId) { newId in
+                // Close this row if another row was swiped
+                if newId != episode.id && swipeOffset != 0 {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        swipeOffset = 0
+                    }
+                }
+            }
         }
         .clipped() // Clip the action buttons that extend beyond the row
     }
@@ -2747,6 +2796,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 viewModel.toggleFavorite(for: episode)
                 withAnimation {
                     swipeOffset = 0
+                    viewModel.swipedEpisodeId = nil
                 }
             } label: {
                 VStack(spacing: 6) {
@@ -2792,6 +2842,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     handleDownloadAction()
                     withAnimation {
                         swipeOffset = 0
+                        viewModel.swipedEpisodeId = nil
                     }
                 } label: {
                     VStack(spacing: 6) {

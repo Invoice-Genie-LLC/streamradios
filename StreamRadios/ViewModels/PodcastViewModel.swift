@@ -760,6 +760,7 @@ class PodcastViewModel: ObservableObject {
     @Published var lastPlayedEpisodes: [String: String] = [:]
     @Published var episodeProgress: [String: Double] = [:]
     @Published var downloadProgress: [String: Double] = [:]
+    @Published var swipedEpisodeId: String? = nil // Track currently swiped episode for exclusive swipe behavior
     
     // MARK: - App Lifecycle State
     @Published var isReturningFromBackground = false // Track when app returns from background
