@@ -2496,17 +2496,19 @@ class PodcastViewModel: ObservableObject {
                         filteredEpisodes = refreshedEpisodes
                     }
                     
-                    // Update UI with synced episodes
-                    currentEpisodes = filteredEpisodes
+                    // Clear episode cache FIRST to force getter to use fresh data from isolation manager
+                    _episodeCache = nil
+                    _episodeCacheFeedId = nil
                     
                     // Update episode counts
                     let allCount = refreshedEpisodes.count
                     let currentEpisodesCount = refreshedEpisodes.filter { isEpisodeFromLastTwoWeeks($0) }.count
                     episodeCounts = (all: allCount, currentEpisodes: currentEpisodesCount)
                     
-                    // Clear episode cache to force UI refresh with new data
-                    _episodeCache = nil
-                    _episodeCacheFeedId = nil
+                    // CRITICAL FIX: We've already updated the isolation manager above with all refreshed episodes
+                    // Trigger SwiftUI to re-read from the getter (which will now use fresh isolation manager data)
+                    // The setter would block this if filteredEpisodes.count < total episodes in isolation manager
+                    objectWillChange.send()
                     
                     print("🔄 BACKGROUND REFRESH: Updated isolation manager and UI - now showing \(filteredEpisodes.count) episodes")
                 }
@@ -4067,7 +4069,6 @@ class PodcastViewModel: ObservableObject {
         print("🔄 LOAD EPISODES: Starting load for feedId '\(feedId)' (isInitialLoad: \(isInitialLoad))")
         
         // CPU MONITORING: Track performance during episode loading
-        CPUMonitor.shared.logCPUUsage(label: "[LOAD START] Episode load beginning for feed \(feedId.prefix(8))")
         
         // 🚀 PREVENT DUPLICATE OPERATIONS: Skip if already processing this feed
         if feedsBeingProcessed.contains(feedId) {
@@ -4144,9 +4145,6 @@ class PodcastViewModel: ObservableObject {
                 episodeCounts = (all: allCount, currentEpisodes: currentEpisodesCount)
                 
                 print("⚡ INSTANT SUCCESS: Displaying \(filteredEpisodes.count) validated cached episodes immediately")
-            
-            // CPU MONITORING: Track CPU after episodes displayed
-            CPUMonitor.shared.logCPUUsage(label: "[LOAD COMPLETE] Episodes displayed (\(filteredEpisodes.count) episodes)")
         }
         
         // BACKGROUND REFRESH: Check for new episodes from RSS without blocking UI
@@ -4391,11 +4389,12 @@ class PodcastViewModel: ObservableObject {
                         case .currentEpisodes:
                             filteredEpisodes = episodesWithStates.filter { self.isEpisodeFromLastTwoWeeks($0) }
                         }
-                        self.currentEpisodes = filteredEpisodes
-                        
-                        // Clear episode cache to force UI refresh with new data
+                        // Clear episode cache FIRST to force getter to use fresh data
                         self._episodeCache = nil
                         self._episodeCacheFeedId = nil
+                        
+                        // CRITICAL FIX: We've already updated isolation manager, notify SwiftUI to refresh
+                        self.objectWillChange.send()
                         
                         self.isLoadingEpisodes = false
                         self.operationInProgress = false

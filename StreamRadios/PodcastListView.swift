@@ -689,26 +689,34 @@ struct PodcastListView: View {
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10) // Increase minimum distance to avoid interfering with swipe actions
-                    .onChanged { _ in
-                        // Update when drag distance is significant enough
-                        if !isScrolling.wrappedValue {
-                            isScrolling.wrappedValue = true
-                            // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
-                            // REMOVED: Direct isFooterMenuHidden assignment - let ContentView shouldHideFooterMenu logic handle this
-                        }
-                        UserDefaults.standard.set(true, forKey: "isUserScrolling")
-                        // Post notification for PodcastPlayer scroll detection
-                        NotificationCenter.default.post(name: .userIsScrolling, object: nil)
-                    }
-                    .onEnded { _ in
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            isScrolling.wrappedValue = false
-                            // Note: Don't reset isFooterMenuHidden here - let home button control it
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                    .onChanged { value in
+                        // Only trigger for primarily vertical scrolling (not horizontal swipes)
+                        let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
+                        if isVerticalScroll {
+                            // Update when drag distance is significant enough
+                            if !isScrolling.wrappedValue {
+                                isScrolling.wrappedValue = true
+                                // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
+                                // REMOVED: Direct isFooterMenuHidden assignment - let ContentView shouldHideFooterMenu logic handle this
+                            }
+                            UserDefaults.standard.set(true, forKey: "isUserScrolling")
                             // Post notification for PodcastPlayer scroll detection
-                            NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                            NotificationCenter.default.post(name: .userIsScrolling, object: nil)
+                        }
+                    }
+                    .onEnded { value in
+                        // Only trigger for primarily vertical scrolling (not horizontal swipes)
+                        let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
+                        if isVerticalScroll {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                isScrolling.wrappedValue = false
+                                // Note: Don't reset isFooterMenuHidden here - let home button control it
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                                // Post notification for PodcastPlayer scroll detection
+                                NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                            }
                         }
                     }
             )
@@ -1613,8 +1621,11 @@ struct EpisodeRowView: View {
     @State private var refreshTrigger = UUID() // Force UI refresh when progress changes
     @State private var downloadButtonPressed = false // For download button press animation
     @State private var localLoadingState = false // For play button loading animation
+    @State private var swipeOffset: CGFloat = 0 // Track swipe position for custom swipe actions
+    @State private var isSwipeGestureActive = false // Track if we're in a horizontal swipe
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
+    private let swipeActionWidth: CGFloat = 160 // Width for action buttons area
     
     // FORCE UI REFRESH: Get real-time episode state from viewModel
     private var currentEpisode: PodcastEpisode {
@@ -1697,7 +1708,127 @@ struct EpisodeRowView: View {
                     .background(bannerAlertMessage.hasPrefix("Download started") ? Color.blue : Color.red)
             }
             
-            // Responsive Layout: Play Button | Episode Info | Action Buttons
+            // ZStack for swipe-to-reveal action buttons
+            ZStack(alignment: .trailing) {
+                // Action buttons behind the row
+                HStack(spacing: 0) {
+                    Spacer()
+                    swipeActionButtons
+                        .frame(width: swipeActionWidth)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                
+                // Main row content with opaque background
+                rowContent
+                    .background(
+                        // Use system background color which is always opaque
+                        Color(UIColor.systemBackground)
+                    )
+                    .cornerRadius(8)
+                    .offset(x: swipeOffset)
+                    .highPriorityGesture(
+                        // High priority ensures buttons are tappable when revealed
+                        DragGesture(minimumDistance: 20)
+                            .onChanged { value in
+                                let horizontalDrag = value.translation.width
+                                let verticalDrag = value.translation.height
+                                
+                                // Determine gesture direction early
+                                if !isSwipeGestureActive {
+                                    // Check if this is clearly a horizontal swipe
+                                    if abs(horizontalDrag) > 20 && abs(horizontalDrag) > abs(verticalDrag) * 2 {
+                                        isSwipeGestureActive = true
+                                    }
+                                }
+                                
+                                // Only handle offset if we've determined this is a horizontal swipe
+                                if isSwipeGestureActive {
+                                    // Constrain swipe: negative (left) up to action width, no positive (right) past 0
+                                    if horizontalDrag < 0 {
+                                        swipeOffset = max(horizontalDrag, -swipeActionWidth)
+                                    } else if swipeOffset < 0 {
+                                        // Allow swiping back right to close
+                                        swipeOffset = min(0, swipeOffset + horizontalDrag)
+                                    }
+                                }
+                            }
+                            .onEnded { value in
+                                let horizontalDrag = value.translation.width
+                                let verticalDrag = value.translation.height
+                                
+                                // Only handle if we activated the swipe gesture
+                                if isSwipeGestureActive {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        // If swiped more than halfway, snap to open; otherwise close
+                                        if swipeOffset < -swipeActionWidth / 2 {
+                                            swipeOffset = -swipeActionWidth
+                                        } else {
+                                            swipeOffset = 0
+                                        }
+                                    }
+                                }
+                                
+                                // Reset gesture state
+                                isSwipeGestureActive = false
+                            }
+                    )
+            }
+            .frame(maxWidth: .infinity)
+            .clipped() // Clip the action buttons that extend beyond the row
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .alert(isPresented: $showingDeleteConfirmation) {
+            Alert(
+                title: Text("Delete Downloaded Episode"),
+                message: Text("Are you sure you want to delete this downloaded episode?"),
+                primaryButton: .destructive(Text("Delete")) {
+                    Task {
+                        await viewModel.deleteDownloadedEpisode(episode)
+                    }
+                    withAnimation {
+                        swipeOffset = 0
+                    }
+                },
+                secondaryButton: .cancel() {
+                    withAnimation {
+                        swipeOffset = 0
+                    }
+                }
+            )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeProgressChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                refreshTrigger = UUID()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodePlayedChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                refreshTrigger = UUID()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeFavoriteChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                refreshTrigger = UUID()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeDownloadChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                refreshTrigger = UUID()
+            }
+        }
+    }
+    
+    private var rowContent: some View {
+        VStack(spacing: 0) {
+            // Responsive Layout: Play Button | Episode Info | Status Badges
             HStack(alignment: .top, spacing: 12) {
                 
                 // COLUMN 1: Play/Pause button (Fixed width)
@@ -1836,50 +1967,34 @@ struct EpisodeRowView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1) // Give middle column flexibility
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    // Start local loading state when tapped
+                    print("🎬 ROW TAP LOADING: Setting localLoadingState = true for episode: \(episode.title)")
+                    localLoadingState = true
+                    onPlay()
+                }
                 
-                // COLUMN 3: Action buttons (Fixed width - always visible)
-                VStack(alignment: .center, spacing: 8) {
-                    // Bookmark button
-                    Button(action: {
-                        viewModel.toggleFavorite(for: episode)
-                    }) {
-                        Image(systemName: currentEpisode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                            .foregroundColor(currentEpisode.state.isFavorite ? .blue : .adaptiveSecondaryText)
-                            .frame(width: buttonSize, height: buttonSize)
+                // Visual status indicators (download/favorite badges)
+                VStack(alignment: .trailing, spacing: 4) {
+                    if currentEpisode.state.isDownloaded {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
                     }
                     
-                    // Download button
-                    Group {
-                        if currentEpisode.state.isDownloaded {
-                            // Show trash can for downloaded episodes
-                            Button(action: {
-                                showingDeleteConfirmation = true
-                            }) {
-                                Image(systemName: "trash")
-                                    .foregroundColor(.red)
-                                    .frame(width: buttonSize, height: buttonSize)
-                            }
-                        } else {
-                            // All other cases: Show regular download button
-                            simplifiedDownloadButton
-                        }
+                    if currentEpisode.state.isFavorite {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption)
+                            .foregroundColor(.blue)
                     }
-                    .frame(width: buttonSize, height: buttonSize)
                 }
-                .frame(width: 50, alignment: .center) // Compact fixed width
-                .layoutPriority(2) // High priority - always visible
-                .padding(.top, 2) // Align with content
+                .frame(width: 20)
+                .padding(.top, 2)
             }
             .frame(minHeight: 64) // Minimum height for touch targets
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Start local loading state when tapped
-                print("🎬 ROW TAP LOADING: Setting localLoadingState = true for episode: \(episode.title)")
-                localLoadingState = true
-                onPlay()
-            }
             .onReceive(podcastPlayer.$currentProgress) { _ in
                 // Force view refresh when progress changes for playing episodes
                 // This will update the currentTimeInfo computed property
@@ -1890,67 +2005,64 @@ struct EpisodeRowView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            // Enhanced background that covers the entire available space - similar to radio station styling
-            Rectangle()
-                .fill(isPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7))
-                .frame(maxWidth: .infinity)
-                .overlay(
-                    // Border highlight for currently playing episode - matching radio station style
-                    Rectangle()
-                        .stroke(isPlaying ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
-                )
-        )
-        .cornerRadius(8)
-        .alert(isPresented: $showingDeleteConfirmation) {
-            Alert(
-                title: Text("Delete Downloaded Episode"),
-                message: Text("Are you sure you want to delete this downloaded episode?"),
-                primaryButton: .destructive(Text("Delete")) {
-                    Task {
-                        await viewModel.deleteDownloadedEpisode(episode)
+    }
+    
+    // Swipe action buttons that appear behind the row
+    private var swipeActionButtons: some View {
+        HStack(spacing: 0) {
+            // Favorite button
+            Button {
+                viewModel.toggleFavorite(for: episode)
+                withAnimation {
+                    swipeOffset = 0
+                }
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
+                        .font(.title3)
+                    Text(currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite")
+                        .font(.caption2)
+                }
+                .foregroundColor(.white)
+                .frame(width: 80, height: 64)
+                .background(currentEpisode.state.isFavorite ? Color.orange : Color.yellow)
+            }
+            
+            // Download/Delete button
+            if currentEpisode.state.isDownloaded {
+                Button {
+                    showingDeleteConfirmation = true
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "trash.fill")
+                            .font(.title3)
+                        Text("Delete")
+                            .font(.caption2)
                     }
-                },
-                secondaryButton: .cancel()
-            )
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeProgressChangedInstantly"))) { notification in
-            if let userInfo = notification.userInfo,
-               let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
-                // Force view refresh when this episode's progress changes instantly
-                refreshTrigger = UUID()
-                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) progress updated")
+                    .foregroundColor(.white)
+                    .frame(width: 80, height: 64)
+                    .background(Color.red)
+                }
+            } else {
+                Button {
+                    handleDownloadAction()
+                    withAnimation {
+                        swipeOffset = 0
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
+                            .font(.title3)
+                        Text("Download")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 80, height: 64)
+                    .background(isDownloading ? Color.gray : Color.blue)
+                }
+                .disabled(isDownloading)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodePlayedChangedInstantly"))) { notification in
-            if let userInfo = notification.userInfo,
-               let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
-                // Force view refresh when this episode's played state changes instantly
-                refreshTrigger = UUID()
-                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) played state updated")
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeFavoriteChangedInstantly"))) { notification in
-            if let userInfo = notification.userInfo,
-               let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
-                // Force view refresh when this episode's favorite state changes instantly
-                refreshTrigger = UUID()
-                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) favorite state updated")
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeDownloadChangedInstantly"))) { notification in
-            if let userInfo = notification.userInfo,
-               let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
-                // Force view refresh when this episode's download state changes instantly
-                refreshTrigger = UUID()
-                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) download state updated")
-            }
-        }
-        // REAL-TIME SYNC: Added notification listeners for instant progress, played, favorite, and download state updates to force UI refresh
     }
     
     
@@ -2087,6 +2199,28 @@ struct EpisodeRowView: View {
         }
     }
     
+    private func handleDownloadAction() {
+        // Add haptic feedback for swipe action
+        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+        impactFeedback.impactOccurred()
+        
+        if !episode.state.isDownloaded && !isDownloading {
+            // Check subscription for download feature
+            if !subscriptionManager.isSubscribedOrInTrial {
+                showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
+                return
+            }
+            
+            // Show immediate feedback with a brief message
+            showBannerAlert(message: "Download started for \(episode.title)")
+            
+            viewModel.downloadEpisode(episode) { result in
+                // Download state is managed by the progress tracking
+                print("Download completed for episode: \(episode.title)")
+            }
+        }
+    }
+    
     private func formatTimeInfo() -> String? {
         let remainingDuration: Double
         if isPlaying {
@@ -2172,6 +2306,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var showingShareSheet = false
     @State private var shareURL: URL?
     @State private var pendingExportURL: URL?
+    @State private var swipeOffset: CGFloat = 0 // Track swipe position for custom swipe actions
+    @State private var isSwipeGestureActive = false // Track if we're in a horizontal swipe
     
     // Use a class to persist the export URL across SwiftUI state invalidations
     private class ExportURLHolder: ObservableObject {
@@ -2257,6 +2393,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }()
     
     private let buttonSize: CGFloat = 22
+    private let swipeActionWidth: CGFloat = 160 // Width for action buttons area
     
     // Computed property for checking download state
     private var isDownloading: Bool {
@@ -2474,28 +2611,139 @@ struct OptimizedEpisodeRowView: View, Equatable {
     
     // MARK: - Optimized Episode Card Design
     private var episodeCard: some View {
-        VStack(spacing: 0) {
-            // Simplified episode content without expensive gradients
-            Group {
-                episodeContent
+        ZStack(alignment: .trailing) {
+            // Action buttons behind the row
+            HStack(spacing: 0) {
+                Spacer()
+                swipeActionButtons
+                    .frame(width: swipeActionWidth)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            
+            // Main card content with opaque background
+            VStack(spacing: 0) {
+                // Simplified episode content without expensive gradients
+                Group {
+                    episodeContent
+                }
+                
+                // Simple separator
+                Rectangle()
+                    .fill(Color.adaptiveSeparator)
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 16)
             }
             .background(
-                // Enhanced background that covers the entire available space - similar to radio station styling
-                Rectangle()
-                    .fill(isPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7))
-                    .frame(maxWidth: .infinity)
-                    .overlay(
-                        // Border highlight for currently playing episode - matching radio station style
-                        Rectangle()
-                            .stroke(isPlaying ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
-                    )
+                // Use system background color which is always opaque
+                Color(UIColor.systemBackground)
             )
+            .cornerRadius(8)
+            .offset(x: swipeOffset)
+            .highPriorityGesture(
+                // High priority ensures buttons are tappable when revealed
+                DragGesture(minimumDistance: 20)
+                    .onChanged { value in
+                        let horizontalDrag = value.translation.width
+                        let verticalDrag = value.translation.height
+                        
+                        // Determine gesture direction early
+                        if !isSwipeGestureActive {
+                            // Check if this is clearly a horizontal swipe
+                            if abs(horizontalDrag) > 20 && abs(horizontalDrag) > abs(verticalDrag) * 2 {
+                                isSwipeGestureActive = true
+                            }
+                        }
+                        
+                        // Only handle offset if we've determined this is a horizontal swipe
+                        if isSwipeGestureActive {
+                            // Constrain swipe: negative (left) up to action width, no positive (right) past 0
+                            if horizontalDrag < 0 {
+                                swipeOffset = max(horizontalDrag, -swipeActionWidth)
+                            } else if swipeOffset < 0 {
+                                // Allow swiping back right to close
+                                swipeOffset = min(0, swipeOffset + horizontalDrag)
+                            }
+                        }
+                    }
+                    .onEnded { value in
+                        let horizontalDrag = value.translation.width
+                        let verticalDrag = value.translation.height
+                        
+                        // Only handle if we activated the swipe gesture
+                        if isSwipeGestureActive {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                // If swiped more than halfway, snap to open; otherwise close
+                                if swipeOffset < -swipeActionWidth / 2 {
+                                    swipeOffset = -swipeActionWidth
+                                } else {
+                                    swipeOffset = 0
+                                }
+                            }
+                        }
+                        
+                        // Reset gesture state
+                        isSwipeGestureActive = false
+                    }
+            )
+        }
+        .clipped() // Clip the action buttons that extend beyond the row
+    }
+    
+    // Swipe action buttons that appear behind the row
+    private var swipeActionButtons: some View {
+        HStack(spacing: 0) {
+            // Favorite button
+            Button {
+                viewModel.toggleFavorite(for: episode)
+                withAnimation {
+                    swipeOffset = 0
+                }
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
+                        .font(.title3)
+                    Text(currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite")
+                        .font(.caption2)
+                }
+                .foregroundColor(.white)
+                .frame(width: 80, height: 64)
+                .background(currentEpisode.state.isFavorite ? Color.orange : Color.yellow)
+            }
             
-            // Simple separator
-            Rectangle()
-                .fill(Color.adaptiveSeparator)
-                .frame(height: 0.5)
-                .padding(.horizontal, 16)
+            // Download/Delete button
+            if currentEpisode.state.isDownloaded {
+                Button {
+                    showingDeleteConfirmation = true
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "trash.fill")
+                            .font(.title3)
+                        Text("Delete")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 80, height: 64)
+                    .background(Color.red)
+                }
+            } else {
+                Button {
+                    handleDownloadAction()
+                    withAnimation {
+                        swipeOffset = 0
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
+                            .font(.title3)
+                        Text("Download")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 80, height: 64)
+                    .background(isDownloading ? Color.gray : Color.blue)
+                }
+                .disabled(isDownloading)
+            }
         }
     }
     
@@ -2626,54 +2874,38 @@ struct OptimizedEpisodeRowView: View, Equatable {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1) // Give middle column flexibility
+            .contentShape(Rectangle())
+            .onTapGesture {
+                // Start local loading state when tapped
+                print("🎬 OPTIMIZED ROW TAP LOADING: Setting localLoadingState = true for episode: \(episode.title)")
+                localLoadingState = true
+                
+                // Ensure loading state is visible for minimum duration
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    onPlay()
+                }
+            }
             
-            // COLUMN 3: Action buttons (Fixed width - always visible)
-            VStack(alignment: .center, spacing: 8) {
-                // Bookmark button
-                Button(action: {
-                    viewModel.toggleFavorite(for: episode)
-                }) {
-                    Image(systemName: currentEpisode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                        .foregroundColor(currentEpisode.state.isFavorite ? .blue : .adaptiveSecondaryText)
-                        .frame(width: buttonSize, height: buttonSize)
+            // Visual status indicators (download/favorite badges)
+            VStack(alignment: .trailing, spacing: 4) {
+                if currentEpisode.state.isDownloaded {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.green)
                 }
                 
-                // Download button
-                Group {
-                    if currentEpisode.state.isDownloaded {
-                        // Show trash can for downloaded episodes
-                        Button(action: {
-                            showingDeleteConfirmation = true
-                        }) {
-                            Image(systemName: "trash")
-                                .foregroundColor(.red)
-                                .frame(width: buttonSize, height: buttonSize)
-                        }
-                    } else {
-                        // All other cases: Show regular download button
-                        simplifiedDownloadButton
-                    }
+                if currentEpisode.state.isFavorite {
+                    Image(systemName: "bookmark.fill")
+                        .font(.caption)
+                        .foregroundColor(.blue)
                 }
-                .frame(width: buttonSize, height: buttonSize)
             }
-            .frame(width: 50, alignment: .center) // Compact fixed width
-            .layoutPriority(2) // High priority - always visible
-            .padding(.top, 2) // Align with content
+            .frame(width: 20)
+            .padding(.top, 2)
         }
         .frame(minHeight: 64) // Minimum height for touch targets
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // Start local loading state when tapped
-            print("🎬 OPTIMIZED ROW TAP LOADING: Setting localLoadingState = true for episode: \(episode.title)")
-            localLoadingState = true
-            
-            // Ensure loading state is visible for minimum duration
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                onPlay()
-            }
-        }
         .onReceive(podcastPlayer.$currentProgress) { _ in
             // Force view refresh when progress changes for playing episodes
             // This will update the currentTimeInfo computed property
@@ -2821,6 +3053,28 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
         .frame(width: 22, height: 22)
         .disabled(isDownloading) // Disable button during download
+    }
+    
+    private func handleDownloadAction() {
+        // Add haptic feedback for swipe action
+        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+        impactFeedback.impactOccurred()
+        
+        if !episode.state.isDownloaded && !isDownloading {
+            // Check subscription for download feature
+            if !subscriptionManager.isSubscribedOrInTrial {
+                showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
+                return
+            }
+            
+            // Show immediate feedback with a brief message
+            showBannerAlert(message: "Download started for \(episode.title)")
+            
+            viewModel.downloadEpisode(episode) { result in
+                // Download state is managed by the progress tracking
+                print("Download completed for episode: \(episode.title)")
+            }
+        }
     }
     
     private func exportEpisodeFile() {
@@ -3502,28 +3756,26 @@ struct PodcastPlayerView: View {
             }
         }
         .simultaneousGesture(
-            DragGesture()
-                .onChanged { _ in
-                    // CPU MONITORING: Track CPU usage during scrolling
-                    let isPlaying = podcastPlayer.isPlaying
-                    let playbackState = isPlaying ? "PLAYING" : "NOT PLAYING"
-                    CPUMonitor.shared.logCPUUsage(label: "[SCROLL START] Episode list scrolling - Podcast: \(playbackState)")
-                    
-                    // Post notification that episode list is scrolling
-                    NotificationCenter.default.post(name: .episodeListScrolling, object: nil)
+            DragGesture(minimumDistance: 10)
+                .onChanged { value in
+                    // Only trigger for primarily vertical scrolling (not horizontal swipes)
+                    let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
+                    if isVerticalScroll {
+                        // Post notification that episode list is scrolling
+                        NotificationCenter.default.post(name: .episodeListScrolling, object: nil)
+                    }
                 }
-                .onEnded { _ in
-                    // CPU MONITORING: Track CPU when scrolling stops
-                    let isPlaying = podcastPlayer.isPlaying
-                    let playbackState = isPlaying ? "PLAYING" : "NOT PLAYING"
-                    CPUMonitor.shared.logCPUUsage(label: "[SCROLL END] Episode list scroll stopped - Podcast: \(playbackState)")
-                    
-                    // Post notification that episode list stopped scrolling
-                    NotificationCenter.default.post(name: .episodeListScrollingStopped, object: nil)
-                    
-                    // Also post notification for episode title scrolling
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                .onEnded { value in
+                    // Only trigger for primarily vertical scrolling (not horizontal swipes)
+                    let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
+                    if isVerticalScroll {
+                        // Post notification that episode list stopped scrolling
+                        NotificationCenter.default.post(name: .episodeListScrollingStopped, object: nil)
+                        
+                        // Also post notification for episode title scrolling
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                        }
                     }
                 }
         )
@@ -3638,9 +3890,6 @@ struct PodcastPlayerView: View {
     
     private func handleOnAppear() {
         // CPU MONITORING: Track CPU when feed view appears
-        let isPlaying = podcastPlayer.isPlaying
-        let playbackState = isPlaying ? "PLAYING" : "NOT PLAYING"
-        CPUMonitor.shared.logCPUUsage(label: "[VIEW APPEAR] Feed view appeared - \(feed.title.prefix(20)) - Podcast: \(playbackState)")
         
         // CRITICAL FIX: Sync live progress from currently playing episode to cache
         // This ensures the episode list shows current live progress, not stale saved progress
@@ -3739,7 +3988,6 @@ struct PodcastPlayerView: View {
     
     private func loadInitialEpisodes() {
         // CPU MONITORING: Track CPU when initial episodes are requested
-        CPUMonitor.shared.logCPUUsage(label: "[INITIAL LOAD] Requesting initial episodes for feed \(feed.id.prefix(8))")
         
         // PERFORMANCE: Use optimized feed refresh to leverage snapshots
         viewModel.requestFeedRefresh(feed.id)
@@ -4250,17 +4498,25 @@ struct PodcastList: View {
         }
         .listStyle(PlainListStyle())
         .simultaneousGesture(
-            DragGesture()
-                .onChanged { _ in
-                    UserDefaults.standard.set(true, forKey: "isUserScrolling")
-                    // Post notification for PodcastPlayer scroll detection
-                    NotificationCenter.default.post(name: .userIsScrolling, object: nil)
-                }
-                .onEnded { _ in
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        UserDefaults.standard.set(false, forKey: "isUserScrolling")
+            DragGesture(minimumDistance: 10)
+                .onChanged { value in
+                    // Only trigger for primarily vertical scrolling (not horizontal swipes)
+                    let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
+                    if isVerticalScroll {
+                        UserDefaults.standard.set(true, forKey: "isUserScrolling")
                         // Post notification for PodcastPlayer scroll detection
-                        NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                        NotificationCenter.default.post(name: .userIsScrolling, object: nil)
+                    }
+                }
+                .onEnded { value in
+                    // Only trigger for primarily vertical scrolling (not horizontal swipes)
+                    let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
+                    if isVerticalScroll {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                            // Post notification for PodcastPlayer scroll detection
+                            NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                        }
                     }
                 }
         )
