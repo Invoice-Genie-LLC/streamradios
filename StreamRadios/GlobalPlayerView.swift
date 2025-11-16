@@ -35,6 +35,7 @@ struct GlobalPlayerView: View {
                 HStack(spacing: 8) {
                     // Home button on the left (only shows when scrolling)
                     HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
+                        .zIndex(1) // Ensure home button is above player to prevent tap-through
                     
                     // Podcast player with smooth animation
                     CompactPodcastPlayerView(
@@ -55,6 +56,7 @@ struct GlobalPlayerView: View {
                         }
                     )
                     .allowsHitTesting(!isScrolling) // Disable podcast player taps when Home button is showing
+                    .zIndex(0) // Player is below home button
                     .onTapGesture {
                         // Only allow tap when Home button is not showing to prevent conflicts
                         if !isScrolling, let currentFeed = podcastPlayer.currentFeed {
@@ -74,12 +76,14 @@ struct GlobalPlayerView: View {
                     HStack(spacing: 8) {
                         // Home button on the left (only shows when scrolling)
                         HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
+                            .zIndex(1) // Ensure home button is above player to prevent tap-through
                         
                         // Radio player with smooth animation
                         CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
                             .allowsHitTesting(!isScrolling) // Disable radio player taps when Home button is showing
+                            .zIndex(0) // Player is below home button
                     }
                     .padding(.horizontal, playerHorizontalPadding)
                     .padding(.bottom, 0)
@@ -89,19 +93,27 @@ struct GlobalPlayerView: View {
                     HStack(spacing: 8) {
                         // Home button on the left (only shows when scrolling)
                         HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
+                            .zIndex(1) // Ensure home button is above player to prevent tap-through
                         
                         // Radio player with smooth animation
                         CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
                             .allowsHitTesting(!isScrolling) // Disable radio player taps when Home button is showing
+                            .zIndex(0) // Player is below home button
                     }
                     .padding(.horizontal, playerHorizontalPadding)
                     .padding(.bottom, 0)
                 }
             }
         }
-        // Remove background - clean transparent look
+        .background(
+            // Invisible background to block tap-through while allowing button interactions
+            Rectangle()
+                .fill(Color.clear)
+                .contentShape(Rectangle())
+                .allowsHitTesting(true)
+        )
     }
     
     /// Determines if podcast player should be shown

@@ -440,35 +440,31 @@ struct ContentView: View {
             }
         }
         // Removed tab state persistence - app always starts on radio tab
-        .overlay(
+        .overlay(alignment: .bottom) {
             // Global Player positioned above tab bar, never covering it
-            VStack {
-                Spacer()
-                
-                if shouldShowGlobalPlayer {
-                    GlobalPlayerView(
-                        selectedPodcast: $selectedPodcast,
-                        isPlayerSheetPresented: $isPlayerSheetPresented,
-                        selectedTab: $selectedTab,
-                        isFooterMenuHidden: $isFooterMenuHidden,
-                        isScrolling: $isScrolling
-                    )
-                    .environmentObject(radioPlayer)
-                    .environmentObject(viewModel)
-                    .environmentObject(podcastPlayer)
-                    .environmentObject(podcastViewModel)
-                    .padding(.bottom, isFooterMenuHidden ? 15 : 55)
-                    // Add smooth sliding animation when TabView shows/hides
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
-                    // Add subtle scale and opacity animation for enhanced visual feedback
-                    .scaleEffect(shouldHideFooterMenu ? 1.02 : 1.0)
-                    .opacity(shouldShowGlobalPlayer ? 1.0 : 0.0)
-                    .animation(.easeInOut(duration: 0.3), value: shouldShowGlobalPlayer)
-                }
+            if shouldShowGlobalPlayer {
+                GlobalPlayerView(
+                    selectedPodcast: $selectedPodcast,
+                    isPlayerSheetPresented: $isPlayerSheetPresented,
+                    selectedTab: $selectedTab,
+                    isFooterMenuHidden: $isFooterMenuHidden,
+                    isScrolling: $isScrolling
+                )
+                .environmentObject(radioPlayer)
+                .environmentObject(viewModel)
+                .environmentObject(podcastPlayer)
+                .environmentObject(podcastViewModel)
+                .padding(.bottom, isFooterMenuHidden ? 15 : 55)
+                // Add smooth sliding animation when TabView shows/hides
+                .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
+                // Add subtle scale and opacity animation for enhanced visual feedback
+                .scaleEffect(shouldHideFooterMenu ? 1.02 : 1.0)
+                .opacity(shouldShowGlobalPlayer ? 1.0 : 0.0)
+                .animation(.easeInOut(duration: 0.3), value: shouldShowGlobalPlayer)
+                .allowsHitTesting(true) // Allow interaction with player only
+                .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
             }
-            .allowsHitTesting(true) // Allow interaction with player
-            .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
-        )
+        }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
                     // App is closing: dismiss the player UI overlay
                     isPlayerSheetPresented = false
@@ -1731,6 +1727,7 @@ struct UnifiedPodcastPlayerView: View {
                                 .padding(.leading, 4)  // Add left padding for better text positioning
                                 .padding(.trailing, 8) // Add right padding to extend tap area closer to buttons
                         }
+                        .contentShape(Rectangle()) // Ensure entire area is tappable and blocks tap-through
                     }
                     .buttonStyle(PlainButtonStyle())
                     
@@ -1824,6 +1821,12 @@ struct UnifiedPodcastPlayerView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 16))
                 )
                 .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+                .background(
+                    // Invisible background layer to block tap-through while allowing button interactions
+                    Rectangle()
+                        .fill(Color.clear)
+                        .contentShape(Rectangle())
+                )
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
             .sheet(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
@@ -1873,6 +1876,7 @@ struct UnifiedPodcastPlayerView: View {
                                 .padding(.leading, 4)  // Add left padding for better text positioning
                                 .padding(.trailing, 8) // Add right padding to extend tap area closer to buttons
                         }
+                        .contentShape(Rectangle()) // Ensure entire area is tappable and blocks tap-through
                     }
                     .buttonStyle(PlainButtonStyle())
                     
@@ -1938,10 +1942,12 @@ struct UnifiedPodcastPlayerView: View {
                 RoundedRectangle(cornerRadius: 16)
                     .fill(Color.adaptiveSecondaryBackground)
             )
-            .contentShape(Rectangle()) // Define tappable area to block tap-through
-            .onTapGesture {
-                // Consume taps on empty areas to prevent pass-through to views underneath
-            }
+            .background(
+                // Invisible background layer to block tap-through while allowing button interactions
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+            )
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
             .sheet(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
