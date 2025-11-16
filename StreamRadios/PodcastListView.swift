@@ -3411,6 +3411,9 @@ struct PodcastPlayerView: View {
     @State private var searchText = ""
     @State private var isSearchPresented = false
     
+    // Cached artwork to prevent flickering during scrolls
+    @State private var cachedArtworkImage: UIImage?
+    
     // MARK: - Bindings
     @Binding var selectedPodcast: PodcastFeed?
     @Binding var episodeToScrollTo: PodcastEpisode?
@@ -3695,41 +3698,23 @@ struct PodcastPlayerView: View {
             }
             
             HStack(alignment: .top, spacing: 16) {
-                // Feed artwork on the left - using cached imageData for instant loading
-                if let imageData = feed.imageData, let uiImage = UIImage(data: imageData) {
-                    Image(uiImage: uiImage)
+                // Feed artwork on the left - using cached UIImage to prevent flickering
+                if let cachedImage = cachedArtworkImage {
+                    Image(uiImage: cachedImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 120, height: 120)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
-                    // Fallback to URL loading if no cached data
-                    AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        case .failure(_), .empty:
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.gray.opacity(0.3))
-                                .overlay(
-                                    Image(systemName: "music.note")
-                                        .foregroundColor(.gray)
-                                        .font(.largeTitle)
-                                )
-                        @unknown default:
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.gray.opacity(0.3))
-                                .overlay(
-                                    Image(systemName: "music.note")
-                                        .foregroundColor(.gray)
-                                        .font(.largeTitle)
-                                )
-                        }
-                    }
-                    .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    // Placeholder while loading
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 120, height: 120)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .foregroundColor(.gray)
+                                .font(.largeTitle)
+                        )
                 }
                 
                 // Description text on the right
@@ -3963,6 +3948,13 @@ struct PodcastPlayerView: View {
             )
             .background(Color.adaptiveBackground)
             .onAppear {
+                // Cache artwork image to prevent flickering during scrolls
+                if cachedArtworkImage == nil {
+                    if let imageData = feed.imageData {
+                        cachedArtworkImage = UIImage(data: imageData)
+                    }
+                }
+                
                 // Start end indicator animation
                 endIndicatorScale = 1.3
                 viewDidAppear = true
@@ -4000,6 +3992,12 @@ struct PodcastPlayerView: View {
                 // ENHANCED: Trigger scroll to current episode when switching tabs
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     scrollToCurrentEpisodeIfNeeded(proxy: proxy)
+                }
+            }
+            .onChange(of: feed.imageData) { _, newImageData in
+                // Update cached artwork when feed image changes
+                if let imageData = newImageData {
+                    cachedArtworkImage = UIImage(data: imageData)
                 }
             }
         }
