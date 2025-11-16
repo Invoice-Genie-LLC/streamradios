@@ -1930,6 +1930,20 @@ struct EpisodeRowView: View {
                 // Calculate progress once for both action and UI
                 let currentProgress = podcastPlayer.getCurrentProgress(for: episode)
                 
+                ZStack {
+                    // Circular progress ring around button when playing
+                    if isPlaying && currentProgress > 0 {
+                        Circle()
+                            .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+                            .frame(width: 48, height: 48)
+                        
+                        Circle()
+                            .trim(from: 0, to: min(max(currentProgress, 0), 1)) // Clamp between 0 and 1
+                            .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                            .frame(width: 48, height: 48)
+                            .rotationEffect(.degrees(-90)) // Start from top
+                    }
+                    
                 Button(action: {
                     // FIX: Use EpisodeStateManager as source of truth for button behavior
                     let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
@@ -2008,6 +2022,7 @@ struct EpisodeRowView: View {
                         localLoadingState = false
                     }
                 }
+                }
                 
                 // COLUMN 2: Episode info (Flexible width with intelligent truncation)
                 VStack(alignment: .leading, spacing: 4) {
@@ -2020,16 +2035,6 @@ struct EpisodeRowView: View {
                         .foregroundColor(.primary)
                         .multilineTextAlignment(.leading)
                         .layoutPriority(1) // Give title priority in layout
-                    
-                    // Progress bar - only show on currently playing episode
-                    if isPlaying && currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
-                        ProgressView(value: currentProgress)
-                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                            .frame(height: 3)
-                            .background(Color.adaptiveBorder)
-                            .cornerRadius(1.5)
-                            .animation(podcastPlayer.isInitialProgressLoad ? nil : .easeInOut(duration: 0.3), value: currentProgress)
-                    }
                     
                     // Compact metadata row (priority-based truncation)
                     HStack(spacing: 4) {
@@ -2979,8 +2984,21 @@ struct OptimizedEpisodeRowView: View, Equatable {
         // Responsive Layout: Play Button | Episode Info | Action Buttons
         HStack(alignment: .top, spacing: 12) {
             
-            // COLUMN 1: Play button (Fixed width) with enhanced loading indicator
+            // COLUMN 1: Play button (Fixed width) with enhanced loading indicator and circular progress
             ZStack {
+                // Circular progress ring around button when playing
+                if isPlaying && currentProgress > 0 {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+                        .frame(width: 48, height: 48)
+                    
+                    Circle()
+                        .trim(from: 0, to: min(max(currentProgress, 0), 1)) // Clamp between 0 and 1
+                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .frame(width: 48, height: 48)
+                        .rotationEffect(.degrees(-90)) // Start from top
+                }
+                
                 Button(action: isPlaying ? onStop : {
                     // Start local loading state when play button tapped
                     print("🎬 OPTIMIZED LOADING: Setting localLoadingState = true for play")
@@ -3050,16 +3068,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     .lineLimit(2) // Limit lines for better scrolling performance
                     .multilineTextAlignment(.leading)
                     .layoutPriority(1) // Give title priority in layout
-                
-                // Progress bar - only show on currently playing episode
-                if isPlaying && currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
-                    ProgressView(value: currentProgress)
-                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                        .frame(height: 3)
-                        .background(Color.adaptiveBorder)
-                        .cornerRadius(1.5)
-                        .animation(podcastPlayer.isInitialProgressLoad ? nil : .easeInOut(duration: 0.3), value: currentProgress)
-                }
                 
                 // Compact metadata row (priority-based truncation)
                 HStack(spacing: 4) {
