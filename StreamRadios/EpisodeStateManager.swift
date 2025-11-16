@@ -209,11 +209,14 @@ class EpisodeStateManager: ObservableObject {
         // CRITICAL CLEANUP: Remove old data from standard UserDefaults to prevent CFPreferences overflow
         cleanupStandardUserDefaults()
         
-        // Load states from Core Data (will merge with restored backup if present)
-        loadSavedStates()
+        // Load currently playing episode synchronously (small, fast operation)
+        currentlyPlayingEpisodeId = userDefaults.string(forKey: currentlyPlayingKey)
         
-        // CRITICAL: Sync download states from Core Data on startup to recover from force close scenarios
-        syncDownloadStatesFromCoreData()
+        // PERFORMANCE: Load states asynchronously to avoid blocking app startup
+        // Start with empty dictionaries and load in background
+        Task.detached(priority: .userInitiated) {
+            await self.loadSavedStatesAsync()
+        }
         
         setupDebugLogging()
         
@@ -1195,15 +1198,16 @@ class EpisodeStateManager: ObservableObject {
     
     // MARK: - Public Methods
     
-    private func loadSavedStates() {
+    /// Async version of loadSavedStates for background loading during app startup
+    private func loadSavedStatesAsync() async {
         // CRITICAL FIX: If we just restored from backup, merge Core Data instead of replacing
         if didRestoreFromBackup {
             print("🔄 UPGRADE LOAD: Backup was restored, merging Core Data (not replacing)")
-            loadFromCoreDataAndMerge()
+            await loadFromCoreDataAndMergeAsync()
         } else {
-            // Normal startup: Load from Core Data
-            print("💾 NORMAL LOAD: Loading states from Core Data")
-            loadFromCoreData()
+            // Normal startup: Load from Core Data asynchronously
+            print("💾 NORMAL LOAD: Loading states from Core Data asynchronously")
+            await loadFromCoreDataAsync()
             
             // Check if Core Data loading failed and we need to restore from emergency backup
             if episodeStates.isEmpty && episodeProgress.isEmpty && hasEmergencyBackup() {
@@ -1212,11 +1216,10 @@ class EpisodeStateManager: ObservableObject {
             }
         }
         
-        // Load currently playing episode from UserDefaults (small data)
-        currentlyPlayingEpisodeId = userDefaults.string(forKey: currentlyPlayingKey)
-        if let playingId = currentlyPlayingEpisodeId {
-            print("✅ EpisodeStateManager: Currently playing episode: \(playingId)")
-        }
+        // Sync download states from Core Data after loading
+        syncDownloadStatesFromCoreData()
+        
+        print("✅ EpisodeStateManager: Async state loading completed")
     }
     
     /// Check if emergency backup exists
@@ -1224,9 +1227,9 @@ class EpisodeStateManager: ObservableObject {
         return userDefaults.data(forKey: "CoreDataEmergencyBackup") != nil
     }
     
-    /// Load episode states from Core Data (new primary method)
-    /// CRITICAL FIX: Now synchronous to ensure data is available immediately during app startup
-    private func loadFromCoreData() {
+    /// Load episode states from Core Data asynchronously (performance optimized)
+    /// PERFORMANCE: Async loading prevents blocking app startup with large episode counts
+    private func loadFromCoreDataAsync() async {
         let context = CoreDataStack.shared.context
         
         var loadedProgress: [String: Double] = [:]
@@ -1234,9 +1237,9 @@ class EpisodeStateManager: ObservableObject {
         var loadedDownloads: [String: Bool] = [:]
         var loadedStates: [String: EpisodePlaybackState] = [:]
         
-        // CRITICAL: Use performAndWait for synchronous loading during app startup
-        // This ensures episode progress is available immediately when episodes are played
-        context.performAndWait {
+        // PERFORMANCE: Use async perform to avoid blocking app startup
+        // States will load in background and be available when needed
+        await context.perform {
             do {
                 // CRITICAL FIX: Fetch ALL episodes, not just those with state data
                 // The contamination fixes may have reset some state flags
@@ -1298,13 +1301,15 @@ class EpisodeStateManager: ObservableObject {
             }
         }
         
-        // Update in-memory dictionaries immediately (we're already on main thread during init)
-        self.episodeProgress = loadedProgress
-        self.episodeFavorites = loadedFavorites
-        self.episodeDownloads = loadedDownloads
-        self.episodeStates = loadedStates
+        // Update in-memory dictionaries on main actor for thread safety
+        await MainActor.run {
+            self.episodeProgress = loadedProgress
+            self.episodeFavorites = loadedFavorites
+            self.episodeDownloads = loadedDownloads
+            self.episodeStates = loadedStates
+        }
         
-        print("✅ EpisodeStateManager: Loaded from Core Data synchronously - Progress: \(loadedProgress.count), Favorites: \(loadedFavorites.count), Downloads: \(loadedDownloads.count), States: \(loadedStates.count)")
+        print("✅ EpisodeStateManager: Loaded from Core Data asynchronously - Progress: \(loadedProgress.count), Favorites: \(loadedFavorites.count), Downloads: \(loadedDownloads.count), States: \(loadedStates.count)")
         
         // CRITICAL FIX: Clean up orphaned states (states for episodes that no longer exist in Core Data)
         // This prevents displaying "ghost" states after app upgrades when episodes are removed
@@ -1471,6 +1476,91 @@ class EpisodeStateManager: ObservableObject {
         
         print("✅ MERGE COMPLETE: Merged \(mergedCount) items from Core Data with restored backup")
         print("📊 FINAL COUNTS: Progress=\(self.episodeProgress.count), Favorites=\(self.episodeFavorites.count), Downloads=\(self.episodeDownloads.count), States=\(self.episodeStates.count)")
+    }
+    
+    /// Async version: Load episode states from Core Data and MERGE with existing restored backup data
+    /// Used after backup restoration to avoid overwriting restored data
+    private func loadFromCoreDataAndMergeAsync() async {
+        let context = CoreDataStack.shared.context
+        
+        var coreDataProgress: [String: Double] = [:]
+        var coreDataFavorites: [String: Bool] = [:]
+        var coreDataDownloads: [String: Bool] = [:]
+        var coreDataStates: [String: EpisodePlaybackState] = [:]
+        
+        await context.perform {
+            do {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                let episodes = try context.fetch(fetchRequest)
+                print("💾 MERGE LOAD: Found \(episodes.count) episodes in Core Data to merge")
+                
+                for episode in episodes {
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    
+                    // Collect Core Data values
+                    if episode.progress > 0 {
+                        coreDataProgress[episodeId] = Double(episode.progress)
+                    }
+                    if episode.isFavorite {
+                        coreDataFavorites[episodeId] = true
+                    }
+                    if episode.isDownloaded {
+                        coreDataDownloads[episodeId] = true
+                    }
+                    if episode.isPlayed {
+                        coreDataStates[episodeId] = .played
+                    } else if episode.progress >= 1.0 {
+                        coreDataStates[episodeId] = .played
+                    } else if episode.progress > 0 {
+                        coreDataStates[episodeId] = .inProgress
+                    }
+                }
+            } catch {
+                print("❌ MERGE LOAD: Failed to load from Core Data: \(error)")
+            }
+        }
+        
+        // MERGE: Take maximum of both sources (never lose data) - on main actor
+        await MainActor.run {
+            var mergedCount = 0
+            
+            // Merge progress - take maximum
+            for (episodeId, coreProgress) in coreDataProgress {
+                let existingProgress = self.episodeProgress[episodeId] ?? 0.0
+                if coreProgress > existingProgress {
+                    self.episodeProgress[episodeId] = coreProgress
+                    mergedCount += 1
+                }
+            }
+            
+            // Merge favorites - keep any true values
+            for (episodeId, isFavorite) in coreDataFavorites {
+                if isFavorite && (self.episodeFavorites[episodeId] == nil || !self.episodeFavorites[episodeId]!) {
+                    self.episodeFavorites[episodeId] = true
+                    mergedCount += 1
+                }
+            }
+            
+            // Merge downloads - keep any true values
+            for (episodeId, isDownloaded) in coreDataDownloads {
+                if isDownloaded && (self.episodeDownloads[episodeId] == nil || !self.episodeDownloads[episodeId]!) {
+                    self.episodeDownloads[episodeId] = true
+                    mergedCount += 1
+                }
+            }
+            
+            // Merge states - prioritize played over in-progress
+            for (episodeId, coreState) in coreDataStates {
+                let existingState = self.episodeStates[episodeId]
+                if existingState == nil || (coreState == .played && existingState != .played) {
+                    self.episodeStates[episodeId] = coreState
+                    mergedCount += 1
+                }
+            }
+            
+            print("✅ MERGE COMPLETE: Merged \(mergedCount) items from Core Data with restored backup")
+            print("📊 FINAL COUNTS: Progress=\(self.episodeProgress.count), Favorites=\(self.episodeFavorites.count), Downloads=\(self.episodeDownloads.count), States=\(self.episodeStates.count)")
+        }
     }
     
     /// Fallback method to load from UserDefaults (for migration from old data)
