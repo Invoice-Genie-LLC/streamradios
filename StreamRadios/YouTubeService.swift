@@ -22,6 +22,28 @@ struct YouTubeVideo {
 class YouTubeService {
     static let shared = YouTubeService()
     
+    /// Decode Unicode escape sequences in strings (e.g., \u0026 -> &)
+    private func decodeUnicodeEscapes(_ string: String) -> String {
+        var result = string
+        
+        // Replace common Unicode escape sequences
+        let replacements: [(String, String)] = [
+            ("\\u0026", "&"),   // Ampersand
+            ("\\u0027", "'"),   // Single quote
+            ("\\u003c", "<"),   // Less than
+            ("\\u003e", ">"),   // Greater than
+            ("\\u0022", "\""),  // Double quote
+            ("\\u002f", "/"),   // Forward slash
+            ("\\u005c", "\\"),  // Backslash
+        ]
+        
+        for (escaped, unescaped) in replacements {
+            result = result.replacingOccurrences(of: escaped, with: unescaped)
+        }
+        
+        return result
+    }
+    
     /// Scrape YouTube search results to get first video ID (no API needed)
     /// - Parameters:
     ///   - songTitle: The title of the song
@@ -1134,7 +1156,8 @@ class YouTubeService {
                     in: titleText,
                     range: NSRange(titleText.startIndex..., in: titleText)
                 ), let range = Range(match.range(at: 1), in: titleText) {
-                    title = String(titleText[range])
+                    // Decode Unicode escape sequences (e.g., \u0026 -> &)
+                    title = self.decodeUnicodeEscapes(String(titleText[range]))
                 }
             }
             
@@ -1145,7 +1168,7 @@ class YouTubeService {
                     in: descText,
                     range: NSRange(descText.startIndex..., in: descText)
                 ), let range = Range(match.range(at: 1), in: descText) {
-                    description = String(descText[range])
+                    description = self.decodeUnicodeEscapes(String(descText[range]))
                         .replacingOccurrences(of: "\\n", with: "\n")
                         .replacingOccurrences(of: "\\/", with: "/")
                 }
@@ -1158,7 +1181,7 @@ class YouTubeService {
                     in: descText,
                     range: NSRange(descText.startIndex..., in: descText)
                 ), let range = Range(match.range(at: 1), in: descText) {
-                    description = String(descText[range])
+                    description = self.decodeUnicodeEscapes(String(descText[range]))
                         .replacingOccurrences(of: "\\n", with: "\n")
                         .replacingOccurrences(of: "\\/", with: "/")
                 }
