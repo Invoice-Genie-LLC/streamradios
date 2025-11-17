@@ -36,6 +36,10 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     @Published var youtubeVideoViews: String?
     @Published var youtubeLikes: String?
     @Published var youtubePublishDate: String?
+    
+    // Track the last fetched video to prevent unnecessary metadata resets
+    private var lastFetchedSongTitle: String?
+    private var lastFetchedArtistName: String?
 
     private var audioEngine = AVAudioEngine()
     private var session = SHSession()
@@ -139,12 +143,23 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         
         print("🔍 YouTube: Searching for '\(songTitle)' by '\(artistName)'")
         
-        // Reset metadata to nil to prevent showing stale data from previous video
-        youtubeVideoTitle = nil
-        youtubeVideoDescription = nil
-        youtubeVideoViews = nil
-        youtubeLikes = nil
-        youtubePublishDate = nil
+        // Only reset metadata if fetching a different song (prevents flicker when reloading same video)
+        let isSameSong = lastFetchedSongTitle == songTitle && lastFetchedArtistName == artistName
+        
+        if !isSameSong {
+            print("🔄 YouTube: Fetching new video - resetting metadata")
+            youtubeVideoTitle = nil
+            youtubeVideoDescription = nil
+            youtubeVideoViews = nil
+            youtubeLikes = nil
+            youtubePublishDate = nil
+            
+            // Update tracking
+            lastFetchedSongTitle = songTitle
+            lastFetchedArtistName = artistName
+        } else {
+            print("✅ YouTube: Same video - preserving existing metadata")
+        }
         
         YouTubeService.shared.searchSong(title: songTitle, artist: artistName) { [weak self] videoId in
             DispatchQueue.main.async {
@@ -155,11 +170,24 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                     // Fetch video metadata (description, title, views, likes, date)
                     YouTubeService.shared.fetchVideoMetadata(videoId: videoId) { [weak self] video in
                         DispatchQueue.main.async {
-                            self?.youtubeVideoTitle = video?.title
-                            self?.youtubeVideoDescription = video?.description
-                            self?.youtubeVideoViews = video?.viewCount
-                            self?.youtubeLikes = video?.likeCount
-                            self?.youtubePublishDate = video?.publishDate
+                            guard let self = self else { return }
+                            
+                            // Only update metadata if we don't have it yet or if new data is available
+                            if self.youtubeVideoTitle == nil || video?.title != nil {
+                                self.youtubeVideoTitle = video?.title
+                            }
+                            if self.youtubeVideoDescription == nil || video?.description != nil {
+                                self.youtubeVideoDescription = video?.description
+                            }
+                            if self.youtubeVideoViews == nil || video?.viewCount != nil {
+                                self.youtubeVideoViews = video?.viewCount
+                            }
+                            if self.youtubeLikes == nil || video?.likeCount != nil {
+                                self.youtubeLikes = video?.likeCount
+                            }
+                            if self.youtubePublishDate == nil || video?.publishDate != nil {
+                                self.youtubePublishDate = video?.publishDate
+                            }
                             
                             print("📅 YouTube: Publish date set to: \(video?.publishDate ?? "nil")")
                         }
