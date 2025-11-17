@@ -722,6 +722,411 @@ class YouTubeService {
             var publishDate: String?
             var channelName: String?
             
+            // PRIORITY 1: Extract JSON data from ytInitialData and ytInitialPlayerResponse
+            // These contain the most reliable metadata
+            
+            // Helper function to extract JSON object from script
+            func extractJSON(from html: String, prefix: String) -> [String: Any]? {
+                print("🔍 Looking for prefix: '\(prefix)'")
+                guard let range = html.range(of: prefix) else {
+                    print("❌ Prefix '\(prefix)' not found in HTML")
+                    return nil
+                }
+                
+                print("✅ Found prefix '\(prefix)' at position")
+                var startIndex = range.upperBound
+                
+                // Skip whitespace
+                while startIndex < html.endIndex && html[startIndex].isWhitespace {
+                    startIndex = html.index(after: startIndex)
+                }
+                
+                // Check if value is null
+                if html[startIndex...].starts(with: "null") {
+                    print("⚠️ Value is null, skipping")
+                    return nil
+                }
+                
+                // Find the end of the JSON - look for either semicolon or script tag end
+                var jsonEndIndex = startIndex
+                var braceCount = 0
+                var foundStart = false
+                var inString = false
+                var escapeNext = false
+                
+                for index in html[startIndex...].indices {
+                    let char = html[index]
+                    
+                    // Handle string escaping
+                    if escapeNext {
+                        escapeNext = false
+                        continue
+                    }
+                    if char == "\\" {
+                        escapeNext = true
+                        continue
+                    }
+                    if char == "\"" {
+                        inString.toggle()
+                        continue
+                    }
+                    
+                    // Only count braces outside of strings
+                    if !inString {
+                        if char == "{" {
+                            braceCount += 1
+                            foundStart = true
+                        } else if char == "}" {
+                            braceCount -= 1
+                            if foundStart && braceCount == 0 {
+                                jsonEndIndex = html.index(after: index)
+                                break
+                            }
+                        }
+                    }
+                }
+                
+                var jsonString = String(html[startIndex..<jsonEndIndex])
+                print("📏 Extracted raw string length: \(jsonString.count) characters")
+                
+                // Handle escaped JSON strings (mobile YouTube sometimes does this)
+                if jsonString.hasPrefix("\"") || jsonString.hasPrefix("'") {
+                    print("🔧 Detected quoted JSON string, unescaping...")
+                    // Remove quotes
+                    jsonString = String(jsonString.dropFirst().dropLast())
+                    
+                    // Check if it's hex-encoded (e.g., \x7b for {)
+                    if jsonString.contains("\\x") {
+                        print("🔧 Detected hex-encoded JSON, decoding...")
+                        // Decode hex sequences like \x7b to actual characters
+                        var decoded = ""
+                        var i = jsonString.startIndex
+                        
+                        while i < jsonString.endIndex {
+                            if i < jsonString.index(jsonString.endIndex, offsetBy: -3),
+                               jsonString[i] == "\\",
+                               jsonString[jsonString.index(after: i)] == "x" {
+                                // Found \xNN pattern
+                                let hexStart = jsonString.index(i, offsetBy: 2)
+                                let hexEnd = jsonString.index(i, offsetBy: 4)
+                                let hexString = String(jsonString[hexStart..<hexEnd])
+                                
+                                if let hexValue = UInt8(hexString, radix: 16) {
+                                    decoded.append(Character(UnicodeScalar(hexValue)))
+                                    i = hexEnd
+                                } else {
+                                    decoded.append(jsonString[i])
+                                    i = jsonString.index(after: i)
+                                }
+                            } else {
+                                decoded.append(jsonString[i])
+                                i = jsonString.index(after: i)
+                            }
+                        }
+                        jsonString = decoded
+                        
+                        // Instead of parsing the entire massive JSON, extract just the microformat section
+                        print("🔧 Extracting microformat section using targeted regex...")
+                        
+                        // Look for the microformat section specifically
+                        if let microformatRange = jsonString.range(of: "\"microformat\"\\s*:\\s*\\{", options: .regularExpression) {
+                            let startIndex = microformatRange.upperBound
+                            
+                            // Find the matching closing brace for microformat
+                            var braceCount = 1
+                            var endIndex = startIndex
+                            var inString = false
+                            var escapeNext = false
+                            
+                            for index in jsonString[startIndex...].indices {
+                                let char = jsonString[index]
+                                
+                                if escapeNext {
+                                    escapeNext = false
+                                    continue
+                                }
+                                if char == "\\" {
+                                    escapeNext = true
+                                    continue
+                                }
+                                if char == "\"" && !escapeNext {
+                                    inString.toggle()
+                                    continue
+                                }
+                                
+                                if !inString {
+                                    if char == "{" {
+                                        braceCount += 1
+                                    } else if char == "}" {
+                                        braceCount -= 1
+                                        if braceCount == 0 {
+                                            endIndex = jsonString.index(after: index)
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            let microformatJSON = "{" + String(jsonString[startIndex..<endIndex])
+                            print("📏 Extracted microformat JSON: \(microformatJSON.count) characters")
+                            print("📄 Microformat preview (first 200 chars): \(String(microformatJSON.prefix(200)))")
+                            
+                            // Try to parse just the microformat
+                            if let microformatData = microformatJSON.data(using: .utf8),
+                               let microformatDict = try? JSONSerialization.jsonObject(with: microformatData) as? [String: Any] {
+                                print("✅ Successfully parsed microformat JSON!")
+                                
+                                // Store it so we can use it later
+                                jsonString = microformatJSON
+                            } else {
+                                print("⚠️ Failed to parse microformat, falling back to full JSON")
+                            }
+                        } else {
+                            print("⚠️ Could not find microformat section in JSON")
+                        }
+                    } else {
+                        // Standard escape sequences
+                        jsonString = jsonString.replacingOccurrences(of: "\\\"", with: "\"")
+                        jsonString = jsonString.replacingOccurrences(of: "\\/", with: "/")
+                        jsonString = jsonString.replacingOccurrences(of: "\\\\", with: "\\")
+                    }
+                }
+                
+                print("📄 JSON preview (first 200 chars): \(String(jsonString.prefix(200)))")
+                
+                guard let jsonData = jsonString.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+                    print("❌ Failed to parse JSON from extracted string")
+                    print("   First 500 chars of failed string: \(String(jsonString.prefix(500)))")
+                    return nil
+                }
+                
+                print("✅ Successfully parsed JSON with \(json.keys.count) top-level keys: \(Array(json.keys.prefix(10)))")
+                return json
+            }
+            
+            // Try ytInitialPlayerResponse first (contains videoDetails and microformat)
+            if let playerResponse = extractJSON(from: html, prefix: "var ytInitialPlayerResponse = ") {
+                print("✅ Successfully parsed ytInitialPlayerResponse JSON")
+                
+                // Extract from microformat (most reliable for publish date)
+                if let microformat = playerResponse["microformat"] as? [String: Any],
+                   let playerMicroformatRenderer = microformat["playerMicroformatRenderer"] as? [String: Any] {
+                    
+                    if let uploadDate = playerMicroformatRenderer["uploadDate"] as? String {
+                        publishDate = uploadDate
+                        print("✅ Found publish date in microformat.uploadDate: \(publishDate!)")
+                    } else if let publishDateStr = playerMicroformatRenderer["publishDate"] as? String {
+                        publishDate = publishDateStr
+                        print("✅ Found publish date in microformat.publishDate: \(publishDate!)")
+                    }
+                }
+                
+                // Extract from videoDetails as fallback
+                if publishDate == nil,
+                   let videoDetails = playerResponse["videoDetails"] as? [String: Any],
+                   let publishDateStr = videoDetails["publishDate"] as? String {
+                    publishDate = publishDateStr
+                    print("✅ Found publish date in videoDetails: \(publishDate!)")
+                }
+            }
+            
+            // Try ytInitialData for additional metadata like date text
+            if let initialData = extractJSON(from: html, prefix: "var ytInitialData = ") {
+                print("✅ Successfully parsed ytInitialData JSON")
+                
+                // Check if we extracted just the microformat or the full data
+                var microformat: [String: Any]? = nil
+                
+                // If the parsed JSON has playerMicroformatRenderer or microformatDataRenderer at top level,
+                // it means we extracted just the microformat section
+                if initialData["playerMicroformatRenderer"] != nil || initialData["microformatDataRenderer"] != nil {
+                    print("🔍 Detected extracted microformat section (not full ytInitialData)")
+                    microformat = initialData
+                } else {
+                    // Otherwise, look for microformat within the full initialData
+                    microformat = initialData["microformat"] as? [String: Any]
+                }
+                
+                // First try microformat (mobile YouTube has it here instead of in playerResponse)
+                if let microformat = microformat {
+                    print("🔍 Found microformat, keys: \(microformat.keys)")
+                    
+                    // Try playerMicroformatRenderer (desktop YouTube)
+                    if let playerMicroformatRenderer = microformat["playerMicroformatRenderer"] as? [String: Any] {
+                        if let uploadDate = playerMicroformatRenderer["uploadDate"] as? String {
+                            publishDate = uploadDate
+                            print("✅ Found publish date in ytInitialData.microformat.uploadDate: \(publishDate!)")
+                        } else if let publishDateStr = playerMicroformatRenderer["publishDate"] as? String {
+                            publishDate = publishDateStr
+                            print("✅ Found publish date in ytInitialData.microformat.publishDate: \(publishDate!)")
+                        }
+                    }
+                    // Try microformatDataRenderer (mobile YouTube)
+                    else if let microformatDataRenderer = microformat["microformatDataRenderer"] as? [String: Any] {
+                        print("🔍 Found microformatDataRenderer (mobile), keys: \(microformatDataRenderer.keys)")
+                        
+                        // Dump the entire structure to find the date
+                        if let jsonData = try? JSONSerialization.data(withJSONObject: microformatDataRenderer, options: .prettyPrinted),
+                           let jsonString = String(data: jsonData, encoding: .utf8) {
+                            print("📋 Full microformatDataRenderer JSON (first 2000 chars):")
+                            print(String(jsonString.prefix(2000)))
+                        }
+                        
+                        if let uploadDate = microformatDataRenderer["uploadDate"] as? String {
+                            publishDate = uploadDate
+                            print("✅ Found publish date in ytInitialData.microformatDataRenderer.uploadDate: \(publishDate!)")
+                        } else if let publishDateStr = microformatDataRenderer["publishDate"] as? String {
+                            publishDate = publishDateStr
+                            print("✅ Found publish date in ytInitialData.microformatDataRenderer.publishDate: \(publishDate!)")
+                        } else if let videoDetails = microformatDataRenderer["videoDetails"] as? [String: Any] {
+                            print("🔍 Found videoDetails in microformatDataRenderer, keys: \(videoDetails.keys)")
+                            
+                            if let uploadDate = videoDetails["uploadDate"] as? String {
+                                publishDate = uploadDate
+                                print("✅ Found publish date in ytInitialData.microformatDataRenderer.videoDetails.uploadDate: \(publishDate!)")
+                            } else if let publishDateStr = videoDetails["publishDate"] as? String {
+                                publishDate = publishDateStr
+                                print("✅ Found publish date in ytInitialData.microformatDataRenderer.videoDetails.publishDate: \(publishDate!)")
+                            } else {
+                                print("⚠️ videoDetails found but no uploadDate or publishDate field")
+                                print("   Available keys: \(Array(videoDetails.keys))")
+                            }
+                        } else {
+                            print("⚠️ microformatDataRenderer found but no uploadDate or publishDate field")
+                            print("   Available keys: \(Array(microformatDataRenderer.keys))")
+                        }
+                    } else {
+                        print("⚠️ microformat found but no playerMicroformatRenderer or microformatDataRenderer")
+                        print("   microformat keys: \(Array(microformat.keys))")
+                    }
+                } else {
+                    print("⚠️ ytInitialData parsed but no microformat found")
+                    print("   ytInitialData top-level keys: \(Array(initialData.keys))")
+                }
+                
+                // Navigate through the complex structure to find dateText as fallback
+                if publishDate == nil,
+                   let contents = initialData["contents"] as? [String: Any],
+                   let twoColumnWatchNextResults = contents["twoColumnWatchNextResults"] as? [String: Any],
+                   let results = twoColumnWatchNextResults["results"] as? [String: Any],
+                   let resultsContents = results["results"] as? [String: Any],
+                   let contents = resultsContents["contents"] as? [[String: Any]] {
+                    
+                    for content in contents {
+                        if let videoSecondaryInfoRenderer = content["videoSecondaryInfoRenderer"] as? [String: Any],
+                           let dateText = videoSecondaryInfoRenderer["dateText"] as? [String: Any],
+                           let simpleText = dateText["simpleText"] as? String {
+                            publishDate = simpleText
+                            print("✅ Found publish date in ytInitialData dateText: \(publishDate!)")
+                            break
+                        }
+                    }
+                }
+            }
+            
+            // Fallback 1: Try meta tags in HTML head
+            if publishDate == nil {
+                print("🔍 Searching for publish date in meta tags...")
+                
+                // Try og:published_time
+                if let ogPublishedRange = html.range(of: "<meta property=\"og:published_time\" content=\"([^\"]+)\"", options: .regularExpression) {
+                    let metaText = String(html[ogPublishedRange])
+                    if let match = try? NSRegularExpression(pattern: "content=\"([^\"]+)\"").firstMatch(
+                        in: metaText,
+                        range: NSRange(metaText.startIndex..., in: metaText)
+                    ), let range = Range(match.range(at: 1), in: metaText) {
+                        publishDate = String(metaText[range])
+                        print("✅ Found publish date in og:published_time meta tag: \(publishDate!)")
+                    }
+                }
+                
+                // Try uploadDate itemprop
+                if publishDate == nil, let uploadDateRange = html.range(of: "itemprop=\"uploadDate\" content=\"([^\"]+)\"", options: .regularExpression) {
+                    let metaText = String(html[uploadDateRange])
+                    if let match = try? NSRegularExpression(pattern: "content=\"([^\"]+)\"").firstMatch(
+                        in: metaText,
+                        range: NSRange(metaText.startIndex..., in: metaText)
+                    ), let range = Range(match.range(at: 1), in: metaText) {
+                        publishDate = String(metaText[range])
+                        print("✅ Found publish date in uploadDate itemprop: \(publishDate!)")
+                    }
+                }
+                
+                // Try datePublished itemprop
+                if publishDate == nil, let datePublishedRange = html.range(of: "itemprop=\"datePublished\" content=\"([^\"]+)\"", options: .regularExpression) {
+                    let metaText = String(html[datePublishedRange])
+                    if let match = try? NSRegularExpression(pattern: "content=\"([^\"]+)\"").firstMatch(
+                        in: metaText,
+                        range: NSRange(metaText.startIndex..., in: metaText)
+                    ), let range = Range(match.range(at: 1), in: metaText) {
+                        publishDate = String(metaText[range])
+                        print("✅ Found publish date in datePublished itemprop: \(publishDate!)")
+                    }
+                }
+            }
+            
+            // Fallback 2: Try JSON-LD structured data
+            if publishDate == nil {
+                print("🔍 Searching for publish date in JSON-LD structured data...")
+                
+                if let jsonLdRange = html.range(of: "<script type=\"application/ld\\+json\">(.+?)</script>", options: .regularExpression) {
+                    let jsonLdText = String(html[jsonLdRange])
+                    
+                    // Try uploadDate in JSON-LD
+                    if let uploadDateMatch = jsonLdText.range(of: "\"uploadDate\"\\s*:\\s*\"([^\"]+)\"", options: .regularExpression) {
+                        let dateText = String(jsonLdText[uploadDateMatch])
+                        if let match = try? NSRegularExpression(pattern: "\"uploadDate\"\\s*:\\s*\"([^\"]+)\"").firstMatch(
+                            in: dateText,
+                            range: NSRange(dateText.startIndex..., in: dateText)
+                        ), let range = Range(match.range(at: 1), in: dateText) {
+                            publishDate = String(dateText[range])
+                            print("✅ Found publish date in JSON-LD uploadDate: \(publishDate!)")
+                        }
+                    }
+                    
+                    // Try datePublished in JSON-LD
+                    if publishDate == nil, let datePublishedMatch = jsonLdText.range(of: "\"datePublished\"\\s*:\\s*\"([^\"]+)\"", options: .regularExpression) {
+                        let dateText = String(jsonLdText[datePublishedMatch])
+                        if let match = try? NSRegularExpression(pattern: "\"datePublished\"\\s*:\\s*\"([^\"]+)\"").firstMatch(
+                            in: dateText,
+                            range: NSRange(dateText.startIndex..., in: dateText)
+                        ), let range = Range(match.range(at: 1), in: dateText) {
+                            publishDate = String(dateText[range])
+                            print("✅ Found publish date in JSON-LD datePublished: \(publishDate!)")
+                        }
+                    }
+                }
+            }
+            
+            // Fallback 3: Try publishedDate in inline JSON
+            if publishDate == nil {
+                print("🔍 Searching for publish date in inline JSON patterns...")
+                
+                if let publishedDateRange = html.range(of: "\"publishedDate\"\\s*:\\s*\"([^\"]+)\"", options: .regularExpression) {
+                    let dateText = String(html[publishedDateRange])
+                    if let match = try? NSRegularExpression(pattern: "\"publishedDate\"\\s*:\\s*\"([^\"]+)\"").firstMatch(
+                        in: dateText,
+                        range: NSRange(dateText.startIndex..., in: dateText)
+                    ), let range = Range(match.range(at: 1), in: dateText) {
+                        publishDate = String(dateText[range])
+                        print("✅ Found publish date in inline publishedDate: \(publishDate!)")
+                    }
+                }
+                
+                // Try publishDate in inline JSON
+                if publishDate == nil, let publishDateRange = html.range(of: "\"publishDate\"\\s*:\\s*\"([^\"]+)\"", options: .regularExpression) {
+                    let dateText = String(html[publishDateRange])
+                    if let match = try? NSRegularExpression(pattern: "\"publishDate\"\\s*:\\s*\"([^\"]+)\"").firstMatch(
+                        in: dateText,
+                        range: NSRange(dateText.startIndex..., in: dateText)
+                    ), let range = Range(match.range(at: 1), in: dateText) {
+                        publishDate = String(dateText[range])
+                        print("✅ Found publish date in inline publishDate: \(publishDate!)")
+                    }
+                }
+            }
+            
             // Try to find title
             if let titleMatch = html.range(of: "\"title\":\"([^\"]+)\"", options: .regularExpression) {
                 let titleText = String(html[titleMatch])
@@ -770,116 +1175,38 @@ class YouTubeService {
                 }
             }
             
-            // Try to find like count - multiple patterns
-            let likePatterns = [
-                "\"accessibilityText\":\"([0-9,]+) likes\"",
-                "\"label\":\"([0-9,]+) likes\"",
-                "\"defaultText\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([0-9,]+) likes",
-                "\"toggleButtonRenderer\".*?\"defaultText\".*?\"simpleText\":\"([0-9,]+)\"",
-                "\"likeCount\":\"([0-9,]+)\"",
-                "\"text\":\"([0-9KMB.]+)\".*?\"iconType\":\"LIKE\""
-            ]
-            
-            for pattern in likePatterns {
-                if likeCount == nil {
-                    if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
-                       let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
-                        if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: html) {
-                            let extracted = String(html[range])
-                            if !extracted.isEmpty {
-                                likeCount = extracted
-                                print("✅ Found likes using pattern: \(pattern)")
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Try to find publish date - extensive patterns
-            let datePatterns = [
-                // ISO format dates
-                "\"publishDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
-                "\"uploadDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
-                
-                // Date text fields
-                "\"dateText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
-                "\"dateText\":\"([^\"]+)\"",
-                
-                // Published time variations
-                "\"publishedTimeText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
-                "\"publishedTimeText\":\"([^\"]+)\"",
-                
-                // Info row text (where date often appears)
-                "\"info\":\\[.*?\"text\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
-                
-                // Relative time patterns
-                "\"relativeDateText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
-                
-                // Video secondary info
-                "\"videoSecondaryInfoRenderer\".*?\"dateText\".*?\"simpleText\":\"([^\"]+)\"",
-                
-                // Plain text date patterns (e.g., "Nov 23, 2024", "3 years ago")
-                "\"text\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
-                "\"text\":\"([0-9]+ years? ago)\"",
-                "\"text\":\"([0-9]+ months? ago)\"",
-                "\"text\":\"([0-9]+ weeks? ago)\"",
-                "\"text\":\"([0-9]+ days? ago)\"",
-                
-                // Structured data
-                "\"structuredDescription\".*?\"dateText\".*?\"content\":\"([^\"]+)\"",
-                
-                // Meta info
-                "\"videoDetails\".*?\"publishDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
-                
-                // Accessibility labels for date
-                "\"dateText\".*?\"accessibility\".*?\"label\":\"([^\"]+)\""
-            ]
-            
-            print("🔍 Searching for publish date...")
-            for (index, pattern) in datePatterns.enumerated() {
-                if publishDate == nil {
-                    if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
-                       let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
-                        if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: html) {
-                            let extracted = String(html[range])
-                            if !extracted.isEmpty && extracted.count < 50 {  // Sanity check
-                                publishDate = extracted
-                                print("✅ Found date using pattern \(index + 1): \(pattern)")
-                                print("   Extracted: '\(extracted)'")
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // FALLBACK: Aggressive search for any date-like patterns in HTML
-            if publishDate == nil {
-                print("⚠️ Primary patterns failed, trying aggressive fallback...")
-                
-                // Search for common date patterns anywhere in HTML
-                let fallbackPatterns = [
-                    "[A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4}",  // Nov 23, 2024
-                    "[0-9]{1,2}\\s+[A-Z][a-z]{2}\\s+[0-9]{4}",    // 23 Nov 2024
-                    "[0-9]{4}-[0-9]{2}-[0-9]{2}",                 // 2024-11-23
-                    "[0-9]+ years? ago",                          // 3 years ago
-                    "[0-9]+ months? ago",                         // 2 months ago
-                    "[0-9]+ weeks? ago",                          // 1 week ago
-                    "[0-9]+ days? ago",                           // 5 days ago
-                    "[0-9]+ hours? ago"                           // 12 hours ago
-                ]
-                
-                for pattern in fallbackPatterns {
-                    if publishDate == nil {
-                        if let regex = try? NSRegularExpression(pattern: pattern),
-                           let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
-                            if let range = Range(match.range, in: html) {
-                                let extracted = String(html[range])
-                                // Validate it looks like a reasonable date
-                                if extracted.count >= 4 && extracted.count < 50 {
-                                    publishDate = extracted
-                                    print("✅ Found date using aggressive fallback: '\(extracted)'")
+            // Try to find like count from parsed JSON first
+            if let initialData = extractJSON(from: html, prefix: "var ytInitialData = ") {
+                if let contents = initialData["contents"] as? [String: Any],
+                   let twoColumnWatchNextResults = contents["twoColumnWatchNextResults"] as? [String: Any],
+                   let results = twoColumnWatchNextResults["results"] as? [String: Any],
+                   let resultsContents = results["results"] as? [String: Any],
+                   let contents = resultsContents["contents"] as? [[String: Any]] {
+                    
+                    for content in contents {
+                        if let videoPrimaryInfoRenderer = content["videoPrimaryInfoRenderer"] as? [String: Any],
+                           let videoActions = videoPrimaryInfoRenderer["videoActions"] as? [String: Any],
+                           let menuRenderer = videoActions["menuRenderer"] as? [String: Any],
+                           let topLevelButtons = menuRenderer["topLevelButtons"] as? [[String: Any]] {
+                            
+                            // Find the like button
+                            for button in topLevelButtons {
+                                if let toggleButtonRenderer = button["toggleButtonRenderer"] as? [String: Any],
+                                   let defaultText = toggleButtonRenderer["defaultText"] as? [String: Any],
+                                   let simpleText = defaultText["simpleText"] as? String {
+                                    likeCount = simpleText
+                                    print("✅ Found likes in ytInitialData: \(likeCount!)")
+                                    break
+                                }
+                                
+                                // Alternative structure
+                                if let segmentedLikeDislikeButtonRenderer = button["segmentedLikeDislikeButtonRenderer"] as? [String: Any],
+                                   let likeButton = segmentedLikeDislikeButtonRenderer["likeButton"] as? [String: Any],
+                                   let toggleButtonRenderer = likeButton["toggleButtonRenderer"] as? [String: Any],
+                                   let defaultText = toggleButtonRenderer["defaultText"] as? [String: Any],
+                                   let simpleText = defaultText["simpleText"] as? String {
+                                    likeCount = simpleText
+                                    print("✅ Found likes in ytInitialData (segmented): \(likeCount!)")
                                     break
                                 }
                             }
@@ -887,6 +1214,112 @@ class YouTubeService {
                     }
                 }
             }
+            
+            // Fallback to regex patterns if JSON parsing failed
+            if likeCount == nil {
+                let likePatterns = [
+                    "\"accessibilityText\":\"([0-9,]+) likes\"",
+                    "\"label\":\"([0-9,]+) likes\"",
+                    "\"defaultText\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([0-9,]+) likes",
+                    "\"toggleButtonRenderer\".*?\"defaultText\".*?\"simpleText\":\"([0-9,]+)\"",
+                    "\"likeCount\":\"([0-9,]+)\"",
+                    "\"text\":\"([0-9KMB.]+)\".*?\"iconType\":\"LIKE\""
+                ]
+                
+                for pattern in likePatterns {
+                    if likeCount == nil {
+                        if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+                           let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
+                            if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: html) {
+                                let extracted = String(html[range])
+                                if !extracted.isEmpty {
+                                    likeCount = extracted
+                                    print("✅ Found likes using regex pattern: \(pattern)")
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Try to find publish date - extensive patterns
+            // Updated patterns to match current YouTube HTML structure (as of 2024)
+            let datePatterns = [
+                // ISO format dates (most reliable)
+                "\"publishDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                "\"uploadDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                
+                // videoDetails section (primary source)
+                "\"videoDetails\".*?\"publishDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                
+                // microformat section (reliable source)
+                "\"microformat\".*?\"publishDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                "\"microformat\".*?\"uploadDate\":\"([0-9]{4}-[0-9]{2}-[0-9]{2})\"",
+                
+                // Date text fields in various sections
+                "\"dateText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
+                "\"dateText\":\"([^\"]+)\"",
+                
+                // Published time text (appears in video secondary info)
+                "\"publishedTimeText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
+                "\"publishedTimeText\":\"([^\"]+)\"",
+                
+                // Video secondary info renderer (common location for date)
+                "\"videoSecondaryInfoRenderer\".*?\"dateText\".*?\"simpleText\":\"([^\"]+)\"",
+                
+                // Info strings array (where date metadata appears)
+                "\"infoStrings\".*?\"text\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
+                "\"info\":\\[.*?\"text\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
+                
+                // Relative time patterns (e.g., "3 years ago", "2 months ago")
+                "\"relativeDateText\":\\{\"simpleText\":\"([^\"]+)\"\\}",
+                "\"text\":\"([0-9]+ years? ago)\"",
+                "\"text\":\"([0-9]+ months? ago)\"",
+                "\"text\":\"([0-9]+ weeks? ago)\"",
+                "\"text\":\"([0-9]+ days? ago)\"",
+                "\"text\":\"([0-9]+ hours? ago)\"",
+                
+                // Plain text date patterns in various formats
+                "\"text\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
+                "\"simpleText\":\"([A-Z][a-z]{2}\\s+[0-9]{1,2},\\s+[0-9]{4})\"",
+                
+                // Structured description
+                "\"structuredDescription\".*?\"dateText\".*?\"content\":\"([^\"]+)\"",
+                
+                // Accessibility labels for date
+                "\"dateText\".*?\"accessibility\".*?\"label\":\"([^\"]+)\"",
+                
+                // Alternative JSON structures
+                "\\\"date\\\":\\\"([0-9]{4}-[0-9]{2}-[0-9]{2})\\\"",
+                "\\\"uploaded\\\":\\\"([^\"]+)\\\""
+            ]
+            
+            // PRIORITY 2: If date not found in ytInitialPlayerResponse, try broader patterns
+            if publishDate == nil {
+                print("🔍 Searching for publish date using broader patterns...")
+                for (index, pattern) in datePatterns.enumerated() {
+                    if publishDate == nil {
+                        if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+                           let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) {
+                            if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: html) {
+                                let extracted = String(html[range])
+                                if !extracted.isEmpty && extracted.count < 50 {  // Sanity check
+                                    publishDate = extracted
+                                    print("✅ Found date using broader pattern \(index + 1): \(pattern)")
+                                    print("   Extracted: '\(extracted)'")
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                print("✅ Publish date already found in ytInitialPlayerResponse, skipping broader patterns")
+            }
+            
+            // NOTE: Aggressive fallback disabled - it picks up dates from comments/related videos
+            // which gives incorrect results. JSON parsing should handle all cases.
             
             if publishDate == nil {
                 print("❌ Could not find publish date in HTML")

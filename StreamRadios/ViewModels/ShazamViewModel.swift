@@ -139,6 +139,13 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         
         print("🔍 YouTube: Searching for '\(songTitle)' by '\(artistName)'")
         
+        // Reset metadata to nil to prevent showing stale data from previous video
+        youtubeVideoTitle = nil
+        youtubeVideoDescription = nil
+        youtubeVideoViews = nil
+        youtubeLikes = nil
+        youtubePublishDate = nil
+        
         YouTubeService.shared.searchSong(title: songTitle, artist: artistName) { [weak self] videoId in
             DispatchQueue.main.async {
                 self?.youtubeVideoId = videoId
@@ -153,6 +160,8 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                             self?.youtubeVideoViews = video?.viewCount
                             self?.youtubeLikes = video?.likeCount
                             self?.youtubePublishDate = video?.publishDate
+                            
+                            print("📅 YouTube: Publish date set to: \(video?.publishDate ?? "nil")")
                         }
                     }
                 } else {

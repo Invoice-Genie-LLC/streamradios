@@ -677,13 +677,24 @@ struct RadioPlayerSheetView: View {
     
     // Helper to format date (2024-11-23 -> Nov23 2024)
     private func formatDate(_ dateString: String) -> String {
-        // Try parsing as ISO date first (2024-11-23)
+        // Try parsing as ISO 8601 date with timezone first (2024-09-06T10:00:24-07:00)
+        let iso8601Formatter = DateFormatter()
+        iso8601Formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        iso8601Formatter.locale = Locale(identifier: "en_US_POSIX")
+        
+        if let date = iso8601Formatter.date(from: dateString) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "MMM d yyyy"
+            return displayFormatter.string(from: date)
+        }
+        
+        // Try parsing as simple ISO date (2024-11-23)
         let isoFormatter = DateFormatter()
         isoFormatter.dateFormat = "yyyy-MM-dd"
         
         if let date = isoFormatter.date(from: dateString) {
             let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "MMMdd yyyy"
+            displayFormatter.dateFormat = "MMM d yyyy"
             return displayFormatter.string(from: date)
         }
         
@@ -699,7 +710,7 @@ struct RadioPlayerSheetView: View {
                     // Try to extract day
                     if let dayMatch = dateString.range(of: "[0-9]{1,2}", options: .regularExpression) {
                         let day = String(dateString[dayMatch])
-                        return "\(month)\(day) \(year)"
+                        return "\(month) \(day) \(year)"
                     }
                     return "\(month) \(year)"
                 }
