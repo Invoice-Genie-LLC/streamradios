@@ -911,6 +911,10 @@ class PodcastViewModel: ObservableObject {
     // IMMEDIATE NEW EPISODE CHECK: Track immediate check tasks
     private var immediateCheckTasks: [String: Task<Void, Never>] = [:]
     
+    // REFRESH REQUEST THROTTLING: Track recent refresh requests to prevent duplicate operations
+    private var lastRefreshRequestTime: [String: Date] = [:]
+    private let refreshRequestThrottle: TimeInterval = 2.0 // 2 seconds
+    
     // FEED PROCESSING SYNCHRONIZATION
     private let feedProcessingQueue = DispatchQueue(label: "com.streamradios.feed.processing", attributes: .concurrent)
     private var feedsBeingProcessed: Set<String> = []
@@ -1115,6 +1119,14 @@ class PodcastViewModel: ObservableObject {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
+        
+        // PERFORMANCE: Listen for scroll stop to trigger deferred UI updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleUserStoppedScrolling),
+            name: .userStoppedScrolling,
+            object: nil
+        )
     }
     
     @objc private func handleInstantPodcastProgressSync(_ notification: Notification) {
@@ -1210,6 +1222,17 @@ class PodcastViewModel: ObservableObject {
         Task { @MainActor in
             self.isReturningFromBackground = false
             print("🔄 ViewModel: Cleared isReturningFromBackground flag after view checked it")
+        }
+    }
+    
+    /// Trigger deferred UI update when user stops scrolling
+    @objc private func handleUserStoppedScrolling(_ notification: Notification) {
+        Task { @MainActor in
+            if self.hasPendingUIUpdate {
+                self.hasPendingUIUpdate = false
+                self.objectWillChange.send()
+                print("✅ DEFERRED UPDATE: Triggered UI rebuild now that scrolling stopped")
+            }
         }
     }
     
@@ -2509,9 +2532,14 @@ class PodcastViewModel: ObservableObject {
                     // CRITICAL FIX: We've already updated the isolation manager above with all refreshed episodes
                     // Trigger SwiftUI to re-read from the getter (which will now use fresh isolation manager data)
                     // The setter would block this if filteredEpisodes.count < total episodes in isolation manager
-                    objectWillChange.send()
-                    
-                    print("🔄 BACKGROUND REFRESH: Updated isolation manager and UI - now showing \(filteredEpisodes.count) episodes")
+                    // PERFORMANCE: Only trigger rebuild if user is NOT scrolling to avoid 5-6 second hangs
+                    if !self.isUserScrolling {
+                        objectWillChange.send()
+                        print("🔄 BACKGROUND REFRESH: Updated isolation manager and UI - now showing \(filteredEpisodes.count) episodes")
+                    } else {
+                        self.hasPendingUIUpdate = true
+                        print("⏸️ BACKGROUND REFRESH: UI update deferred - user is scrolling (will update when scroll stops)")
+                    }
                 }
             }
             
@@ -3976,15 +4004,23 @@ class PodcastViewModel: ObservableObject {
         // CRITICAL FIX: Sync episode states from EpisodeStateManager to Core Data
         // This ensures episodes have their states in Core Data, not just in memory
         // (Same logic as pull-to-refresh which works correctly)
+        // PERFORMANCE: Only save episodes that actually have states
         var stateUpdates: [EpisodeStateUpdate] = []
         for episode in episodesWithFreshStates {
-            stateUpdates.append(EpisodeStateUpdate(
-                episodeId: episode.id,
-                progress: episode.state.progress,
-                isFavorite: episode.state.isFavorite,
-                isDownloaded: episode.state.isDownloaded,
-                isPlayed: episode.state.isPlayed
-            ))
+            // Skip episodes with no states to avoid massive Core Data writes
+            let hasState = episode.state.progress > 0 || 
+                           episode.state.isFavorite || 
+                           episode.state.isDownloaded || 
+                           episode.state.isPlayed
+            if hasState {
+                stateUpdates.append(EpisodeStateUpdate(
+                    episodeId: episode.id,
+                    progress: episode.state.progress,
+                    isFavorite: episode.state.isFavorite,
+                    isDownloaded: episode.state.isDownloaded,
+                    isPlayed: episode.state.isPlayed
+                ))
+            }
         }
         
         if !stateUpdates.isEmpty {
@@ -3993,10 +4029,14 @@ class PodcastViewModel: ObservableObject {
                 try await self.episodeManager.updateEpisodeStates(stateUpdates)
                 print("   ✅ STATE SYNC: Episode states saved to Core Data successfully")
                 
-                // CRITICAL FIX: Reload episodes from Core Data to pick up the saved states
-                // This ensures the UI displays the states immediately without needing to reopen the app
-                // BUT: Only reload ALL episodes if we're on "All Episodes" tab to avoid breaking filters
-                if await MainActor.run(body: { self.currentTab }) == 0 {
+                // PERFORMANCE: For large feeds with few states, skip expensive Core Data reload
+                // Just update the states in the already-loaded episodes
+                let stateRatio = Double(stateUpdates.count) / Double(episodesWithFreshStates.count)
+                let shouldSkipReload = episodesWithFreshStates.count > 500 && stateRatio < 0.1
+                
+                if shouldSkipReload {
+                    print("   ⚡ PERFORMANCE: Skipping Core Data reload - large feed with few states (\(stateUpdates.count)/\(episodesWithFreshStates.count))")
+                } else if await MainActor.run(body: { self.currentTab }) == 0 {
                     print("   🔄 STATE SYNC: Reloading all episodes from Core Data to apply saved states (All Episodes tab)")
                     let reloadedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
                     
@@ -4148,11 +4188,19 @@ class PodcastViewModel: ObservableObject {
                 print("⚡ INSTANT SUCCESS: Displaying \(filteredEpisodes.count) validated cached episodes immediately")
         }
         
-        // BACKGROUND REFRESH: Check for new episodes from RSS without blocking UI
-            // Use higher priority when user opens feed for faster updates
-            Task.detached(priority: isInitialLoad ? .userInitiated : .background) {
+        // IMMEDIATE NEW EPISODE CHECK: When user opens feed, check for newest episodes immediately
+        // This lightweight check internally triggers a full background refresh, so no need for separate refresh
+        if isInitialLoad && !cachedEpisodes.isEmpty {
+            print("🚀 IMMEDIATE CHECK: Starting lightweight check for newest episodes on feed open")
+            Task.detached(priority: .userInitiated) {
+                await self.checkForNewEpisodesImmediatelyOnFeedOpen(feedId: feedId)
+            }
+        } else if !isInitialLoad {
+            // For non-initial loads (pull-to-refresh, etc), do standard background refresh
+            Task.detached(priority: .background) {
                 await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
             }
+        }
             
 // ... (rest of the code remains the same)
             return
@@ -4449,6 +4497,17 @@ class PodcastViewModel: ObservableObject {
     /// Request immediate refresh for a feed (user initiated) - optimized for newest episodes first
     func requestFeedRefresh(_ feedId: String) {
         print("🎯 REQUEST REFRESH: User requested refresh for feed \(feedId)")
+        
+        // THROTTLE: Prevent duplicate refresh requests within 2 seconds
+        if let lastRequestTime = lastRefreshRequestTime[feedId] {
+            let timeSinceLastRequest = Date().timeIntervalSince(lastRequestTime)
+            if timeSinceLastRequest < refreshRequestThrottle {
+                print("⚡ THROTTLE: Skipping duplicate refresh request (\(String(format: "%.1f", timeSinceLastRequest))s ago)")
+                return
+            }
+        }
+        lastRefreshRequestTime[feedId] = Date()
+        
         let userRefreshKey = "UserRequestedRefresh_\(feedId)"
         UserDefaults.standard.set(true, forKey: userRefreshKey)
         
