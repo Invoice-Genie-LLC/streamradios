@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import MusicKit
 
 // YouTube video metadata
 struct YouTubeVideo {
@@ -50,18 +51,116 @@ class YouTubeService {
     ///   - artist: The artist name
     ///   - completion: Completion handler with video ID
     func searchSong(title: String, artist: String, completion: @escaping (String?) -> Void) {
-        // Try multiple search query variations for better results
-        let searchQueries = [
-            "\(artist) \(title) official music video",  // Most specific
-            "\(artist) \(title) official",              // Common format
-            "\(title) \(artist)",                       // Reverse order
-            "\(artist) \(title)"                        // Basic search
-        ]
-        
         print("🔍 YouTube: Searching for '\(title)' by '\(artist)'")
         
-        // Try each search query until we find a good match
-        searchWithQueries(queries: searchQueries, title: title, artist: artist, completion: completion)
+        // First, try to verify metadata with iTunes/Apple Music for better search accuracy
+        Task {
+            let verifiedMetadata = await verifyMetadataWithiTunes(title: title, artist: artist)
+            
+            // Use verified metadata if available, otherwise use original
+            let searchTitle = verifiedMetadata.title ?? title
+            let searchArtist = verifiedMetadata.artist ?? artist
+            
+            if verifiedMetadata.title != nil || verifiedMetadata.artist != nil {
+                print("✅ iTunes: Using verified metadata - '\(searchTitle)' by '\(searchArtist)'")
+            } else {
+                print("ℹ️ iTunes: No verified metadata found, using Shazam data")
+            }
+            
+            // Build search queries with verified metadata
+            let searchQueries = [
+                "\(searchArtist) \(searchTitle) official music video",  // Artist first with keywords
+                "\(searchTitle) \(searchArtist) official music video",  // Title first with keywords
+                "\(searchArtist) \(searchTitle) official",              // Artist first with "official"
+                "\(searchTitle) \(searchArtist) official",              // Title first with "official"
+                "\(searchArtist) \(searchTitle)",                       // Artist first, basic
+                "\(searchTitle) \(searchArtist)",                       // Title first, basic
+                "\(searchTitle) official",                              // Title only with "official"
+                "\(searchTitle)"                                        // Title only, last resort
+            ]
+            
+            // Try each search query until we find a good match
+            self.searchWithQueries(queries: searchQueries, title: searchTitle, artist: searchArtist, completion: completion)
+        }
+    }
+    
+    /// Verify song metadata with iTunes/Apple Music API
+    /// Returns verified artist and title if found, nil otherwise
+    private func verifyMetadataWithiTunes(title: String, artist: String) async -> (title: String?, artist: String?) {
+        print("🎵 iTunes: Verifying metadata for '\(title)' by '\(artist)'")
+        
+        // Check Apple Music authorization
+        let authStatus = MusicAuthorization.currentStatus
+        if authStatus != .authorized {
+            print("🎵 iTunes: Requesting Apple Music authorization...")
+            let newStatus = await MusicAuthorization.request()
+            if newStatus != .authorized {
+                print("🎵 iTunes: Authorization denied - skipping verification")
+                return (nil, nil)
+            }
+        }
+        
+        do {
+            // Search Apple Music for the song
+            var searchRequest = MusicCatalogSearchRequest(term: "\(artist) \(title)", types: [Song.self])
+            searchRequest.limit = 5
+            
+            let searchResponse = try await searchRequest.response()
+            
+            guard let song = searchResponse.songs.first else {
+                print("🎵 iTunes: No results found")
+                return (nil, nil)
+            }
+            
+            // Extract verified metadata
+            let verifiedTitle = song.title
+            let verifiedArtist = song.artistName
+            
+            print("✅ iTunes: Found verified metadata")
+            print("   Original: '\(title)' by '\(artist)'")
+            print("   Verified: '\(verifiedTitle)' by '\(verifiedArtist)'")
+            
+            // Check if the match is reasonable (not completely different)
+            let titleSimilar = isReasonablySimilar(verifiedTitle.lowercased(), title.lowercased())
+            let artistSimilar = isReasonablySimilar(verifiedArtist.lowercased(), artist.lowercased())
+            
+            if titleSimilar && artistSimilar {
+                return (verifiedTitle, verifiedArtist)
+            } else {
+                print("⚠️ iTunes: Verified metadata too different from Shazam data - using Shazam")
+                return (nil, nil)
+            }
+            
+        } catch {
+            print("❌ iTunes: Search failed: \(error.localizedDescription)")
+            return (nil, nil)
+        }
+    }
+    
+    /// Check if two strings are reasonably similar (for metadata verification)
+    private func isReasonablySimilar(_ str1: String, _ str2: String) -> Bool {
+        // Normalize strings
+        let normalized1 = str1.folding(options: .diacriticInsensitive, locale: .current)
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
+        let normalized2 = str2.folding(options: .diacriticInsensitive, locale: .current)
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
+        
+        // Extract words
+        let words1 = Set(normalized1.split(separator: " ").filter { $0.count > 2 })
+        let words2 = Set(normalized2.split(separator: " ").filter { $0.count > 2 })
+        
+        // If either is empty after filtering, consider them similar (short titles)
+        if words1.isEmpty || words2.isEmpty {
+            return true
+        }
+        
+        // Calculate word overlap
+        let commonWords = words1.intersection(words2)
+        let totalWords = max(words1.count, words2.count)
+        let similarity = Double(commonWords.count) / Double(totalWords)
+        
+        // Require at least 50% word overlap
+        return similarity >= 0.5
     }
     
     /// Try multiple search queries and pick the best result
@@ -100,20 +199,32 @@ class YouTubeService {
             if !videoIds.isEmpty {
                 print("🔍 YouTube: Found \(videoIds.count) potential videos in search results")
                 
-                // Check each video until we find a good match
+                // Check ALL videos and pick the BEST match (highest quality)
+                var bestMatch: (videoId: String, quality: Int)? = nil
+                
                 for (index, videoId) in videoIds.prefix(5).enumerated() {
                     if let matchResult = self.verifyVideoMatchWithTitle(html: html, videoId: videoId, title: title, artist: artist) {
                         if matchResult.isGoodMatch {
-                            print("✅ YouTube: Found matching video '\(videoId)' (checked \(index + 1) videos)")
-                            DispatchQueue.main.async {
-                                completion(videoId)
+                            // Keep track of the best quality match
+                            if bestMatch == nil || matchResult.matchQuality > bestMatch!.quality {
+                                bestMatch = (videoId, matchResult.matchQuality)
+                                print("   🎯 NEW BEST: '\(videoId)' with quality \(matchResult.matchQuality)")
                             }
-                            return
                         } else {
                             print("⏭️ YouTube: Video \(index + 1) '\(matchResult.videoTitle ?? "unknown")' doesn't match, checking next...")
                         }
                     }
                 }
+                
+                // Return the best match found
+                if let best = bestMatch {
+                    print("✅ YouTube: Selected BEST match '\(best.videoId)' with quality \(best.quality)")
+                    DispatchQueue.main.async {
+                        completion(best.videoId)
+                    }
+                    return
+                }
+                
                 print("⚠️ YouTube: Checked \(min(5, videoIds.count)) videos, none matched well enough")
             } else {
                 print("⚠️ YouTube: No videos found in ytInitialData")
@@ -499,6 +610,7 @@ class YouTubeService {
     struct VideoMatchResult {
         let videoTitle: String?
         let isGoodMatch: Bool
+        let matchQuality: Int  // 3 = both artist+song, 2 = artist+partial song, 1 = song only
     }
     
     /// Verify if a specific video matches the song by extracting its title from the HTML
@@ -549,9 +661,12 @@ class YouTubeService {
         
         // Extract title from this context - YouTube search uses "headline", not "title"
         let titlePatterns = [
-            "\"headline\":\\{\"runs\":\\[\\{\"text\":\"([^\"]{5,200})\"",  // YouTube search results
+            "\"headline\":\\{\"runs\":\\[\\{\"text\":\"([^\"]{5,200})\"",  // YouTube search results (primary)
             "\"title\":\\{\"runs\":\\[\\{\"text\":\"([^\"]{5,200})\"",     // Video watch page
-            "\"title\":\\{\"simpleText\":\"([^\"]{5,200})\"",
+            "\"title\":\\{\"simpleText\":\"([^\"]{5,200})\"",              // Simple text format
+            "\"headline\":\\{\"simpleText\":\"([^\"]{5,200})\"",           // Headline simple text
+            "\"text\":\"([^\"]{5,200})\"[^}]*\"navigationEndpoint\"[^}]*\"videoId\":\"\(videoId)\"", // Text before videoId
+            "\"videoId\":\"\(videoId)\"[^}]{0,500}\"text\":\"([^\"]{5,200})\"", // Text near videoId
             "\"headline\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([^\"]{5,200})\"",
             "\"title\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([^\"]{5,200})\"",
         ]
@@ -563,11 +678,9 @@ class YouTubeService {
                 if match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: context) {
                     let extracted = String(context[range])
                     // Decode hex and unicode escapes
-                    let decoded = extracted
+                    let decoded = self.decodeUnicodeEscapes(extracted)
                         .replacingOccurrences(of: "\\x22", with: "\"")
                         .replacingOccurrences(of: "\\x27", with: "'")
-                        .replacingOccurrences(of: "\\u0026", with: "&")
-                        .replacingOccurrences(of: "\\u0027", with: "'")
                         .replacingOccurrences(of: "`", with: "'")
                     if decoded.count >= 5 && decoded.count < 200 {
                         print("   ✅ Pattern \(index + 1) matched: '\(decoded.prefix(50))'")
@@ -580,20 +693,27 @@ class YouTubeService {
         
         guard let extractedTitle = videoTitle else {
             print("   ⚠️ Could not extract title for videoId '\(videoId)' - no pattern matched")
-            return VideoMatchResult(videoTitle: nil, isGoodMatch: false)
+            return VideoMatchResult(videoTitle: nil, isGoodMatch: false, matchQuality: 0)
         }
         
         // Reject Mix videos - they aggregate multiple songs
         let lowerTitle = extractedTitle.lowercased()
         if lowerTitle.starts(with: "mix -") || lowerTitle.contains("- mix") || lowerTitle.contains("mix playlist") {
             print("   ⏭️ Rejecting Mix/Playlist video: '\(extractedTitle.prefix(60))'")
-            return VideoMatchResult(videoTitle: extractedTitle, isGoodMatch: false)
+            return VideoMatchResult(videoTitle: extractedTitle, isGoodMatch: false, matchQuality: 0)
         }
         
         // Check match quality
+        // Normalize strings to handle diacritics and special characters (e.g., ë -> e)
         let extractedTitleLower = extractedTitle.lowercased()
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
         let songTitleLower = title.lowercased()
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
         let artistLower = artist.lowercased()
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
         
         let songWords = songTitleLower.split(separator: " ").filter { $0.count > 2 }
         let artistWords = artistLower.split(separator: " ").filter { $0.count > 2 }
@@ -604,14 +724,25 @@ class YouTubeService {
         let songMatchRatio = songWords.isEmpty ? 1.0 : Double(songWordMatches) / Double(songWords.count)
         let hasArtistMatch = artistWordMatches > 0 || artistWords.isEmpty
         
-        let isGoodMatch = songMatchRatio >= 0.5 && hasArtistMatch
+        // Smart matching logic with artist priority:
+        // 1. BEST: High song match (>=70%) AND artist present = top priority
+        // 2. GOOD: Song match >=90% without artist (covers live performances)  
+        // 3. OK: Song match >=40% AND artist present
+        let hasBothArtistAndSong = songMatchRatio >= 0.7 && hasArtistMatch
+        let hasPerfectSongOnly = songMatchRatio >= 0.9 && !hasArtistMatch
+        let hasDecentSongAndArtist = songMatchRatio >= 0.4 && hasArtistMatch
         
-        print("   🔍 '\(extractedTitle.prefix(60))' - Song: \(Int(songMatchRatio * 100))%, Artist: \(hasArtistMatch ? "✓" : "✗") = \(isGoodMatch ? "✅" : "❌")")
+        let isGoodMatch = hasBothArtistAndSong || hasPerfectSongOnly || hasDecentSongAndArtist
+        
+        // Store match quality for prioritization
+        let matchQuality = hasBothArtistAndSong ? 3 : (hasDecentSongAndArtist ? 2 : 1)
+        
+        print("   🔍 '\(extractedTitle.prefix(60))' - Song: \(Int(songMatchRatio * 100))%, Artist: \(hasArtistMatch ? "✓" : "✗"), Quality: \(matchQuality) = \(isGoodMatch ? "✅" : "❌")")
         if !isGoodMatch {
             print("      Expected: '\(title)' by '\(artist)'")
         }
         
-        return VideoMatchResult(videoTitle: extractedTitle, isGoodMatch: isGoodMatch)
+        return VideoMatchResult(videoTitle: extractedTitle, isGoodMatch: isGoodMatch, matchQuality: matchQuality)
     }
     
     /// Verify if the video title in HTML matches the song title and artist
