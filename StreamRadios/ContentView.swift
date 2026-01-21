@@ -389,16 +389,12 @@ struct ContentView: View {
             // SAFETY: Update tab bar visibility to ensure it's shown
             updateTabBarVisibility()
             
-            print("🏠 CONTENT VIEW: Forced TabView visible - isFooterMenuHidden: \(isFooterMenuHidden), isScrolling: \(isScrolling)")
-            
             // Reset the flag after a short delay to allow normal behavior to resume
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 homeButtonExplicitlyShowingTabView = false
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            print("🏠 APP STATE: App became active - ensuring TabView is visible")
-            
             // Small delay to let the app settle
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 ensureTabViewIsVisible()
@@ -832,11 +828,8 @@ struct ContentView: View {
                     }
                 )
                 .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
-                    // CRITICAL FIX: Don't reload from Core Data if stations were just loaded via fetchStationsForSelectedCountry
-                    // This prevents manual stations from being wiped out after they're loaded
-                    print("📻 🔧 FIX: Received stationsUpdated notification - preserving in-memory stations to avoid wiping manual stations")
-                    
                     // Force UI update without reloading from Core Data
+                    // This prevents manual stations from being wiped out after they're loaded
                     viewModel.objectWillChange.send()
                     
                     // If newly added stations belong to current country, ensure All tab is visible
@@ -847,8 +840,6 @@ struct ContentView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
                     // Handle country changes without affecting currently playing station
-                    print("🌍 Received countryChanged notification - updating UI for country selection")
-                    
                     // Force UI update without reloading from Core Data
                     viewModel.objectWillChange.send()
                     
@@ -1095,7 +1086,6 @@ struct ContentView: View {
     private func ensureTabViewIsVisible() {
         // CRITICAL FIX: ALWAYS ensure TabView is visible when this is called
         // Don't check state conditions - just force it visible
-        print("🏠 SAFETY: Ensuring TabView is visible - isFooterMenuHidden: \(isFooterMenuHidden), isScrolling: \(isScrolling)")
         
         // Only update if needed to avoid unnecessary animations
         if isFooterMenuHidden || isScrolling {
@@ -1104,19 +1094,13 @@ struct ContentView: View {
                 isScrolling = false
             }
             updateTabBarVisibility()
-            print("🏠 SAFETY: TabView forced visible")
-        } else {
-            print("🏠 SAFETY: TabView already visible - no action needed")
         }
     }
     
     private func checkAndStartDataSync() {
         // Check if this is a fresh install or if sync is needed
         if DataSyncManager.shared.checkIfSyncNeeded() {
-            print("🔄 Fresh install detected - starting data synchronization...")
             DataSyncManager.shared.startFreshInstallSync()
-        } else {
-            print("✅ App has been launched before and sync is complete")
         }
     }
     
@@ -1132,10 +1116,8 @@ struct ContentView: View {
             await MainActor.run {
                 // Double-check subscription status after update
                 if !subscriptionManager.isSubscribedOrInTrial {
-                    print("🔔 Showing mandatory subscription paywall for non-subscriber")
                     showingSubscriptionView = true
                 } else {
-                    print("✅ User is subscribed or in trial - not showing paywall")
                     print("   Current status: \(subscriptionManager.subscriptionStatus)")
                 }
             }

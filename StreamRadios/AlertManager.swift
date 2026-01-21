@@ -28,7 +28,7 @@ class AlertManager: ObservableObject {
         customAlertSecondaryButtonText = alertType.secondaryButtonText
         
         switch alertType {
-        case .selectCountryBeforeAddingStation, .exportWithoutCountry, .importWithoutCountry, .deleteStationError:
+        case .selectCountryBeforeAddingStation, .exportWithoutCountry, .importWithoutCountry, .deleteStationError, .radioAPIUnavailable:
             customAlertPrimaryAction = { [weak self] in
                 self?.dismissAlert()
             }
@@ -71,6 +71,7 @@ enum AlertType: Identifiable {
     case confirmImportWithDataClear
     case confirmFavoritesSortChange
     case confirmPodcastSortChange
+    case radioAPIUnavailable
     
     var id: Int {
         switch self {
@@ -87,6 +88,7 @@ enum AlertType: Identifiable {
         case .confirmImportWithDataClear: return 10
         case .confirmFavoritesSortChange: return 11
         case .confirmPodcastSortChange: return 12
+        case .radioAPIUnavailable: return 13
         }
     }
     
@@ -114,6 +116,8 @@ enum AlertType: Identifiable {
             return "Change Sorting?"
         case .confirmPodcastSortChange:
             return "Change Sorting?"
+        case .radioAPIUnavailable:
+            return "Station Database Temporarily Unavailable"
         }
     }
     
@@ -145,12 +149,14 @@ enum AlertType: Identifiable {
             return "Sorting Favorites alphabetically will replace your custom order. This change will be saved to iCloud and affect your other devices."
         case .confirmPodcastSortChange:
             return "Sorting podcasts alphabetically will replace your custom order. This change will be saved to iCloud and affect your other devices."
+        case .radioAPIUnavailable:
+            return "We're having trouble connecting to the radio station database. Don't worry — all the stations you've already saved are still available!\n\nOnly new countries and new stations may be temporarily affected. We're working on it and this will be resolved soon."
         }
     }
     
     var primaryButtonText: String {
         switch self {
-        case .exportWithoutCountry, .importWithoutCountry, .selectCountryBeforeAddingStation, .deleteStationError:
+        case .exportWithoutCountry, .importWithoutCountry, .selectCountryBeforeAddingStation, .deleteStationError, .radioAPIUnavailable:
             return "OK"
         case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData:
             return "Delete"

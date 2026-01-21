@@ -324,3 +324,4 @@ podcastFeedsProgress = 0.3 + (rssProgress * 0.4)   // 0.3 to 0.7
 
 This optimization transforms the podcast sync experience from appearing frozen with no feedback to showing smooth, continuous progress with detailed information. Users now see exactly how many feeds are being processed, what percentage is complete, and what operation is currently running. The progress bar moves continuously rather than jumping, creating a professional, polished experience that builds user confidence in the app.
 
+

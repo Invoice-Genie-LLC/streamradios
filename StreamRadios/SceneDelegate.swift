@@ -9,6 +9,9 @@ import UIKit
 import SwiftUI
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+    
+    // Background task for CloudKit sync continuation
+    private var cloudKitSyncBackgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     var window: UIWindow?
     
@@ -170,6 +173,18 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         } else {
             print("🚗 CARPLAY SYNC: Skipping CarPlay notifications - CarPlay is connected or active podcast session detected")
         }
+        
+        // 🔄 CLOUDKIT SYNC: Resume any incomplete CloudKit syncs when app becomes active
+        Task { @MainActor in
+            DataSyncManager.shared.checkAndResumeRadioStationSync()
+        }
+        
+        // End any background task that was keeping sync alive
+        if cloudKitSyncBackgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(cloudKitSyncBackgroundTaskID)
+            cloudKitSyncBackgroundTaskID = .invalid
+            print("🔄 CLOUDKIT SYNC: Ended background task - app is now active")
+        }
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
@@ -214,6 +229,22 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneDidEnterBackground(_ scene: UIScene) {
         // Called as the scene transitions from the foreground to the background.
         // This is often triggered when the app is force closed
+        
+        // 🔄 CLOUDKIT SYNC: If there's an active sync, start a background task to continue it
+        if SyncStateManager.shared.hasIncompleteRadioStationSync() {
+            print("🔄 CLOUDKIT SYNC: Active sync detected - starting background task to continue")
+            
+            cloudKitSyncBackgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "CloudKitSyncContinuation") { [weak self] in
+                // Background task expiring - save current state
+                print("🔄 CLOUDKIT SYNC: Background task expiring - sync state is preserved and will resume on next launch")
+                self?.cloudKitSyncBackgroundTaskID = .invalid
+            }
+            
+            if cloudKitSyncBackgroundTaskID != .invalid {
+                print("🔄 CLOUDKIT SYNC: Background task started - ID: \(cloudKitSyncBackgroundTaskID.rawValue)")
+                print("🔄 CLOUDKIT SYNC: Background time remaining: \(String(format: "%.1f", UIApplication.shared.backgroundTimeRemaining)) seconds")
+            }
+        }
         
         // Save podcast state immediately
         PodcastPlayer.shared.handleAppWillTerminate()

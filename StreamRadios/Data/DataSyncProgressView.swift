@@ -7,8 +7,7 @@ struct DataSyncProgressView: View {
     @State private var animateProgress = false
     
     var body: some View {
-        // Debug logging for sync states
-        let _ = print("🎭 DataSyncProgressView: isSyncing=\(syncManager.isSyncing), isFreshInstallUIReady=\(syncManager.isFreshInstallUIReady)")
+        // Debug logging removed - was causing excessive log noise on fresh install
         
         if syncManager.isSyncing && !syncManager.isFreshInstallUIReady {
             ZStack {

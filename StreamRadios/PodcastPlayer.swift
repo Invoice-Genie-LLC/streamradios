@@ -131,10 +131,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // CRITICAL: Add memory warning observer to prevent termination during podcast playback
         NotificationCenter.default.addObserver(self, selector: #selector(handleMemoryWarning), name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
-        
-        print("✅ PodcastPlayer: Background audio observers configured")
     }
-    
+
     @objc private func handleAppDidEnterBackground() {
         // Simplified background handling to prevent deadlocks and main thread blocking
         if isPlaying && userWantsToPlay {
@@ -186,11 +184,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let isCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
         let hadAudioInterruption = wasPlayingBeforeInterruption
         
-        print("🔧 PodcastPlayer: App entering foreground - userWantsToPlay: \(userWantsToPlay), isPlaying: \(isPlaying), wasManuallyPaused: \(wasManuallyPaused), hadAudioInterruption: \(hadAudioInterruption), isCarPlayConnected: \(isCarPlayConnected)")
-        
         // SEAMLESS PLAYBACK: Only intervene if there was an actual audio interruption
         if userWantsToPlay && !isPlaying && !wasManuallyPaused && hadAudioInterruption && !isCarPlayConnected {
-            print("🔧 PodcastPlayer: App entering foreground - restoring podcast playback if needed")
             DebugLogger.logInfo("App entering foreground with podcast playback intent - checking restoration needs", category: "BackgroundAudio")
             DebugLogger.setUserAction("Podcast Foreground Transition")
             
@@ -211,7 +206,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         // Resume playback only if user wants it and it wasn't manually paused
                         if self.userWantsToPlay && !self.wasManuallyPaused {
                             self.player?.play()
-                            print("✅ PodcastPlayer: Podcast playback resumed after foreground transition")
                             DebugLogger.logInfo("Podcast playback successfully restored after foreground transition", category: "BackgroundAudio")
                         }
                     } catch {
@@ -220,16 +214,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 }
             }
         } else if isPlaying {
-            print("✅ PodcastPlayer: App entering foreground - playback continued seamlessly")
             DebugLogger.logInfo("Podcast playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
         } else if wasManuallyPaused {
-            print("⏸️ PodcastPlayer: App entering foreground - podcast was manually paused, not auto-resuming")
             DebugLogger.logInfo("Podcast was manually paused by user - not resuming automatically", category: "BackgroundAudio")
         } else if isCarPlayConnected {
-            print("🚗 PodcastPlayer: App entering foreground - CarPlay is connected, not interfering with CarPlay playback")
             DebugLogger.logInfo("App entering foreground during CarPlay session - not interfering with CarPlay playback", category: "BackgroundAudio")
         } else if !hadAudioInterruption {
-            print("🔄 PodcastPlayer: App entering foreground - no audio interruption occurred, allowing seamless continuation")
             DebugLogger.logInfo("App entering foreground with no audio interruption - allowing seamless playback continuation", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering foreground with no podcast playback intent", category: "BackgroundAudio")
@@ -244,11 +234,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let isCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
         let hadAudioInterruption = wasPlayingBeforeInterruption
         
-        print("🔧 PodcastPlayer: App became active - hadAudioInterruption: \(hadAudioInterruption), userWantsToPlay: \(userWantsToPlay), isPlaying: \(isPlaying), wasManuallyPaused: \(wasManuallyPaused), isCarPlayConnected: \(isCarPlayConnected)")
-        
         // SEAMLESS PLAYBACK: Only intervene for genuine lock screen alarm scenarios with confirmed interruptions
         if hadAudioInterruption && userWantsToPlay && !isPlaying && !wasManuallyPaused && !isCarPlayConnected {
-            print("🔧 PodcastPlayer: App became active after potential lock screen interruption - checking resume")
             DebugLogger.logInfo("App became active with interrupted podcast playback - attempting lock screen alarm resume", category: "LockScreenAudio")
             DebugLogger.setUserAction("Lock Screen Alarm Resume")
             
@@ -261,7 +248,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 // Double-check conditions are still valid
                 if self.wasPlayingBeforeInterruption && self.userWantsToPlay && !self.isPlaying && !self.wasManuallyPaused {
-                    print("🔄 PodcastPlayer: Attempting lock screen alarm resume")
                     DebugLogger.logInfo("Executing lock screen alarm resume for podcast", category: "LockScreenAudio")
                     
                     // Use the existing resume method
@@ -273,18 +259,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         } else {
             // Log why we're not resuming for debugging
             if !hadAudioInterruption {
-                print("🔄 PodcastPlayer: App became active - no audio interruption occurred, allowing seamless continuation")
                 DebugLogger.logInfo("App became active with no audio interruption - allowing seamless playback continuation", category: "LockScreenAudio")
             } else if !userWantsToPlay {
                 DebugLogger.logInfo("App became active but user does not want podcast playback", category: "LockScreenAudio")
             } else if isPlaying {
-                print("✅ PodcastPlayer: App became active - playback continued seamlessly")
                 DebugLogger.logInfo("App became active and podcast is already playing", category: "LockScreenAudio")
             } else if wasManuallyPaused {
-                print("⏸️ PodcastPlayer: App became active - podcast was manually paused, not auto-resuming")
                 DebugLogger.logInfo("App became active but podcast was manually paused by user", category: "LockScreenAudio")
             } else if isCarPlayConnected {
-                print("🚗 PodcastPlayer: App became active during CarPlay session - not interfering with CarPlay playback")
                 DebugLogger.logInfo("App became active during CarPlay session - not interfering with CarPlay playback", category: "LockScreenAudio")
             }
         }
@@ -434,8 +416,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             name: AVAudioSession.interruptionNotification,
             object: nil
         )
-        
-        print("🚗 PodcastPlayer: CarPlay route change and audio interruption monitoring setup complete")
     }
     
     private func setupCrossDeviceProgressSync() {
@@ -454,8 +434,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             name: .init("CrossDeviceProgressUpdate"),
             object: nil
         )
-        
-        print("🔄 PodcastPlayer: Cross-device progress sync monitoring setup complete")
     }
     
     // REMOVED: Old handleInterruption method replaced with handleAudioInterruption for better CarPlay support
@@ -1184,8 +1162,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     func configure(with viewModel: PodcastViewModel) {
         self.viewModel = viewModel
         
-        print("🔧 PodcastPlayer: Configuring with viewModel")
-        
         // Reset restoration attempts counter for fresh configuration
         restorationAttempts = 0
         hasSuccessfullyRestored = false
@@ -1196,38 +1172,25 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let currentActivePlayer = PlaybackManager.shared.activePlayer
         
         if lastActivePlayer == .podcast {
-            print("🚀 Podcast: Podcast was last active player - checking if should restore")
-            
             // Only restore if no player is currently active (app startup) OR if podcast is already active
             if currentActivePlayer == .none || currentActivePlayer == .podcast {
-                print("🚀 Podcast: Restoring podcast player UI and claiming active status")
                 Task { @MainActor in
                     restorePodcastPlayerUIImmediately()
                     
                     // Set as active player during app startup restoration
                     // Don't activate audio session during restoration - will activate when playback starts
                     if currentActivePlayer == .none {
-                        print("🚀 Podcast: Setting podcast as active player (startup restoration)")
                         PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: false)
-                    } else {
-                        print("🚀 Podcast: Podcast already active player - no need to set again")
                     }
                 }
-            } else {
-                print("🚀 Podcast: Skipping restoration - another player is active (\(currentActivePlayer)) and user has switched")
             }
-        } else {
-            print("🚀 Podcast: Podcast was not last active player (\(lastActivePlayer?.rawValue ?? "none")) - skipping restoration")
         }
         
         // Detailed episode restoration (loads episodes, finds specific episode, etc.)
         // BACKGROUND RETURN FIX: Skip restoration if returning from background
         // The user's view already has the correct feed loaded - restoration would overwrite it
         Task { @MainActor in
-            if viewModel.isReturningFromBackground {
-                print("🔧 PodcastPlayer: Skipping restoration - returning from background (user's view has correct feed)")
-            } else {
-                print("🔧 PodcastPlayer: Starting detailed restoration with feeds count: \(viewModel.podcastFeeds.count)")
+            if !viewModel.isReturningFromBackground {
                 await restoreLastPlayedEpisodeOnStartup()
             }
         }

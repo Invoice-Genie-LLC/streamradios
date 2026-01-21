@@ -57,13 +57,9 @@ struct RadioStreamApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                     // CRITICAL FIX: Only reconfigure if podcast player doesn't already have an active episode
                     // This prevents progress reset when returning from lock screen with current episode
-                    print("📱 App became active - checking if podcast player needs reconfiguration")
                     
                     if PodcastPlayer.shared.currentEpisode == nil {
-                        print("📱 App became active - reconfiguring podcast player (no current episode)")
                         PodcastPlayer.shared.configure(with: podcastViewModel)
-                    } else {
-                        print("📱 App became active - skipping reconfiguration (episode already loaded, preserving progress)")
                     }
                 }
                 .onDisappear {
@@ -74,7 +70,6 @@ struct RadioStreamApp: App {
     }
 
     private func setupApp() {
-        print("🎯 SETUP APP: Starting setupApp() method")
         
         // Audio session configuration is handled by PlaybackManager to prevent conflicts
         // This ensures centralized management and proper retry logic
@@ -108,21 +103,15 @@ struct RadioStreamApp: App {
         let hasRadioStationsSynced = UserDefaults.standard.bool(forKey: "HasRadioStationsSynced")
         
         if isFreshInstall || !hasRadioStationsSynced {
-            print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
-            print("⏭️ SEQUENCING: Radio station sync will be handled by DataSyncManager to prevent CloudKit rate limiting")
             // NOTE: Radio station sync is now handled by DataSyncManager in sequence to prevent CloudKit rate limiting
-            // fetchStationsFromCloudKit() - REMOVED to prevent parallel CloudKit operations
         } else {
-            print("⚡ Skipping CloudKit radio station sync - stations already loaded by ViewModel for instant startup")
             // RadioStationViewModel already loaded stations in its init, no need to reload
             // Setup auto-play functionality with proper setting checks
             radioPlayer.autoPlayLastStationSetup()
         }
         
         // Initialize podcast system with CloudKit support
-        print("🎯 SETUP APP: About to call podcastViewModel.initializeWithCloudKitSupport()")
         podcastViewModel.initializeWithCloudKitSupport()
-        print("🎯 SETUP APP: Completed podcastViewModel.initializeWithCloudKitSupport()")
         
         // Initialize subscription system - this will load products and check subscription status
         Task {

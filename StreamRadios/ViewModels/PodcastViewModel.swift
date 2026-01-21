@@ -475,7 +475,6 @@ class PodcastViewModel: ObservableObject {
     /// Initialize contamination prevention system
     @MainActor
     func initializeContaminationPrevention() {
-        print("🛡️ STARTUP: Initializing contamination prevention system")
         
         // Register all existing feeds with isolation manager
         for feed in podcastFeeds {
@@ -488,17 +487,13 @@ class PodcastViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
             
             await MainActor.run {
-                print("🛡️ STARTUP: Performing initial contamination check")
                 
                 // Run global contamination cleanup through isolation manager
                 feedIsolationManager.performGlobalContaminationCleanup()
                 
                 // Validate isolation is working
                 let report = feedIsolationManager.validateGlobalIsolation()
-                if report.isClean {
-                    print("✅ GLOBAL CONTAMINATION CHECK: All feeds are clean - no contamination detected")
-                } else {
-                    print("🚨 GLOBAL CONTAMINATION CHECK: Found contamination in \(report.totalContaminatedFeeds) feeds with \(report.totalContaminatedEpisodes) contaminated episodes")
+                if !report.isClean {
                     // Run user data migration for existing contaminated data
                     self.performUserDataMigration()
                 }
@@ -538,7 +533,6 @@ class PodcastViewModel: ObservableObject {
         get {
             // Use isolation manager for guaranteed clean episodes
             guard let feedId = selectedFeedId else { 
-                print("🔍 EPISODE GETTER: selectedFeedId is nil, returning empty")
                 return [] 
             }
             
@@ -548,17 +542,14 @@ class PodcastViewModel: ObservableObject {
             if _feedTransitionInProgress {
                 // Check if this is a delayed call and we should clear the flag
                 if let selectedId = selectedFeedId, selectedId == feedId {
-                    print("🔧 EPISODE GETTER: Transition flag still set but feed matches - clearing immediately")
                     _feedTransitionInProgress = false
                 } else {
-                    print("🚨 EPISODE GETTER: Transition in progress, returning empty for feed \(feedId)")
                     return []
                 }
             }
             
             // Clear cache if it's for a different feed
             if let cacheFeedId = _episodeCacheFeedId, cacheFeedId != feedId {
-                print("🚨 EPISODE GETTER: Cache mismatch - cached=\(cacheFeedId), requested=\(feedId), clearing and returning empty")
                 _episodeCache = nil
                 _episodeCacheFeedId = nil
                 return []
@@ -981,7 +972,6 @@ class PodcastViewModel: ObservableObject {
         Task {
             try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
             await MainActor.run {
-                print("🛡️ STARTUP: Initializing contamination prevention system")
                 initializeContaminationPrevention()
             }
             
@@ -1207,14 +1197,12 @@ class PodcastViewModel: ObservableObject {
         // Mark that we're returning from background to prevent clearing episodes
         Task { @MainActor in
             self.isReturningFromBackground = true
-            print("🔄 ViewModel: App entering foreground - set isReturningFromBackground = true")
         }
     }
     
     @objc private func handleAppDidBecomeActive(_ notification: Notification) {
         // Don't reset flag here - let the view reset it after checking
         // This ensures the view always sees the flag before it's cleared
-        print("🔄 ViewModel: App became active - keeping isReturningFromBackground = \(isReturningFromBackground)")
     }
     
     /// Called by view after checking isReturningFromBackground to reset the flag
@@ -3688,8 +3676,6 @@ class PodcastViewModel: ObservableObject {
     
     /// Force Core Data to save any pending changes and reload feeds
     func forceSaveAndReload() async {
-        print("🔧 FORCING Core Data save and reload...")
-        
         // Force save the Core Data context
         await withCheckedContinuation { continuation in
             let context = CoreDataStack.shared.context
@@ -3697,12 +3683,9 @@ class PodcastViewModel: ObservableObject {
                 if context.hasChanges {
                     do {
                         try context.save()
-                        print("✅ FORCED: Core Data context saved successfully")
                     } catch {
                         print("❌ FORCED: Failed to save Core Data context: \(error)")
                     }
-                } else {
-                    print("ℹ️ FORCED: No pending Core Data changes to save")
                 }
                 continuation.resume()
             }
@@ -3710,12 +3693,9 @@ class PodcastViewModel: ObservableObject {
         
         // Force reload feeds from Core Data with aggressive UI refresh
         await MainActor.run {
-            print("🔧 FORCING: Reloading feeds from Core Data...")
             loadFeedsFromCoreData()
-            
             // Immediately notify SwiftUI that this object is about to change
             self.objectWillChange.send()
-            print("🔧 FORCING: Triggered objectWillChange.send() after reload")
         }
         
         // Wait for the reload to complete
@@ -3723,16 +3703,9 @@ class PodcastViewModel: ObservableObject {
         
         // Final verification and manual UI trigger
         await MainActor.run {
-            let currentFeedCount = self.podcastFeeds.count
-            let currentOrderCount = self.podcastFeedOrder.count
-            print("🔧 FORCING: After reload verification - Feeds: \(currentFeedCount), Order: \(currentOrderCount)")
-            
             // Force another UI update notification to ensure SwiftUI picks up the changes
             self.objectWillChange.send()
-            print("🔧 FORCING: Final objectWillChange.send() triggered")
         }
-        
-        print("✅ FORCED: Save and reload completed - feeds count: \(podcastFeeds.count)")
     }
     
     // MARK: - Public Interface
@@ -6099,13 +6072,10 @@ class PodcastViewModel: ObservableObject {
     /// Perform comprehensive feed isolation check across all feeds
     @MainActor
     func performGlobalContaminationCheck() {
-        print("🛡️ GLOBAL CONTAMINATION CHECK: Starting comprehensive validation across all feeds")
         
         let feedIssues = EpisodeContaminationGuard.performFeedIsolationCheck(allFeeds: podcastFeeds)
         
-        if feedIssues.isEmpty {
-            print("✅ GLOBAL CONTAMINATION CHECK: All feeds are clean - no contamination detected")
-        } else {
+        if !feedIssues.isEmpty {
             print("🚨 GLOBAL CONTAMINATION CHECK: Found contamination in \(feedIssues.count) feeds")
             
             for (feedId, issues) in feedIssues {
@@ -7895,20 +7865,13 @@ class PodcastViewModel: ObservableObject {
     /// Updated initialization to include CloudKit sync check
     @MainActor
     func initializeWithCloudKitSupport() {
-        print("🚀 Initializing PodcastViewModel with CloudKit support...")
-        print("🚀 INIT: Current podcast feeds count: \(podcastFeeds.count)")
-        print("🚀 INIT: Current feed order count: \(podcastFeedOrder.count)")
-        
         // Prevent multiple initializations
         guard !isLoading else {
-            print("⚠️ CloudKit initialization already in progress, skipping duplicate call")
             return
         }
         
         // Start with Core Data load for immediate UI
         loadFeedsFromCoreData()
-        print("📊 INITIAL LOAD: Loaded \(podcastFeeds.count) feeds from Core Data after loadFeedsFromCoreData()")
-        print("📊 INITIAL LOAD: podcastFeedOrder has \(podcastFeedOrder.count) items")
         
         // Single CloudKit sync in background
         Task {
@@ -7920,7 +7883,6 @@ class PodcastViewModel: ObservableObject {
             // This prevents legitimate episodes from being deleted due to force close inconsistencies
             do {
                 try await episodeManager.cleanupDuplicateEpisodes()
-                print("✅ Cleaned up duplicate episodes after CloudKit sync")
             } catch {
                 print("⚠️ Failed to cleanup duplicate episodes: \(error)")
             }
@@ -9502,7 +9464,6 @@ extension PodcastViewModel {
             isAscendingSort = true // Default to ascending (A-Z)
             UserDefaults.standard.set(isAscendingSort, forKey: "PodcastIsAscendingSort")
         }
-        print("🎯 SORTING: Loaded podcast sort direction: \(isAscendingSort ? "A-Z" : "Z-A")")
     }
     
     /// Sanitize filename by removing invalid characters
@@ -9739,7 +9700,6 @@ extension PodcastViewModel {
             
             // Save changes
             try context.save()
-            print("📡 CoreData podcast feeds updated successfully.")
         } catch {
             print("❌ Failed to update podcast feeds in CoreData: \(error)")
         }
@@ -9749,20 +9709,14 @@ extension PodcastViewModel {
     func loadFeedsFromCoreData() {
         // PERFORMANCE: Prevent redundant Core Data operations
         guard !isLoadingFromCoreData else {
-            print("🔄 Core Data loading already in progress - skipping redundant call")
             return
         }
         
         // CRITICAL FIX: Don't reload feeds if podcast is currently playing to prevent episode restart
         let podcastPlayer = PodcastPlayer.shared
         if podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil {
-            print("🚗 CARPLAY FIX: Skipping feed reload - podcast is currently playing to prevent episode restart")
             return
         }
-        
-        print("🎯 CORE DATA LOAD: Starting loadFeedsFromCoreData() - Current feeds: \(podcastFeeds.count)")
-        print("🎯 CORE DATA LOAD: Current podcastFeedOrder: \(podcastFeedOrder.count)")
-        print("🎯 CORE DATA LOAD: isLoadingFromCoreData: \(isLoadingFromCoreData), isLoading: \(isLoading)")
         
         isLoadingFromCoreData = true
         isLoading = true  // Set main loading flag for UI coordination
@@ -9779,7 +9733,6 @@ extension PodcastViewModel {
         let backgroundContext = CoreDataStack.shared.newBackgroundContext()
         
         await backgroundContext.perform {
-            print("🎯 CORE DATA LOAD: About to perform Core Data fetch for FeedModel")
             let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
             
             // Add a sort descriptor to ensure feeds are loaded in the correct order
@@ -9788,9 +9741,11 @@ extension PodcastViewModel {
             
             do {
                 let results = try backgroundContext.fetch(request)
-                print("🎯 CORE DATA LOAD: Fetch completed - found \(results.count) FeedModel objects in Core Data")
             if results.isEmpty {
+                // Only log when no feeds found on fresh install
+                #if DEBUG
                 print("📡 No podcast feeds found in CoreData.")
+                #endif
                 // CRITICAL: Clear in-memory arrays when no feeds found in Core Data
                 Task { @MainActor in
                     self.podcastFeeds.removeAll()

@@ -729,9 +729,6 @@ class EpisodeStateManager: ObservableObject {
             }
         }
         
-        if removedCount > 0 {
-            print("🗑️ CLEANUP: Removed \(removedCount) old emergency backup keys (\(totalBytesRemoved) bytes) from app group UserDefaults")
-        }
     }
     
     /// Restore CRITICAL data from emergency backup after Core Data recreation
@@ -1247,7 +1244,6 @@ class EpisodeStateManager: ObservableObject {
                 // Remove the restrictive predicate to load all episodes
                 
                 let episodes = try context.fetch(fetchRequest)
-                print("💾 CORE DATA LOAD: Found \(episodes.count) total episodes in Core Data")
                 
                 var progressCount = 0
                 var favoritesCount = 0
@@ -1256,7 +1252,6 @@ class EpisodeStateManager: ObservableObject {
                 
                 for episode in episodes {
                     guard let episodeId = episode.id, !episodeId.isEmpty else { 
-                        print("⚠️ CORE DATA LOAD: Skipping episode with empty ID")
                         continue 
                     }
                     
@@ -1282,18 +1277,14 @@ class EpisodeStateManager: ObservableObject {
                     if episode.isPlayed {
                         loadedStates[episodeId] = .played
                         playedCount += 1
-                        print("💾 LOADED PLAYED: Episode \(episodeId.prefix(8)) loaded as .played from Core Data")
                     } else if episode.progress >= 1.0 {
                         // Episode completed but not explicitly marked as played - mark it
                         loadedStates[episodeId] = .played
                         playedCount += 1
-                        print("💾 LOADED PLAYED: Episode \(episodeId.prefix(8)) loaded as .played from progress (100%)")
                     } else if episode.progress > 0 {
                         loadedStates[episodeId] = .inProgress
                     }
                 }
-                
-                print("💾 CORE DATA LOAD DETAILS: Progress=\(progressCount), Favorites=\(favoritesCount), Downloads=\(downloadsCount), Played=\(playedCount)")
                 
             } catch {
                 print("❌ EpisodeStateManager: Failed to load from Core Data: \(error)")
@@ -1756,8 +1747,6 @@ class EpisodeStateManager: ObservableObject {
     
     /// Ensure all feeds have unique GUID IDs and all episodes are properly connected to feeds
     private func ensureAllFeedsHaveUniqueIds() async {
-        print("📡 🔧 MIGRATION: Starting feed ID validation and repair process...")
-        
         await withCheckedContinuation { continuation in
             let context = CoreDataStack.shared.newBackgroundContext()
             
@@ -1773,7 +1762,6 @@ class EpisodeStateManager: ObservableObject {
                             let newId = UUID().uuidString
                             feed.id = newId
                             feedsFixed += 1
-                            print("📡 ✅ FEED REPAIR: Assigned new GUID \(newId) to feed '\(feed.title ?? "Unknown")'")
                         }
                     }
                     
@@ -1795,7 +1783,6 @@ class EpisodeStateManager: ObservableObject {
                             if let feedRelation = episode.feed, let relationFeedId = feedRelation.id {
                                 episode.feedId = relationFeedId
                                 episodesFixed += 1
-                                print("📡 ✅ EPISODE REPAIR: Fixed feedId for episode \(episode.id ?? "unknown") -> \(relationFeedId)")
                             }
                             // If no relationship, try URL pattern matching
                             else if let audioUrl = episode.audioUrl {
@@ -1807,7 +1794,6 @@ class EpisodeStateManager: ObservableObject {
                                     episode.feed = feedToConnect
                                     
                                     episodesFixed += 1
-                                    print("📡 ✅ EPISODE RECOVERY: Recovered feedId for episode \(episode.id ?? "unknown") -> \(recoveredFeedId)")
                                 }
                             }
                             // Last resort: assign to first available feed
@@ -1815,7 +1801,6 @@ class EpisodeStateManager: ObservableObject {
                                 episode.feedId = firstFeedId
                                 episode.feed = firstFeed
                                 episodesFixed += 1
-                                print("📡 ⚠️ EPISODE FALLBACK: Assigned episode \(episode.id ?? "unknown") to feed \(firstFeedId)")
                             }
                         }
                     }
@@ -1823,9 +1808,6 @@ class EpisodeStateManager: ObservableObject {
                     // 3. Save all changes
                     if feedsFixed > 0 || episodesFixed > 0 {
                         try context.save()
-                        print("📡 ✅ MIGRATION COMPLETE: Fixed \(feedsFixed) feeds and \(episodesFixed) episodes")
-                    } else {
-                        print("📡 ✅ MIGRATION COMPLETE: No repairs needed - all feeds and episodes have proper IDs")
                     }
                     
                 } catch {

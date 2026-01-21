@@ -51,11 +51,8 @@ class PlaybackManager: ObservableObject {
         // FIRST-TIME PLAYBACK TRACKING: Mark that content has been played for TabView hiding behavior
         if player != .none && !hasEverPlayedContent() {
             markContentAsPlayed()
-            print("🎵 PlaybackManager: First-time content playback detected - enabling TabView hiding on scroll")
         }
         
-        // Always log during restoration to help debug
-        print("🎵 PlaybackManager: Active player changed from \(previousPlayer) to \(player) (saved to UserDefaults)")
         lastLoggedActivePlayer = player
         
         // Only activate audio session if requested (i.e., when actually starting playback)
@@ -71,10 +68,8 @@ class PlaybackManager: ObservableObject {
         
         guard let rawValue = rawValue,
               let player = ActivePlayer(rawValue: rawValue) else {
-            print("🎵 PlaybackManager: No last active player found or invalid value")
             return nil
         }
-        print("🎵 PlaybackManager: Successfully restored last active player: \(player)")
         return player
     }
     
@@ -573,15 +568,11 @@ class PlaybackManager: ObservableObject {
                     }
                 }
             }
-        } else {
-            print("🚫 PlaybackManager: No background resume needed")
         }
     }
     
     /// Handles app becoming active - check for interrupted playback that needs resume
     @objc private func handleAppDidBecomeActive() {
-        print("🌅 PlaybackManager: App became active - checking for interrupted playback")
-        
         // Stop any background timer since we're now in foreground
         stopBackgroundInterruptionTimer()
         
@@ -597,8 +588,6 @@ class PlaybackManager: ObservableObject {
                                  !PodcastPlayer.shared.isPlaying
         
         if shouldResumeRadio || shouldResumePodcast {
-            print("🔄 PlaybackManager: App became active with interrupted playback - attempting resume")
-            
             // Reactivate audio session first
             do {
                 let audioSession = AVAudioSession.sharedInstance()
@@ -607,7 +596,6 @@ class PlaybackManager: ObservableObject {
                                            mode: .default, 
                                            options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
                 try audioSession.setActive(true, options: [])
-                print("✅ PlaybackManager: Audio session reactivated for app active resume after phone call")
             } catch {
                 print("❌ PlaybackManager: Failed to reactivate audio session: \(error)")
             }
@@ -615,31 +603,20 @@ class PlaybackManager: ObservableObject {
             // Resume with delay to ensure audio session is ready
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if shouldResumeRadio {
-                    print("📻 PlaybackManager: App active - resuming radio playback")
                     PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
                     RadioPlayer.shared.resumeAfterInterruption()
                 } else if shouldResumePodcast {
-                    print("🎧 PlaybackManager: App active - resuming podcast playback")
                     PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
                     PodcastPlayer.shared.resumeAfterInterruption()
                 }
             }
-        } else {
-            print("ℹ️ PlaybackManager: App became active - no interrupted playback to resume")
         }
     }
     
     /// Handles app entering foreground - prepare for potential resume
     @objc private func handleAppWillEnterForeground() {
-        print("🌄 PlaybackManager: App entering foreground - preparing audio session")
-        
-        // PHONE CALL FIX: Check for potential resume for ANY player that was interrupted
-        if radioWasPlayingBeforeInterruption || RadioPlayer.shared.wasPlayingBeforeInterruption {
-            print("📻 PlaybackManager: Preparing for potential radio resume after phone call")
-        }
-        if podcastWasPlayingBeforeInterruption || PodcastPlayer.shared.wasPlayingBeforeInterruption {
-            print("🎧 PlaybackManager: Preparing for potential podcast resume after phone call")
-        }
+        // PHONE CALL FIX: Prepare for potential resume for ANY player that was interrupted
+        // Audio session will be reactivated by handleAppDidBecomeActive if needed
     }
     
     /// Starts a timer to periodically check if other audio has stopped and we can resume
@@ -824,7 +801,6 @@ class PlaybackManager: ObservableObject {
     private func stopBackgroundInterruptionTimer() {
         backgroundInterruptionTimer?.invalidate()
         backgroundInterruptionTimer = nil
-        print("⏰ PlaybackManager: Background interruption timer stopped")
     }
     
     private func reactivateAudioSessionWithoutClearing() {

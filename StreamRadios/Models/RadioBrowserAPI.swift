@@ -34,6 +34,40 @@ struct RadioBrowserStation: Codable {
     let geo_lat: Double?
     let geo_long: Double?
     let has_extended_info: Bool?
+    
+    /// Returns a cleaned copy with normalized country name and cleaned station name
+    func cleaned() -> RadioBrowserStation {
+        let normalizedCountry = RadioBrowserAPI.normalizeCountryName(country) ?? country
+        let cleanedName = RadioBrowserAPI.cleanStationName(name)
+        
+        return RadioBrowserStation(
+            stationuuid: stationuuid,
+            name: cleanedName,
+            url: url,
+            homepage: homepage,
+            favicon: favicon,
+            tags: tags,
+            country: normalizedCountry,
+            countrycode: countrycode,
+            state: state,
+            language: language,
+            languagecodes: languagecodes,
+            votes: votes,
+            lastchangetime: lastchangetime,
+            codec: codec,
+            bitrate: bitrate,
+            hls: hls,
+            lastcheckok: lastcheckok,
+            lastchecktime: lastchecktime,
+            lastcheckoktime: lastcheckoktime,
+            clickcount: clickcount,
+            clicktrend: clicktrend,
+            ssl_error: ssl_error,
+            geo_lat: geo_lat,
+            geo_long: geo_long,
+            has_extended_info: has_extended_info
+        )
+    }
 }
 
 class RadioBrowserAPI: ObservableObject {
@@ -44,13 +78,18 @@ class RadioBrowserAPI: ObservableObject {
     private let userAgent = "StreamRadios/1.0"
     
     // Fallback servers that are always available (prioritized by known working status)
+    // Note: Server availability changes - de1 and de2 are most reliable as of Jan 2026
     private let fallbackServers = [
-        "fi1.api.radio-browser.info",   // User confirmed working
-        "de2.api.radio-browser.info",   // User confirmed working
-        "de1.api.radio-browser.info",
-        "nl1.api.radio-browser.info",
-        "at1.api.radio-browser.info"
+        "de1.api.radio-browser.info",   // Most reliable, Germany
+        "de2.api.radio-browser.info",   // Second most reliable, Germany
+        "all.api.radio-browser.info",   // Auto-balancing endpoint
+        "fi1.api.radio-browser.info",   // Finland - may have issues
+        "nl1.api.radio-browser.info",   // Netherlands
+        "at1.api.radio-browser.info"    // Austria
     ]
+    
+    // Track current server index for failover
+    private var currentServerIndex: Int = 0
     
     private init() {
         // Initialize with fallback servers immediately
@@ -73,106 +112,104 @@ class RadioBrowserAPI: ObservableObject {
             if !discoveredServers.isEmpty {
                 availableServers = discoveredServers + fallbackServers
                 selectedServer = discoveredServers.first
-                print("✅ RadioBrowserAPI: Discovered \(discoveredServers.count) servers, using: \(selectedServer ?? "none")")
-            } else {
-                print("⚠️ RadioBrowserAPI: No servers discovered via DNS, using fallback servers")
             }
         } catch {
-            print("❌ RadioBrowserAPI: Server discovery failed: \(error)")
-            print("🔄 RadioBrowserAPI: Using fallback servers")
+            // Silently fall back to predefined servers
         }
     }
     
     private func discoverRadioBrowserServers() async throws -> [String] {
         // For iOS, we'll skip the DNS TXT record lookup and use our known good servers
         // This is because iOS doesn't provide easy access to DNS TXT records
-        print("📡 RadioBrowserAPI: Using predefined servers (DNS discovery not available on iOS)")
         return []
     }
     
     private func selectBestServer() -> String {
         guard let server = selectedServer ?? availableServers.first else {
-            return fallbackServers.first!
+            return fallbackServers[currentServerIndex % fallbackServers.count]
         }
         return server
+    }
+    
+    /// Called when a server fails to switch to the next available one
+    private func failoverToNextServer() {
+        currentServerIndex = (currentServerIndex + 1) % fallbackServers.count
+        selectedServer = fallbackServers[currentServerIndex]
     }
     
     // MARK: - API Methods
     
     func fetchTopStationsByCountry(countryCode: String, limit: Int = 20, offset: Int = 0, order: String = "clickcount") async throws -> [RadioBrowserStation] {
-        let server = selectBestServer()
-        let urlString = "https://\(server)/json/stations/bycountrycodeexact/\(countryCode)?limit=\(limit)&offset=\(offset)&order=\(order)&reverse=true"
-        
-        guard let url = URL(string: urlString) else {
-            throw RadioBrowserError.invalidURL
-        }
-        
-        print("🌐 RadioBrowserAPI: Fetching \(limit) stations for country '\(countryCode)' from \(server) (offset: \(offset), order: \(order))")
-        
-        var request = URLRequest(url: url)
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 60 // Increased timeout for better reliability
-        
-        // Create a custom URLSession with retry configuration
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 120
-        config.waitsForConnectivity = true
-        let session = URLSession(configuration: config)
-        
-        // Implement retry logic for network timeouts
+        // Track servers we've tried to avoid infinite loops
+        var triedServers: Set<String> = []
         var lastError: Error?
-        let maxRetries = 3
         
-        for attempt in 1...maxRetries {
+        // Try each available server until one works
+        while triedServers.count < fallbackServers.count {
+            let server = selectBestServer()
+            
+            // Skip if we've already tried this server
+            if triedServers.contains(server) {
+                failoverToNextServer()
+                continue
+            }
+            triedServers.insert(server)
+            
+            let urlString = "https://\(server)/json/stations/bycountrycodeexact/\(countryCode)?limit=\(limit)&offset=\(offset)&order=\(order)&reverse=true"
+            
+            guard let url = URL(string: urlString) else {
+                throw RadioBrowserError.invalidURL
+            }
+            
+            var request = URLRequest(url: url)
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.timeoutInterval = 15 // Reduced timeout to fail faster and try next server
+            
+            // Create a custom URLSession with retry configuration
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 15
+            config.timeoutIntervalForResource = 30
+            config.waitsForConnectivity = false // Don't wait, try next server instead
+            let session = URLSession(configuration: config)
+            
             do {
-                print("🔄 RadioBrowserAPI: Attempt \(attempt)/\(maxRetries) for country '\(countryCode)'")
                 let (data, response) = try await session.data(for: request)
                 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     throw RadioBrowserError.invalidResponse
                 }
                 
-                print("📡 RadioBrowserAPI: HTTP Status \(httpResponse.statusCode) for country '\(countryCode)'")
-                
                 guard httpResponse.statusCode == 200 else {
                     throw RadioBrowserError.httpError(httpResponse.statusCode)
                 }
                 
                 let stations = try JSONDecoder().decode([RadioBrowserStation].self, from: data)
-                print("✅ RadioBrowserAPI: Successfully decoded \(stations.count) stations for country '\(countryCode)'")
                 
-                return stations
+                // Clean and deduplicate stations at API level
+                let cleanedStations = stations.map { $0.cleaned() }
+                let deduplicatedStations = RadioBrowserAPI.deduplicateStationsByURL(cleanedStations)
+                
+                return deduplicatedStations
                 
             } catch let error as DecodingError {
-                print("❌ RadioBrowserAPI: JSON decoding failed for country '\(countryCode)': \(error)")
                 throw RadioBrowserError.decodingFailed(error)
             } catch {
                 lastError = error
-                print("❌ RadioBrowserAPI: Network request failed (attempt \(attempt)/\(maxRetries)) for country '\(countryCode)': \(error)")
                 
-                // Check if it's a timeout error
-                if let urlError = error as? URLError, urlError.code == .timedOut {
-                    if attempt < maxRetries {
-                        let delay = Double(attempt * 2) // Progressive delay: 2s, 4s, 6s
-                        print("⏳ RadioBrowserAPI: Waiting \(delay) seconds before retry due to timeout...")
-                        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                        continue
-                    }
-                }
+                // Failover to next server
+                failoverToNextServer()
                 
-                // For non-timeout errors, don't retry
-                throw RadioBrowserError.networkError(error)
+                // Small delay before trying next server
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             }
         }
         
-        // All retries exhausted for timeout
+        // All servers exhausted
         if let lastError = lastError {
-            print("💥 RadioBrowserAPI: All \(maxRetries) attempts failed for country '\(countryCode)' - Final error: \(lastError)")
             throw RadioBrowserError.networkError(lastError)
         } else {
-            throw RadioBrowserError.networkError(NSError(domain: "RadioBrowserAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown network error"]))
+            throw RadioBrowserError.networkError(NSError(domain: "RadioBrowserAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "All servers unavailable"]))
         }
     }
     
@@ -225,9 +262,13 @@ class RadioBrowserAPI: ObservableObject {
             }
             
             let stations = try JSONDecoder().decode([RadioBrowserStation].self, from: data)
-            print("✅ RadioBrowserAPI: Successfully found \(stations.count) stations in search")
+            print("✅ RadioBrowserAPI: Found \(stations.count) stations in search")
             
-            return stations
+            // Clean and deduplicate stations at API level
+            let cleanedStations = stations.map { $0.cleaned() }
+            let deduplicatedStations = RadioBrowserAPI.deduplicateStationsByURL(cleanedStations)
+            
+            return deduplicatedStations
             
         } catch let error as DecodingError {
             print("❌ RadioBrowserAPI: Search JSON decoding failed: \(error)")
@@ -295,7 +336,8 @@ class RadioBrowserAPI: ObservableObject {
             let stations = try JSONDecoder().decode([RadioBrowserStation].self, from: data)
             print("✅ RadioBrowserAPI: Successfully fetched details for station \(uuid)")
             
-            return stations.first
+            // Clean the station data before returning
+            return stations.first?.cleaned()
             
         } catch let error as DecodingError {
             print("❌ RadioBrowserAPI: Details JSON decoding failed for station \(uuid): \(error)")
@@ -333,6 +375,119 @@ class RadioBrowserAPI: ObservableObject {
         }
         
         return false
+    }
+    
+    // MARK: - Country Name Normalization
+    
+    /// Normalize API country names to our standard format
+    /// Call this ONCE when receiving data from API to avoid redundant processing downstream
+    static func normalizeCountryName(_ apiCountryName: String?) -> String? {
+        guard let rawName = apiCountryName?.trimmingCharacters(in: .whitespacesAndNewlines), !rawName.isEmpty else {
+            return nil
+        }
+        
+        // Fast path: common country names that don't need normalization
+        let commonCountries: Set<String> = ["United States", "United Kingdom", "Germany", "France", "Italy", "Spain", "Canada", "Australia", "India", "Brazil", "Japan", "China", "Mexico", "Russia", "Netherlands", "Belgium", "Switzerland", "Austria", "Poland", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Portugal", "Greece", "Turkey", "Argentina", "Chile", "Colombia", "Peru", "Venezuela", "South Africa", "Egypt", "Nigeria", "Kenya", "Morocco", "Israel", "Saudi Arabia", "United Arab Emirates", "Thailand", "Vietnam", "Indonesia", "Philippines", "Malaysia", "Singapore", "South Korea", "Taiwan", "New Zealand"]
+        
+        if commonCountries.contains(rawName) {
+            return rawName
+        }
+        
+        // Normalize problematic API country names
+        switch rawName {
+        case "The United States Of America", "United States Of America", "USA", "US", "America":
+            return "United States"
+        case "The United Kingdom Of Great Britain And Northern Ireland", "UK", "Great Britain", "Britain":
+            return "United Kingdom"
+        case "The Netherlands":
+            return "Netherlands"
+        case "The Bahamas":
+            return "Bahamas"
+        case "The Gambia":
+            return "Gambia"
+        case "Russian Federation", "Russia (Russian Federation)":
+            return "Russia"
+        case "Czech Republic", "Czechia":
+            return "Czech Republic"
+        case "Republic of Korea", "Korea (Republic of)":
+            return "South Korea"
+        case "Viet Nam":
+            return "Vietnam"
+        case "Iran (Islamic Republic of)", "Islamic Republic of Iran":
+            return "Iran"
+        case "Syrian Arab Republic":
+            return "Syria"
+        case "Venezuela (Bolivarian Republic of)":
+            return "Venezuela"
+        case "Bolivia (Plurinational State of)":
+            return "Bolivia"
+        case "Tanzania (United Republic of)":
+            return "Tanzania"
+        case "Moldova (Republic of)":
+            return "Moldova"
+        case "Macedonia (the former Yugoslav Republic of)", "The Former Yugoslav Republic of Macedonia", "North Macedonia":
+            return "Macedonia"
+        case "Lao People's Democratic Republic":
+            return "Laos"
+        case "Brunei Darussalam":
+            return "Brunei"
+        case "Myanmar (Burma)", "Burma":
+            return "Myanmar"
+        case "Côte d'Ivoire", "Cote d'Ivoire", "Ivory Coast":
+            return "Côte d'Ivoire"
+        case "Timor-Leste", "East Timor":
+            return "Timor-Leste"
+        case "Vatican", "Holy See", "Vatican City State", "The Vatican":
+            return "Vatican City"
+        default:
+            // Handle "The X" pattern
+            if rawName.hasPrefix("The ") {
+                return String(rawName.dropFirst(4))
+            }
+            return rawName
+        }
+    }
+    
+    /// Clean station name by removing leading special characters and trimming whitespace
+    static func cleanStationName(_ name: String) -> String {
+        var cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Remove leading special characters (non-alphanumeric)
+        while !cleaned.isEmpty && !cleaned.first!.isLetter && !cleaned.first!.isNumber {
+            cleaned.removeFirst()
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Deduplicate stations by URL, preferring HTTPS over HTTP
+    static func deduplicateStationsByURL(_ stations: [RadioBrowserStation]) -> [RadioBrowserStation] {
+        var urlToStation: [String: RadioBrowserStation] = [:]
+        
+        for station in stations {
+            guard !station.url.isEmpty else { continue }
+            
+            // Normalize URL by removing protocol
+            let normalizedURL = station.url.lowercased()
+                .replacingOccurrences(of: "https://", with: "")
+                .replacingOccurrences(of: "http://", with: "")
+            
+            if let existing = urlToStation[normalizedURL] {
+                // Prefer HTTPS over HTTP
+                let existingIsHTTPS = existing.url.lowercased().hasPrefix("https://")
+                let currentIsHTTPS = station.url.lowercased().hasPrefix("https://")
+                
+                if currentIsHTTPS && !existingIsHTTPS {
+                    urlToStation[normalizedURL] = station
+                }
+                // Otherwise keep the first (usually higher click count)
+            } else {
+                urlToStation[normalizedURL] = station
+            }
+        }
+        
+        return Array(urlToStation.values)
     }
 }
 

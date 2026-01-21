@@ -381,23 +381,18 @@ class RadioPlayer: NSObject, ObservableObject {
         do {
             reachability = try Reachability()
             reachability?.whenReachable = { [weak self] _ in
-                print("🌐 RadioPlayer: Network reconnected - attempting to restore playback")
                 self?.handleNetworkReconnection()
             }
             reachability?.whenUnreachable = { [weak self] _ in
-                print("🌐 RadioPlayer: Network disconnected - updating state")
                 self?.handleNetworkDisconnection()
             }
             try reachability?.startNotifier()
-            print("✅ RadioPlayer: Network monitoring started")
         } catch {
             print("❌ RadioPlayer: Unable to start reachability notifier: \(error.localizedDescription)")
         }
     }
     
     private func handleNetworkDisconnection() {
-        print("🌐 RadioPlayer: Network disconnected while user wants to play: \(userWantsToPlay)")
-        
         // GPS FIX: Track network failures to help GPS protection system
         self.trackNetworkFailure()
         
@@ -405,7 +400,6 @@ class RadioPlayer: NSObject, ObservableObject {
         if userWantsToPlay {
             connectionState = .disconnected
             isBuffering = false
-            print("🌐 RadioPlayer: Network lost - will attempt reconnection when network returns")
         }
     }
     
@@ -413,14 +407,12 @@ class RadioPlayer: NSObject, ObservableObject {
         // Attempt reconnection if user wants to play, regardless of current isPlaying state
         // because isPlaying might be stale when network was disconnected
         guard userWantsToPlay else {
-            print("🌐 RadioPlayer: Network reconnected but user doesn't want to play")
             return
         }
         
         // CRITICAL: Reset StreamQualityManager to re-evaluate network conditions
         streamQualityManager.resetNetworkEvaluation()
         
-        print("🌐 RadioPlayer: Network reconnected and user wants to play - starting reconnection attempts")
         isAttemptingReconnection = true
         currentReconnectionAttempt = 0
         attemptReconnection()
@@ -502,7 +494,6 @@ class RadioPlayer: NSObject, ObservableObject {
             .removeDuplicates()
             .sink { [weak self] qualityText in
                 self?.bitrateSubject.send(qualityText)
-                print("🎵 Stream quality updated to: \(qualityText)")
             }
             .store(in: &cancellables)
         
@@ -534,22 +525,17 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func autoPlayLastStationSetup() {
-        // Debug: Check both @AppStorage and direct UserDefaults access
+        // Use direct UserDefaults access to ensure we get the most current value
         let directUserDefaultsValue = UserDefaults.standard.bool(forKey: "autoPlayLastStation")
-        print("🔄 Auto-play setup initiated")
-        print("📊 @AppStorage autoPlayLastStation: \(autoPlayLastStation)")
-        print("📊 Direct UserDefaults autoPlayLastStation: \(directUserDefaultsValue)")
-        print("📊 Values match: \(autoPlayLastStation == directUserDefaultsValue)")
+        
         // If app requested suppression of global player on next launch, skip any UI/auto-restore once
         if UserDefaults.standard.bool(forKey: "SuppressGlobalPlayerOnNextLaunch") {
-            print("🧹 SuppressGlobalPlayerOnNextLaunch active - skipping radio UI/auto-restore on launch")
             UserDefaults.standard.set(false, forKey: "SuppressGlobalPlayerOnNextLaunch")
             return
         }
         
         // CRITICAL: Check if CarPlay is currently playing to avoid conflicts
         if CarPlayManager.shared.isCarPlayConnected && isPlaying {
-            print("🚗 CarPlay: App opened while CarPlay is playing - syncing to CarPlay state instead of auto-restore")
             syncMainAppToCarPlayState()
             return
         }
@@ -558,18 +544,12 @@ class RadioPlayer: NSObject, ObservableObject {
         // This ensures the radio player shows up immediately like the podcast player
         let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
         if lastActivePlayer == .radio {
-            print("🚀 Radio: Radio was last active player - restoring UI and claiming active status")
             restoreLastPlayedStationUIImmediately()
             
             // Only set as active player during app startup restoration, not during normal operation
             if PlaybackManager.shared.activePlayer == .none {
-                print("🚀 Radio: Setting radio as active player (startup restoration)")
                 PlaybackManager.shared.setActivePlayer(.radio)
-            } else {
-                print("🚀 Radio: Skipping active player setting - another player already active (\(PlaybackManager.shared.activePlayer))")
             }
-        } else {
-            print("🚀 Radio: Radio was not last active player (\(lastActivePlayer?.rawValue ?? "none")) - skipping restoration")
         }
         
         // Use direct UserDefaults access to ensure we get the most current value
@@ -795,15 +775,10 @@ class RadioPlayer: NSObject, ObservableObject {
     /// Immediately restores UI state for instant player display on app startup
     /// This method runs synchronously to ensure the player appears immediately
     private func restoreLastPlayedStationUIImmediately() {
-        print("🚀 Radio: Immediate UI restoration started")
-        
         guard let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID"),
               let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) else {
-            print("⚠️ Radio: No saved station found for immediate restoration")
             return
         }
-        
-        print("✅ Radio: Immediately restoring UI for station: \(lastStation.name)")
         
         // Set station object immediately for display
         self.currentlyPlayingStation = lastStation
@@ -811,19 +786,14 @@ class RadioPlayer: NSObject, ObservableObject {
         // Find and set current index for UI consistency
         if let currentIndex = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
             self.currentStationIndex = currentIndex
-            print("🚀 Radio: Set currentStationIndex to \(currentIndex) for immediate display")
         } else {
             self.currentStationIndex = nil
-            print("⚠️ Radio: Could not find index for station - display preserved via currentlyPlayingStation")
         }
         
         // Set up the player URL so it's ready for playback
         if let url = URL(string: lastStation.url) {
             self.setStationURL(url)
-            print("🚀 Radio: Station URL set for immediate readiness")
         }
-        
-        print("✅ Radio: Immediate UI restoration completed - player should be visible now")
     }
     
     /// Starts playback for an already restored station (UI is already set up)
@@ -6116,8 +6086,6 @@ extension RadioPlayer {
     
     /// Sets up CarPlay artwork observation using audio session events and metadata notifications
     private func setupCarPlayArtworkObservation() {
-        print("🚗 RadioPlayer: Setting up enhanced CarPlay artwork observation")
-        
         // Listen for audio session route changes (CarPlay connect/disconnect)
         NotificationCenter.default.addObserver(
             self,
@@ -6133,8 +6101,6 @@ extension RadioPlayer {
             name: AVAudioSession.interruptionNotification,
             object: nil
         )
-        
-        print("🚗 RadioPlayer: CarPlay artwork observation setup complete")
     }
     
     /// Enhanced metadata observation for CarPlay artwork fetching

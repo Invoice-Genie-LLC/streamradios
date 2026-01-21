@@ -50,8 +50,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             
             // Prewarm EpisodeStateManager to avoid cold-start race conditions for UI
             _ = EpisodeStateManager.shared
-            print("🔥 Prewarmed EpisodeStateManager at launch; isReady=\(EpisodeStateManager.shared.isReady)")
-            print("📡 Enhanced CloudKit sync initialized for podcasts and radio stations")
             
             checkBackgroundRefreshStatus()
             
@@ -801,7 +799,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     private func configureAudioSession() {
         // Audio session configuration is now handled by PlaybackManager
         // This ensures centralized management and prevents conflicts
-        print("Audio session configuration delegated to PlaybackManager")
     }
     
     private func setupCarPlay() {
@@ -814,8 +811,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // Ensure radio station data is available for CarPlay
         carPlayManager.updateContent()
-        
-        print("CarPlay will be configured via CarPlaySceneDelegate.")
     }
     
     private func playFavoriteStation(at index: Int) {
@@ -926,9 +921,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     private func initializeEnhancedCrashLogging() {
         do {
             // Initialize the DebugLogger to set up crash reporting
-            print("🔧 Initializing DebugLogger...")
             _ = DebugLogger.shared
-            print("🔧 DebugLogger shared instance created successfully")
             
             // Start main thread monitoring for hang detection
             DebugLogger.startMainThreadMonitoring()
@@ -937,7 +930,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             setupCrashContext()
             
             DebugLogger.logInfo("Enhanced crash logging initialized with comprehensive monitoring", category: "CrashReporting")
-            print("🔧 Enhanced crash logging fully initialized")
         } catch {
             print("❌ Failed to initialize DebugLogger: \(error)")
             // Continue without crash logging rather than crashing the app

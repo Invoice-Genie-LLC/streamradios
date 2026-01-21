@@ -135,30 +135,37 @@ class DataSyncManager: ObservableObject {
     private init() {
         setupProgressCalculation()
         
-        // 🔧 APP GROUP FIX: Check if Core Data is empty to detect TRUE fresh install
-        // App Group UserDefaults persist across app deletions, so we need to check Core Data instead
+        // Check if sync has ever completed successfully
+        let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+        let hasSyncCompleted = UserDefaults.standard.bool(forKey: "DataSyncCompleted")
+        
+        // 🔧 FRESH INSTALL DETECTION:
+        // Only check Core Data to detect app reinstall (UserDefaults persist in App Group)
+        // If HasLaunchedBefore=true but Core Data is completely empty, app was reinstalled
         let coreDataIsEmpty = checkIfCoreDataIsEmpty()
-        if coreDataIsEmpty {
-            // TRUE fresh install - Core Data is empty, reset all flags
+        let isAppReinstall = hasLaunchedBefore && coreDataIsEmpty
+        
+        if isAppReinstall {
+            // App was reinstalled - Core Data is empty but UserDefaults say we launched before
+            // This is a TRUE fresh install, reset all flags
+            print("🔄 App reinstall detected - resetting sync flags")
             UserDefaults.standard.set(false, forKey: "HasLaunchedBefore")
             UserDefaults.standard.set(false, forKey: "DataSyncCompleted")
             UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
             UserDefaults.standard.set(false, forKey: "HasPodcastFeedsSynced")
             UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
-            // Note: synchronize() is deprecated and unnecessary
         }
         
-        // If this is not a fresh install, mark UI as ready immediately
+        // Re-check after potential reset
         let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-        let hasSyncCompleted = UserDefaults.standard.bool(forKey: "DataSyncCompleted")
+        let syncCompleted = UserDefaults.standard.bool(forKey: "DataSyncCompleted")
         
-        print("🎯 DataSyncManager init: isFreshInstall=\(isFreshInstall), hasSyncCompleted=\(hasSyncCompleted)")
-        
-        if !isFreshInstall && hasSyncCompleted {
+        // Show sync screen ONLY on first-ever launch (never launched before AND sync never completed)
+        // Once HasLaunchedBefore is true, NEVER show the sync screen again
+        if !isFreshInstall {
             isFreshInstallUIReady = true
-            print("🎯 DataSyncManager init: Set isFreshInstallUIReady=true (not fresh install)")
         } else {
-            print("🎯 DataSyncManager init: Set isFreshInstallUIReady=false (fresh install or sync not completed)")
+            isFreshInstallUIReady = false
         }
     }
     
@@ -166,22 +173,29 @@ class DataSyncManager: ObservableObject {
     
     /// Check if Core Data is empty to detect TRUE fresh install
     /// App Group UserDefaults persist across app deletions, so we check Core Data instead
-    /// NOTE: We only check podcast feeds, not radio stations, because radio stations
-    /// are initialized early in app lifecycle BEFORE DataSyncManager.initeaa   () runs
+    /// We check BOTH podcast feeds AND radio stations - if either has data, it's not a fresh install
     private func checkIfCoreDataIsEmpty() -> Bool {
         let context = CoreDataStack.shared.context
         var isEmpty = false
         
         context.performAndWait {
             do {
-                // Only check podcast feeds for fresh install detection
-                // Radio stations are initialized before DataSyncManager, so they're not reliable
+                // Check for podcast feeds
                 let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                 feedRequest.fetchLimit = 1
                 let feedCount = try context.count(for: feedRequest)
                 
-                // Core Data is empty if there are no podcast feeds
-                isEmpty = (feedCount == 0)
+                // Check for radio stations
+                let stationRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                stationRequest.fetchLimit = 1
+                let stationCount = try context.count(for: stationRequest)
+                
+                // Core Data is empty only if BOTH feeds AND stations are empty
+                isEmpty = (feedCount == 0 && stationCount == 0)
+                
+                if !isEmpty {
+                    print("📊 Core Data check: \(feedCount > 0 ? "has feeds" : "no feeds"), \(stationCount > 0 ? "has stations" : "no stations") - NOT a fresh install")
+                }
             } catch {
                 print("❌ Error checking Core Data for fresh install: \(error)")
                 isEmpty = false // Assume not empty on error to be safe
@@ -302,13 +316,11 @@ class DataSyncManager: ObservableObject {
             let viewModel = RadioStationViewModel.shared
             
             if isFreshInstall || !hasRadioStationsSynced {
-                print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
                 radioStationsOperation = "Fetching radio stations from iCloud..."
                 await syncRadioStationsFromCloudKitWithProgress()
                 // Mark radio stations as synced
                 UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
             } else {
-                print("⚡ Skipping CloudKit radio station sync - loading from local storage only for better performance")
                 radioStationsOperation = "Loading radio stations from local storage..."
                 radioStationsTotalCount = await getLocalStationCount()
                 
@@ -745,8 +757,6 @@ class DataSyncManager: ObservableObject {
         self.feedsLoadedFromCoreData = feedsLoaded
         self.totalFeedsInCoreData = totalFeeds
         self.coreDataEpisodesLoaded = (feedsLoaded == totalFeeds && totalFeeds > 0)
-        
-        print("💾 DataSyncManager: Core Data episode load status - \(feedsLoaded)/\(totalFeeds) loaded into memory: \(coreDataEpisodesLoaded)")
     }
     
     /// Update radio station snapshot readiness tracking
@@ -755,8 +765,6 @@ class DataSyncManager: ObservableObject {
         self.countriesWithSnapshots = countriesWithSnapshots
         self.totalCountriesRequiringSnapshots = totalCountriesRequiringSnapshots
         self.stationSnapshotsReady = (countriesWithSnapshots == totalCountriesRequiringSnapshots && totalCountriesRequiringSnapshots > 0)
-        
-        print("📸 DataSyncManager: Station snapshot readiness - \(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots) ready: \(stationSnapshotsReady)")
     }
     
     // MARK: - Individual Feed Addition Tracking
@@ -765,14 +773,12 @@ class DataSyncManager: ObservableObject {
     @MainActor
     func startIndividualFeedAddition() {
         isAddingIndividualFeed = true
-        print("🔄 DataSyncManager: Started individual feed addition tracking")
     }
     
     /// Complete individual feed addition tracking
     @MainActor
     func completeIndividualFeedAddition() {
         isAddingIndividualFeed = false
-        print("🔄 DataSyncManager: Completed individual feed addition tracking")
     }
     
     // MARK: - Radio Station Sync Management
@@ -1273,7 +1279,10 @@ class DataSyncManager: ObservableObject {
                     print("⚠️ Core Data verification failed - feeds not found in Core Data, continuing wait...")
                 }
             } else {
-                print("⏳ Waiting for UI to show feeds... attempt \(uiUpdateAttempts + 1) - Feeds: \(feedCount), Order: \(feedOrderCount)")
+                // Only log every 5th attempt to reduce log noise
+                if uiUpdateAttempts % 5 == 0 {
+                    print("⏳ Waiting for UI to show feeds... attempt \(uiUpdateAttempts + 1) - Feeds: \(feedCount), Order: \(feedOrderCount)")
+                }
                 
                 // If we're taking too long, try to force a refresh
                 if uiUpdateAttempts > 7 {
@@ -1481,32 +1490,21 @@ class DataSyncManager: ObservableObject {
     /// Force complete UI refresh to ensure SwiftUI properly reflects data changes
     @MainActor
     private func forceCompleteUIRefresh(_ podcastViewModel: PodcastViewModel) async {
-        print("🚀 FORCE UI REFRESH: Starting complete UI refresh sequence")
-        
         // 1. Force PodcastViewModel to reload its data from Core Data
         await podcastViewModel.forceSaveAndReload()
-        print("🚀 FORCE UI REFRESH: Completed forceSaveAndReload")
         
         // 2. Manually trigger objectWillChange on PodcastViewModel to notify all SwiftUI views
         podcastViewModel.objectWillChange.send()
-        print("🚀 FORCE UI REFRESH: Triggered PodcastViewModel.objectWillChange.send()")
         
         // 3. Force our own DataSyncManager to notify SwiftUI views observing it
         objectWillChange.send()
-        print("🚀 FORCE UI REFRESH: Triggered DataSyncManager.objectWillChange.send()")
         
         // 4. Post multiple notifications to trigger all possible UI refresh mechanisms
         NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
         NotificationCenter.default.post(name: NSNotification.Name("PodcastDataUpdated"), object: nil)
-        print("🚀 FORCE UI REFRESH: Posted refresh notifications")
         
         // 5. Give SwiftUI time to process the changes
         try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
-        
-        // 6. Verify that the changes are reflected in the ViewModel
-        let feedsAfterRefresh = podcastViewModel.podcastFeeds.count
-        let orderAfterRefresh = podcastViewModel.podcastFeedOrder.count
-        print("🚀 FORCE UI REFRESH: After refresh - Feeds: \(feedsAfterRefresh), Order: \(orderAfterRefresh)")
     }
     
     /// Wait for radio stations to load
@@ -1842,7 +1840,10 @@ class DataSyncManager: ObservableObject {
                 break
             }
             
-            print("⏳ Waiting for sync statuses to complete: Radio:\(radioStationsStatus), Podcast:\(podcastFeedsStatus), Artwork:\(artworkDownloadsStatus), Episodes:\(episodeStatesStatus), Preferences:\(userPreferencesStatus)")
+            // Only log every 10th attempt to reduce log noise
+            if attempts % 10 == 0 {
+                print("⏳ Waiting for sync statuses to complete: Radio:\(radioStationsStatus), Podcast:\(podcastFeedsStatus), Artwork:\(artworkDownloadsStatus), Episodes:\(episodeStatesStatus), Preferences:\(userPreferencesStatus)")
+            }
             
             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
             attempts += 1

@@ -151,8 +151,6 @@ class DebugLogger: ObservableObject {
         setupComprehensiveCrashReporting()
         loadPersistedLogs()
         DebugLogger.isInitializing = false
-        // Note: Cannot use DebugLogger.logInfo here as it would create circular dependency
-        print("🔧 DebugLogger initialized - comprehensive crash detection enabled")
     }
     
     // MARK: - Public Logging Methods
@@ -315,7 +313,6 @@ class DebugLogger: ObservableObject {
         setupWatchdogTimer()
         
         crashReportingInitialized = true
-        print("🔧 Comprehensive crash reporting initialized")
     }
     
     private func setupSignalHandlers() {
@@ -339,8 +336,6 @@ class DebugLogger: ObservableObject {
                 DebugLogger.shared.handleSignalCrash(signalNumber)
             }
         }
-        
-        print("🔧 Signal handlers installed for \(crashSignals.count) crash signals")
     }
     
     private func setupMemoryPressureMonitoring() {

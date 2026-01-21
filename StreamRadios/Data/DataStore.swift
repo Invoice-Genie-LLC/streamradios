@@ -1147,12 +1147,10 @@ class DataStore {
 
     
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
-        print("Starting paginated fetch of radio stations from CloudKit...")
         fetchRadioStationsWithPagination(allRecords: [], cursor: nil, completion: completion)
     }
     
     func fetchRadioStationsWithProgress(progressCallback: @escaping (Double, Int, String) -> Void, completion: @escaping ([RadioStation]?, Error?) -> Void) {
-        print("Starting paginated fetch of radio stations from CloudKit with progress tracking...")
         fetchRadioStationsWithPaginationAndProgress(allRecords: [], cursor: nil, totalEstimate: nil, progressCallback: progressCallback, completion: completion)
     }
     
@@ -1303,7 +1301,6 @@ class DataStore {
                     self.fetchRadioStationsWithPaginationAndProgress(allRecords: fetchedRecords, cursor: cursor, totalEstimate: totalEstimate, progressCallback: progressCallback, completion: completion)
                 } else {
                     // All records fetched
-                    print("Completed fetching all \(currentCount) records from CloudKit.")
                     
                     // Report final progress with country breakdown
                     let allCountries = fetchedRecords.compactMap { record in
@@ -1402,7 +1399,6 @@ class DataStore {
                     order: order
                 )
             }
-            print("Successfully processed \(stations.count) stations from CloudKit.")
             completion(stations, nil)
         }
     }
@@ -1473,6 +1469,101 @@ class DataStore {
             } else {
                 self.saveNewStationToCloudKit(station: station, iconImage: iconImage, completion: completion)
             }
+        }
+    }
+    
+    // MARK: - Country-Specific CloudKit Fetch (for API fallback)
+    
+    /// Fetch stations for a specific country from CloudKit
+    /// Used as fallback when Radio Browser API is unavailable
+    func fetchStationsForCountry(_ countryName: String) async throws -> [RadioStation] {
+        print("☁️ CloudKit Fallback: Fetching stations for \(countryName) from CloudKit...")
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            let predicate = NSPredicate(format: "country == %@", countryName)
+            let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
+            query.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+            
+            let queryOperation = CKQueryOperation(query: query)
+            queryOperation.resultsLimit = 500 // Limit for performance
+            
+            var fetchedRecords: [CKRecord] = []
+            
+            queryOperation.recordMatchedBlock = { recordID, result in
+                switch result {
+                case .success(let record):
+                    fetchedRecords.append(record)
+                case .failure(let error):
+                    print("⚠️ CloudKit Fallback: Skipping corrupted record \(recordID.recordName): \(error.localizedDescription)")
+                }
+            }
+            
+            queryOperation.queryResultBlock = { result in
+                switch result {
+                case .success(_):
+                    print("☁️ CloudKit Fallback: Fetched \(fetchedRecords.count) stations for \(countryName)")
+                    
+                    // Convert CKRecords to RadioStations
+                    let stations = fetchedRecords.compactMap { record -> RadioStation? in
+                        guard let name = record["name"] as? String,
+                              let url = record["url"] as? String else {
+                            return nil
+                        }
+                        
+                        let country = record["country"] as? String ?? countryName
+                        let isFavoriteString = record["isFavorite"] as? String ?? "false"
+                        let isFavorite = isFavoriteString.lowercased() == "true"
+                        let favoritedAt = record["favoritedAt"] as? Date
+                        let favoriteOrder = record["favoriteOrder"] as? Int
+                        let order = record["order"] as? Int ?? 0
+                        let lastPlayed = record["lastPlayed"] as? Date
+                        
+                        // Get icon data if available (convert to base64 string)
+                        var iconDataString: String? = nil
+                        if let iconAsset = record["iconData"] as? CKAsset,
+                           let fileURL = iconAsset.fileURL,
+                           let data = try? Data(contentsOf: fileURL) {
+                            iconDataString = data.base64EncodedString()
+                        }
+                        
+                        return RadioStation(
+                            id: record.recordID.recordName,
+                            name: name,
+                            url: url,
+                            iconData: iconDataString,
+                            country: country,
+                            isFavorite: isFavorite,
+                            favoritedAt: favoritedAt,
+                            favoriteOrder: favoriteOrder,
+                            order: order,
+                            lastPlayed: lastPlayed
+                        )
+                    }
+                    
+                    continuation.resume(returning: stations)
+                    
+                case .failure(let error):
+                    print("❌ CloudKit Fallback: Failed to fetch stations for \(countryName): \(error.localizedDescription)")
+                    continuation.resume(throwing: error)
+                }
+            }
+            
+            privateDatabase.add(queryOperation)
+        }
+    }
+    
+    /// Check if CloudKit has stations for a specific country
+    func hasCloudKitStationsForCountry(_ countryName: String) async -> Bool {
+        do {
+            let predicate = NSPredicate(format: "country == %@", countryName)
+            let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
+            
+            // Just check if at least one record exists
+            let (matchResults, _) = try await privateDatabase.records(matching: query, resultsLimit: 1)
+            return !matchResults.isEmpty
+        } catch {
+            print("⚠️ CloudKit: Could not check for stations in \(countryName): \(error.localizedDescription)")
+            return false
         }
     }
 }

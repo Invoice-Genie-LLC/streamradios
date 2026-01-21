@@ -113,13 +113,26 @@ struct RadioStationListView: View {
             loadHiddenCountries()
         }
         .onDisappear(perform: cleanup)
+        .onChange(of: viewModel.showAPIUnavailableAlert) { showAlert in
+            print("📱 showAPIUnavailableAlert changed to: \(showAlert)")
+            if showAlert {
+                print("📱 Showing radioAPIUnavailable alert via alertManager")
+                alertManager.showCustomAlert(for: .radioAPIUnavailable)
+                viewModel.showAPIUnavailableAlert = false
+            }
+        }
+        .onChange(of: showingCountryPicker) { isShowing in
+            // Dismiss API unavailable alert when user opens country picker
+            if isShowing && alertManager.currentAlertType == .radioAPIUnavailable {
+                alertManager.dismissAlert()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .hiddenCountriesChanged)) { _ in
             loadHiddenCountries()
         }
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
             // CRITICAL FIX: Don't reload from Core Data if stations were just loaded via fetchStationsForSelectedCountry
             // This prevents manual stations from being wiped out after they're loaded
-            print("📻 🔧 FIX: Received stationsUpdated notification - preserving in-memory stations to avoid wiping manual stations")
             
             // Force UI update immediately without reloading from Core Data
             DispatchQueue.main.async {
@@ -134,7 +147,6 @@ struct RadioStationListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
             // Handle country changes without affecting currently playing station
-            print("🌍 Received countryChanged notification - updating UI for country selection")
             
             DispatchQueue.main.async {
                 viewModel.objectWillChange.send()
@@ -157,27 +169,6 @@ struct RadioStationListView: View {
         }
         .overlay(
             Group {
-                if alertManager.showCustomAlert {
-                    Color.adaptiveBackground.opacity(0.8)
-                        .edgesIgnoringSafeArea(.all)
-                        .overlay(
-                            CustomAlertView(
-                                title: alertManager.customAlertTitle,
-                                message: alertManager.customAlertMessage,
-                                buttonText: alertManager.customAlertPrimaryButtonText,
-                                buttonAction: {
-                                    alertManager.customAlertPrimaryAction?()
-                                    alertManager.dismissAlert()
-                                },
-                                secondaryButtonText: alertManager.customAlertSecondaryButtonText,
-                                secondaryButtonAction: {
-                                    alertManager.customAlertSecondaryAction?()
-                                    alertManager.dismissAlert()
-                                }
-                            )
-                        )
-                }
-                
                 // Edit mode header (only for Favorites tab since All tab doesn't allow reordering)
                 if isEditing && selectedSubTab == .favorites {
                     VStack {
@@ -377,16 +368,12 @@ struct RadioStationListView: View {
     
     private var emptyStateView: some View {
         VStack {
-            // RECENT, FAVORITES & ALL TAB FIX: Don't show anything when stations exist but tabs are empty
-            if (selectedSubTab == .recent && !viewModel.stations.isEmpty) ||
-               (selectedSubTab == .favorites && !viewModel.stations.isEmpty) {
-                // Show nothing for Recent/Favorites tabs when stations exist but tabs are empty
-                Color.clear
-            } else if selectedSubTab == .all && !viewModel.stations.isEmpty && viewModel.selectedCountry != "Select Country" {
-                // All tab with country selected but no stations for that country
+            // RECENT, FAVORITES & ALL TAB: Show empty state when no stations for country
+            if !viewModel.stations.isEmpty && viewModel.selectedCountry != "Select Country" {
+                // Country selected but no stations for that country (any tab)
                 VStack {
                     Spacer()
-                        .frame(minHeight: 40, maxHeight: 80) // Reduced top spacing for small screens
+                        .frame(minHeight: 40, maxHeight: 80)
                     
                     VStack(spacing: 16) {
                         Image(systemName: "radio")
@@ -403,9 +390,6 @@ struct RadioStationListView: View {
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 16)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity)
                         
                         VStack(spacing: 12) {
                             Button(action: {
@@ -450,9 +434,8 @@ struct RadioStationListView: View {
                     }
                     
                     Spacer()
-                        .frame(minHeight: 80, maxHeight: 120) // More bottom spacing to ensure buttons are visible
                 }
-                .padding(.horizontal, 40)
+                .padding(.horizontal, 32)
             } else if viewModel.stations.isEmpty {
                 // No stations exist at all - show country selection button
                 VStack {
@@ -465,6 +448,7 @@ struct RadioStationListView: View {
                             .foregroundColor(.adaptivePrimaryText)
                         
                         Button(action: {
+                            alertManager.dismissAlert()
                             showingCountryPicker = true
                         }) {
                             HStack {
@@ -503,6 +487,7 @@ struct RadioStationListView: View {
                             .multilineTextAlignment(.center)
                         
                         Button(action: {
+                            alertManager.dismissAlert()
                             showingCountryPicker = true
                         }) {
                             HStack {
@@ -1453,7 +1438,6 @@ struct RadioStationListView: View {
                         withAnimation(.easeInOut(duration: 0.5)) {
                             proxy.scrollTo(firstStation.id, anchor: .top)
                         }
-                        print("📱 Scrolled to top of Recent tab - station playing")
                     }
                     
                 case .favorites, .all:
@@ -1462,10 +1446,6 @@ struct RadioStationListView: View {
                         withAnimation(.easeInOut(duration: 0.5)) {
                             proxy.scrollTo(currentStationId, anchor: .center)
                         }
-                        print("📱 Scrolled to currently playing station: \(currentStationName) in \(selectedSubTab.title) tab")
-                    } else {
-                        // Playing station not in current tab - maintain current position
-                        print("📱 Playing station \(currentStationName) not in current \(selectedSubTab.title) tab - maintaining current position")
                     }
                 }
             }
@@ -1476,13 +1456,6 @@ struct RadioStationListView: View {
         if let firstStation = filteredStations.first {
             withAnimation(.easeInOut(duration: 0.5)) {
                 proxy.scrollTo(firstStation.id, anchor: .top)
-            }
-            
-            if let currentIndex = radioPlayer.currentStationIndex,
-               currentIndex < viewModel.stations.count {
-                print("📱 Scrolled to top of \(selectedSubTab.title) tab - station paused")
-            } else {
-                print("📱 Scrolled to top of \(selectedSubTab.title) tab - no station selected")
             }
         }
     }
@@ -1541,7 +1514,6 @@ struct RadioStationListView: View {
             withAnimation(.easeInOut(duration: 0.5)) {
                 proxy.scrollTo(firstStation.id, anchor: .top)
             }
-            print("📱 [TAB SWITCH] Scrolled to top of \(selectedSubTab.title) tab - no playing station")
         }
     }
     

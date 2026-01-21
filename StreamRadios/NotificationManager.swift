@@ -113,11 +113,8 @@ class NotificationManager: NSObject, ObservableObject {
     
     // Alternative method for immediate notifications that works better for operations
     func notifyUserImmediate(title: String, message: String) {
-        print("🔔 Immediate notification: \(title) - \(message)")
-        
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else {
-                print("❌ Immediate notification failed - not authorized")
                 return
             }
             
@@ -130,8 +127,6 @@ class NotificationManager: NSObject, ObservableObject {
             UNUserNotificationCenter.current().add(request) { error in
                 if let error = error {
                     print("❌ Error scheduling immediate notification: \(error.localizedDescription)")
-                } else {
-                    print("✅ Immediate notification scheduled: \(title)")
                 }
             }
         }
@@ -165,8 +160,6 @@ class NotificationManager: NSObject, ObservableObject {
     
     /// Clears all delivered notifications and resets the app badge count
     func clearAllNotificationsAndBadge() {
-        print("🧹 Clearing all notifications and resetting badge count")
-        
         // Remove all delivered notifications from notification center
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         
@@ -177,8 +170,6 @@ class NotificationManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             UIApplication.shared.applicationIconBadgeNumber = 0
         }
-        
-        print("✅ All notifications cleared and badge reset")
     }
     
     /// Resets only the app badge count without removing notifications

@@ -215,11 +215,8 @@ class ManualStationManager {
     /// Get manual stations for a specific country
     func getManualStations(for country: String) -> [RadioStation] {
         guard let manualStationInfos = ManualStationsData.manualStationsByCountry[country] else {
-            print("📻 No manual stations found for country: \(country)")
             return []
         }
-        
-        print("📻 Loading \(manualStationInfos.count) manual stations for \(country)")
         
         return manualStationInfos.enumerated().map { index, stationInfo in
             stationInfo.toRadioStation(country: country, order: index)
@@ -238,7 +235,6 @@ class ManualStationManager {
             }
         }
         
-        print("📻 Loaded \(allStations.count) total manual stations across \(ManualStationsData.manualStationsByCountry.count) countries")
         return allStations
     }
     

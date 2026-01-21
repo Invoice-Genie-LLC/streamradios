@@ -49,7 +49,6 @@ class RadioStationCloudKitManager: ObservableObject {
     // MARK: - Instant Sync Setup
     
     private func setupInstantSync() {
-        os_log("📡 RADIO SYNC: Setting up instant sync for radio stations", log: log, type: .info)
         
         // Note: synchronize() is deprecated and unnecessary - NSUbiquitousKeyValueStore syncs automatically
         // Removed to fix Swift Concurrency warning
@@ -61,8 +60,6 @@ class RadioStationCloudKitManager: ObservableObject {
             name: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: ubiquitousStore
         )
-        
-        print("📡 RADIO SYNC: Instant sync setup completed")
     }
     
     @objc private func ubiquitousKeyValueStoreDidChange(_ notification: Notification) {
@@ -307,8 +304,6 @@ class RadioStationCloudKitManager: ObservableObject {
     // MARK: - Instant Sync Handlers
     
     private func handleInstantStationUpdatedSync() {
-        print("📡 🔄 RADIO STATION UPDATE RECEIVE: Handling incoming station update sync")
-        
         guard let updateData = ubiquitousStore.object(forKey: InstantSyncKeys.stationUpdated) as? [String: Any] else {
             os_log("📡 RADIO SYNC RECEIVE FAILED: No data found for station update", log: log, type: .error)
             return
@@ -334,8 +329,6 @@ class RadioStationCloudKitManager: ObservableObject {
     }
     
     private func handleInstantStationDeletedSync() {
-        print("📡 🔄 RADIO STATION DELETE RECEIVE: Handling incoming station deletion sync")
-        
         guard let deletionData = ubiquitousStore.object(forKey: InstantSyncKeys.stationDeleted) as? [String: Any] else {
             os_log("📡 RADIO SYNC RECEIVE FAILED: No data found for station deletion", log: log, type: .error)
             return
@@ -361,8 +354,6 @@ class RadioStationCloudKitManager: ObservableObject {
     }
     
     private func handleInstantStationAddedSync() {
-        print("📡 🔄 RADIO STATION ADD RECEIVE: Handling incoming station addition sync")
-        
         guard let addData = ubiquitousStore.object(forKey: InstantSyncKeys.stationAdded) as? [String: Any] else {
             os_log("📡 RADIO SYNC RECEIVE FAILED: No data found for station addition", log: log, type: .error)
             return
@@ -388,8 +379,6 @@ class RadioStationCloudKitManager: ObservableObject {
     }
     
     private func handleInstantFavoriteChangedSync() {
-        print("📡 🔄 RADIO FAVORITE CHANGE RECEIVE: Handling incoming favorite change sync")
-        
         guard let favoriteData = ubiquitousStore.object(forKey: InstantSyncKeys.favoriteChanged) as? [String: Any] else {
             os_log("📡 RADIO SYNC RECEIVE FAILED: No data found for favorite change", log: log, type: .error)
             return
@@ -421,8 +410,6 @@ class RadioStationCloudKitManager: ObservableObject {
     }
     
     private func handleInstantOrderChangedSync() {
-        print("📡 🔄 RADIO ORDER CHANGE RECEIVE: Handling incoming order change sync")
-        
         guard let orderData = ubiquitousStore.object(forKey: InstantSyncKeys.orderChanged) as? [String: Any] else {
             os_log("📡 RADIO SYNC RECEIVE FAILED: No data found for order change", log: log, type: .error)
             return
@@ -701,13 +688,9 @@ class RadioStationCloudKitManager: ObservableObject {
                 modifyOperation.qualityOfService = .utility // Lower priority to reduce rate limiting
                 modifyOperation.isLongLived = false // Keep operations short for better rate limiting behavior
                 
-                // Minimal per-record progress tracking (reduced logging to prevent confusion)
-                modifyOperation.perRecordProgressBlock = { record, progress in
-                    // Only log significant progress milestones to reduce log noise
-                    if progress >= 1.0 {
-                        os_log("📡 ✅ RADIO Record saved: %@", log: self.log, type: .debug, record.recordID.recordName)
-                    }
-                }
+                // Per-record progress tracking disabled to reduce log noise
+                // Batch completion logging provides sufficient visibility
+                modifyOperation.perRecordProgressBlock = nil
                 
                 modifyOperation.perRecordCompletionBlock = { record, error in
                     // Only log errors, not successful saves to reduce log noise
@@ -887,8 +870,8 @@ class RadioStationCloudKitManager: ObservableObject {
                         switch result {
                         case .success(let record):
                             fetchedRecords.append(record)
-                        case .failure(let error):
-                            print("⚠️ Error fetching record \(recordID): \(error)")
+                        case .failure:
+                            break
                         }
                     }
                     
@@ -906,15 +889,12 @@ class RadioStationCloudKitManager: ObservableObject {
                 
                 totalCount += records.count
                 cursor = nextCursor
-                print("📊 CloudKit batch: \(records.count) records (total so far: \(totalCount))")
                 
             } while cursor != nil
             
-            print("📊 CloudKit station count (final): \(totalCount)")
             return totalCount
             
         } catch {
-            print("❌ Failed to get CloudKit station count: \(error)")
             throw error
         }
     }
@@ -950,15 +930,12 @@ class RadioStationCloudKitManager: ObservableObject {
             
             // Check if CloudKit has newer modifications than our last sync
             if let cloudKitDate = mostRecentCloudKitModification, cloudKitDate > lastSyncTime {
-                print("📝 CloudKit modifications detected - CloudKit: \(cloudKitDate), Last Sync: \(lastSyncTime)")
                 return true
             }
             
-            print("✅ No recent CloudKit modifications detected")
             return false
             
         } catch {
-            print("❌ Failed to check CloudKit modifications: \(error)")
             throw error
         }
     }
@@ -971,113 +948,91 @@ class RadioStationCloudKitManager: ObservableObject {
             return []
         }
         
+        // OPTIMIZATION: Instead of fetching ALL CloudKit records (expensive!), 
+        // query only for the specific station IDs we want to check
+        // This reduces 23+ page queries to a single targeted query
+        
         do {
-            // Fetch ALL existing station IDs from CloudKit with proper pagination
-            let query = CKQuery(recordType: RecordType.radioStation, predicate: NSPredicate(value: true))
-            print("📡 🔍 CLOUDKIT QUERY: Starting paginated query for ALL existing stations...")
-            
-            var allMatchResults: [(CKRecord.ID, Result<CKRecord, Error>)] = []
-            var currentCursor: CKQueryOperation.Cursor? = nil
-            var pageCount = 0
-            
-            // Fetch all pages of results using proper CloudKit cursor API
-            repeat {
-                pageCount += 1
-                let (matchResults, cursor): ([(CKRecord.ID, Result<CKRecord, Error>)], CKQueryOperation.Cursor?)
-                
-                if let currentCursor = currentCursor {
-                    // Continue from cursor
-                    (matchResults, cursor) = try await privateDatabase.records(continuingMatchFrom: currentCursor)
+            // Filter station IDs to only include valid CloudKit record names
+            // CloudKit record names must only contain alphanumeric, hyphen, and underscore
+            let validStationIds = stations.compactMap { station -> String? in
+                let id = station.id
+                // Check if ID contains only valid CloudKit characters
+                let validCharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+                if id.unicodeScalars.allSatisfy({ validCharacterSet.contains($0) }) {
+                    return id
                 } else {
-                    // Initial query
-                    (matchResults, cursor) = try await privateDatabase.records(matching: query)
-                }
-                
-                allMatchResults.append(contentsOf: matchResults)
-                currentCursor = cursor
-                
-                print("📡 📊 CLOUDKIT PAGE \(pageCount): Retrieved \(matchResults.count) records (total: \(allMatchResults.count))")
-                
-                if cursor != nil {
-                    print("📡 ➡️ CLOUDKIT PAGINATION: More records available, fetching next page...")
-                }
-            } while currentCursor != nil
-            
-            print("📡 ✅ CLOUDKIT QUERY COMPLETE: Retrieved \(allMatchResults.count) total records from CloudKit in \(pageCount) pages")
-            
-            let existingIds = Set(allMatchResults.compactMap { (recordID, result) -> String? in
-                switch result {
-                case .success:
-                    return recordID.recordName
-                case .failure:
+                    // Skip IDs with invalid characters for CloudKit query
                     return nil
-                }
-            })
-            
-            // Also fetch existing URLs for URL-based duplicate detection
-            var existingURLs = Set<String>()
-            for (_, result) in allMatchResults {
-                switch result {
-                case .success(let record):
-                    if let url = record["url"] as? String {
-                        existingURLs.insert(url.lowercased())
-                    }
-                case .failure:
-                    continue
                 }
             }
             
-            print("📡 🔍 CLOUDKIT CHECK: Found \(existingIds.count) existing station IDs and \(existingURLs.count) existing URLs in CloudKit")
+            guard !validStationIds.isEmpty else {
+                return stations
+            }
             
-            if existingIds.count > 0 {
-                print("📡 📋 Sample existing station IDs: \(Array(existingIds.prefix(3)).joined(separator: ", "))")
+            // CloudKit has limits on IN queries, so batch the checks
+            let batchSize = 50
+            var existingIds = Set<String>()
+            var existingURLs = Set<String>()
+            
+            for batchStart in stride(from: 0, to: validStationIds.count, by: batchSize) {
+                let batchEnd = min(batchStart + batchSize, validStationIds.count)
+                let batchIds = Array(validStationIds[batchStart..<batchEnd])
+                
+                // Use direct record fetch instead of query predicate (more reliable)
+                // This avoids the "Invalid predicate: recordKey contains invalid characters" error
+                do {
+                    let recordIDs = batchIds.map { CKRecord.ID(recordName: $0) }
+                    let fetchResults = try await privateDatabase.records(for: recordIDs)
+                    
+                    for (recordID, result) in fetchResults {
+                        switch result {
+                        case .success(let record):
+                            existingIds.insert(recordID.recordName)
+                            if let url = record["url"] as? String {
+                                existingURLs.insert(url.lowercased())
+                            }
+                        case .failure(let error):
+                            // Record doesn't exist or other error - that's fine, just skip it
+                            if (error as? CKError)?.code != .unknownItem {
+                                // Only log non-"not found" errors silently
+                            }
+                        }
+                    }
+                } catch {
+                    // If fetch fails, skip this batch - not fatal
+                    continue
+                }
             }
             
             // Filter out stations that already exist by ID or URL
             let newStations = stations.filter { station in
                 // Check if station ID already exists
                 if existingIds.contains(station.id) {
-                    print("📻 🚫 CLOUDKIT DUPLICATE ID: Station \(station.name) (ID: \(station.id)) already exists in CloudKit")
                     return false
                 }
                 
                 // Check if station URL already exists (with normalization)
                 let normalizedURL = station.url.lowercased()
-                let urlWithoutProtocol = normalizedURL
                     .replacingOccurrences(of: "https://", with: "")
                     .replacingOccurrences(of: "http://", with: "")
                 
-                let hasURLDuplicate = existingURLs.contains(normalizedURL) ||
-                                    existingURLs.contains { existingURL in
-                                        let existingWithoutProtocol = existingURL
-                                            .replacingOccurrences(of: "https://", with: "")
-                                            .replacingOccurrences(of: "http://", with: "")
-                                        return existingWithoutProtocol == urlWithoutProtocol
-                                    }
-                
-                if hasURLDuplicate {
-                    print("📻 🚫 CLOUDKIT DUPLICATE URL: Station \(station.name) (URL: \(station.url)) has duplicate URL in CloudKit")
-                    return false
+                let hasURLDuplicate = existingURLs.contains { existingURL in
+                    let existingWithoutProtocol = existingURL
+                        .replacingOccurrences(of: "https://", with: "")
+                        .replacingOccurrences(of: "http://", with: "")
+                    return existingWithoutProtocol == normalizedURL
                 }
                 
-                return true
+                return !hasURLDuplicate
             }
             
             let duplicatesFiltered = stations.count - newStations.count
-            if duplicatesFiltered > 0 {
-                print("📡 📊 CLOUDKIT FILTERING: Filtered out \(duplicatesFiltered) stations that already exist in CloudKit")
-            }
-            
-            if newStations.isEmpty {
-                print("📡 ✅ NO NEW STATIONS: All \(stations.count) stations already exist in CloudKit - batch save skipped")
-            } else {
-                print("📡 🆕 PROCEEDING: \(newStations.count) new stations will be saved to CloudKit (from \(stations.count) candidates)")
-            }
             
             return newStations
             
         } catch {
-            print("📡 ❌ Failed to check existing CloudKit stations: \(error)")
             // On error, proceed with all stations to avoid losing data
             return stations
         }
@@ -1097,7 +1052,6 @@ class RadioStationCloudKitManager: ObservableObject {
         defer { batchSaveLock.unlock() }
         
         if isBatchSaveInProgress {
-            print("📡 🚫 BATCH SAVE BLOCKED: Another batch save operation is already in progress")
             os_log("📡 🚫 BATCH SAVE BLOCKED: Concurrent batch save prevented", log: log, type: .info)
             await MainActor.run {
                 progressCallback(1.0, 0, "Batch save already in progress - skipped duplicate operation")
@@ -1109,13 +1063,8 @@ class RadioStationCloudKitManager: ObservableObject {
         defer { isBatchSaveInProgress = false }
         
         os_log("📡 🔄 RADIO Starting batch save for %d stations (country: %@)", log: log, type: .info, stations.count, country ?? "nil")
-        print("📡 🔄 RADIO Starting batch save for \(stations.count) stations (country: \(country ?? "nil"))")
         
-        // Debug: Print first few station IDs and names for verification
-        let debugStations = stations.prefix(3)
-        for (index, station) in debugStations.enumerated() {
-            print("📡 🔍 RADIO Station \(index + 1): ID=\(station.id), Name=\(station.name), Country=\(station.country)")
-        }
+
         
         let stationIds = stations.map { $0.id }
         
@@ -1138,73 +1087,28 @@ class RadioStationCloudKitManager: ObservableObject {
                    log: log, type: .info, stations.count)
         }
         
-        // Enhanced duplicate prevention: Check for URL duplicates within the batch
-        print("📡 🔍 BATCH DUPLICATE CHECK: Checking for URL duplicates within \(stationsToProcess.count) stations")
-        var urlToStationMap = [String: RadioStation]()
-        var deduplicatedStations = [RadioStation]()
-        
-        for station in stationsToProcess {
-            let normalizedURL = station.url.lowercased()
-                .replacingOccurrences(of: "https://", with: "")
-                .replacingOccurrences(of: "http://", with: "")
-            
-            if let existingStation = urlToStationMap[normalizedURL] {
-                print("📻 🚫 BATCH URL DUPLICATE: Skipping \(station.name) (URL: \(station.url)) - duplicate of \(existingStation.name)")
-                continue
-            }
-            
-            urlToStationMap[normalizedURL] = station
-            deduplicatedStations.append(station)
-        }
-        
-        let duplicatesRemovedFromBatch = stationsToProcess.count - deduplicatedStations.count
-        if duplicatesRemovedFromBatch > 0 {
-            print("📡 📊 BATCH CLEANUP: Removed \(duplicatesRemovedFromBatch) URL duplicates from batch before CloudKit save")
-        }
-        
-        // Update stationsToProcess with deduplicated list
-        let batchDeduplicatedStations = deduplicatedStations
+        // URL deduplication is now handled at API level (RadioBrowserAPI.deduplicateStationsByURL)
+        // Just use the stations as-is
         
         // For favorite order updates, we need to UPDATE existing records, not skip them
         // Only skip duplicate checking for new station additions
         let finalStationsToProcess: [RadioStation]
         if country == nil {
             // When country is nil, this is likely a favorite order sync - process all stations
-            print("📡 🔄 FAVORITE ORDER SYNC: Processing all \(batchDeduplicatedStations.count) stations (will update existing records)")
-            finalStationsToProcess = batchDeduplicatedStations
+            finalStationsToProcess = stationsToProcess
         } else {
-            // For country-specific saves, check for duplicates
-            print("📡 🔍 CLOUDKIT DUPLICATE CHECK: Checking \(batchDeduplicatedStations.count) stations against existing CloudKit records")
-            finalStationsToProcess = await filterOutExistingCloudKitStations(batchDeduplicatedStations)
+            // For country-specific saves, check for duplicates using targeted CloudKit query
+            finalStationsToProcess = await filterOutExistingCloudKitStations(stationsToProcess)
             
             // Early return if no stations need to be saved
             guard !finalStationsToProcess.isEmpty else {
-                print("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All \(stations.count) stations already exist in CloudKit")
-                print("📡 ✅ DUPLICATE PREVENTION SUCCESSFUL: No expensive CloudKit operations performed")
-                os_log("📡 🚫 BATCH SAVE COMPLETELY SKIPPED: All %d stations already exist in CloudKit", log: log, type: .info, stations.count)
-                
-                // Complete the sync state as successful
                 SyncStateManager.shared.completeRadioStationSync()
-                
-                // Report completion with clear messaging
                 await MainActor.run {
-                    progressCallback(1.0, 0, "All \(stations.count) stations already exist - no CloudKit operations needed")
+                    progressCallback(1.0, 0, "All stations already synced")
                 }
-                
-                print("📡 🏁 BATCH SAVE TERMINATION: Returning early to prevent expensive operations")
                 return
             }
         }
-        
-        // Additional safety check: If we're trying to save a very high percentage of existing stations, 
-        // this might indicate a duplicate detection failure
-        let duplicatePercentage = Double(stations.count - finalStationsToProcess.count) / Double(stations.count)
-        if duplicatePercentage > 0.8 && finalStationsToProcess.count > 50 {
-            print("📡 ⚠️ DUPLICATE WARNING: \(Int(duplicatePercentage * 100))% of stations were duplicates (\(stations.count - finalStationsToProcess.count) out of \(stations.count))")
-            print("📡 🔍 DUPLICATE ANALYSIS: This might indicate an issue with duplicate detection")
-        }
-        
-        print("📡 🔄 PROCEEDING with batch save for \(finalStationsToProcess.count) truly new stations")
         
         // Report initial progress
         let syncState = SyncStateManager.shared.getRadioStationSyncState()
@@ -1221,8 +1125,6 @@ class RadioStationCloudKitManager: ObservableObject {
         // Convert stations to CKRecords efficiently (no individual CloudKit calls)
         var recordsToSave = [CKRecord]()
         
-        print("📡 🏗️ BATCH PREPARATION: Creating \(finalStationsToProcess.count) CKRecords for optimized batch save")
-        
         // Process stations in chunks to minimize memory usage and provide progress updates
         let preparationChunkSize = 100
         let totalChunks = (finalStationsToProcess.count + preparationChunkSize - 1) / preparationChunkSize
@@ -1230,7 +1132,6 @@ class RadioStationCloudKitManager: ObservableObject {
         // For favorite order updates (country == nil), fetch existing records first
         var existingRecordsMap: [String: CKRecord] = [:]
         if country == nil {
-            print("📡 🔍 FAVORITE ORDER: Fetching existing records to update favoriteOrder...")
             let recordIDs = finalStationsToProcess.map { CKRecord.ID(recordName: $0.id) }
             
             // Fetch existing records in batches
@@ -1245,15 +1146,14 @@ class RadioStationCloudKitManager: ObservableObject {
                         switch result {
                         case .success(let record):
                             existingRecordsMap[recordID.recordName] = record
-                        case .failure(let error):
-                            print("📡 ⚠️ FAVORITE ORDER: Could not fetch record \(recordID.recordName): \(error)")
+                        case .failure:
+                            break
                         }
                     }
                 } catch {
-                    print("📡 ❌ FAVORITE ORDER: Error fetching batch: \(error)")
+                    // Continue with next batch
                 }
             }
-            print("📡 ✅ FAVORITE ORDER: Fetched \(existingRecordsMap.count) existing records")
         }
         
         for chunkIndex in 0..<totalChunks {
@@ -1268,7 +1168,6 @@ class RadioStationCloudKitManager: ObservableObject {
                 let record: CKRecord
                 if let existingRecord = existingRecordsMap[station.id] {
                     record = existingRecord
-                    print("📡 🔄 FAVORITE ORDER: Updating existing record for \(station.name)")
                 } else {
                     record = CKRecord(recordType: RecordType.radioStation, recordID: recordID)
                 }
@@ -1292,7 +1191,6 @@ class RadioStationCloudKitManager: ObservableObject {
                     
                     recordsToSave.append(record)
                 } catch {
-                    print("📡 ⚠️ RADIO Warning: Failed to convert artwork for station \(station.name), continuing without artwork: \(error)")
                     // Continue without artwork data
                     record["lastUpdated"] = Date() as CKRecordValue
                     recordsToSave.append(record)
@@ -1313,7 +1211,6 @@ class RadioStationCloudKitManager: ObservableObject {
         
         // Process in smaller batches to prevent CloudKit rate limiting
         let batchSize = 50 // Reduced batch size for better CloudKit performance
-        print("📡 🚀 OPTIMIZED BATCH SAVE: Starting batch save of \(recordsToSave.count) records in batches of \(batchSize)")
         try await processBatchRecordsWithProgressResumable(recordsToSave, stationsToProcess: finalStationsToProcess, batchSize: batchSize, totalStations: totalStations, alreadyProcessed: alreadyProcessed, country: country, progressCallback: progressCallback)
         
         // Mark sync as complete

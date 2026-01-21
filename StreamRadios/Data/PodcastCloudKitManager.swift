@@ -65,7 +65,6 @@ class PodcastCloudKitManager: ObservableObject {
     // MARK: - Instant Sync Setup
     
     private func setupInstantSync() {
-        print("📡 🔧 SETUP: Starting instant sync setup...")
         
         // Test iCloud availability first
         testICloudAvailability()
@@ -78,22 +77,14 @@ class PodcastCloudKitManager: ObservableObject {
             object: ubiquitousStore
         )
         
-        print("📡 🔧 SETUP: Added notification observer for NSUbiquitousKeyValueStore")
-        
         // Note: synchronize() is deprecated and unnecessary - NSUbiquitousKeyValueStore syncs automatically
         // Removed to fix Swift Concurrency warning
-        
-        os_log("📡 Instant sync setup completed", log: log, type: .info)
     }
     
     /// Test if iCloud is available and properly configured
     private func testICloudAvailability() {
-        print("📡 🧪 ICLOUD TEST: Checking iCloud availability...")
         
-        if let token = FileManager.default.ubiquityIdentityToken {
-            print("📡 ✅ ICLOUD TEST: iCloud account found - token: \(type(of: token))")
-        } else {
-            print("📡 ❌ ICLOUD TEST: No iCloud account found - user not signed in!")
+        guard FileManager.default.ubiquityIdentityToken != nil else {
             return
         }
         
@@ -101,17 +92,8 @@ class PodcastCloudKitManager: ObservableObject {
         let testKey = "test_connectivity"
         let testValue = ["timestamp": Date().timeIntervalSince1970, "test": true] as [String: Any]
         
-        print("📡 🧪 ICLOUD TEST: Writing test data...")
         ubiquitousStore.set(testValue, forKey: testKey)
         // Note: synchronize() is deprecated and unnecessary - syncs automatically
-        print("📡 🧪 ICLOUD TEST: Data written successfully")
-        
-        // Try to read it back
-        if let readBack = ubiquitousStore.object(forKey: testKey) as? [String: Any] {
-            print("📡 ✅ ICLOUD TEST: Successfully read back test data: \(readBack)")
-        } else {
-            print("📡 ❌ ICLOUD TEST: Failed to read back test data!")
-        }
         
         // Clean up test data
         ubiquitousStore.removeObject(forKey: testKey)

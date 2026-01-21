@@ -80,6 +80,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var loadingProgress: Double = 0.0
     @Published var loadingStationsCount: Int = 0
     @Published var totalStationsToLoad: Int = 0
+    @Published var showAPIUnavailableAlert = false
+    private var lastAPIAlertShownTime: Date?
     
     // Track stations currently being processed for favicon updates to prevent duplicates
     private var stationsBeingProcessed: Set<String> = []
@@ -102,37 +104,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
-            print("🌍 Country selection changed from '\(oldValue)' to '\(selectedCountry)'")
-            
             // Only proceed if the country actually changed and it's not "Select Country"
             if oldValue != selectedCountry && selectedCountry != "Select Country" {
                 // Switch to All tab when country changes (except during initialization)
                 selectedSubTab = .all
-                print("🌍 Country changed from '\(oldValue)' to '\(selectedCountry)' - switching to All tab")
-                
-                // STABILITY FIX: Preserve currently playing station display during country changes
-                // The currently playing station should remain stable regardless of country picker changes
-                if let currentStation = RadioPlayer.shared.currentlyPlayingStation {
-                    print("📍 STABILITY: Preserving currently playing station '\(currentStation.name)' from '\(currentStation.country)' during country change")
-                    print("📍 STABILITY: Station display will remain consistent regardless of country picker selection")
-                }
                 
                 // CRITICAL FIX: Force migration for all countries except US and UK to handle API name variations
                 if selectedCountry != "United States" && selectedCountry != "United Kingdom" && selectedCountry != "Select Country" && selectedCountry != "Unknown Region" {
-                    print("🔧 Forcing migration for country name normalization: \(selectedCountry)")
                     Task { @MainActor in
                         forceMigrateStationCountryNames()
                     }
                 }
-                
-                // Station fetching is now handled manually by the UI when user taps on country
-                print("🌍 Country changed to: \(selectedCountry) - stations will be fetched when user selects country")
-            } else if oldValue == selectedCountry {
-                print("🌍 Country selection unchanged, skipping API fetch")
-            } else if selectedCountry == "Select Country" {
-                print("🌍 Reset to 'Select Country', skipping API fetch")
-            } else {
-                print("🌍 Skipping API fetch - oldValue: '\(oldValue)', selectedCountry: '\(selectedCountry)'")
             }
             
             saveSelectedCountry()
@@ -212,13 +194,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let hasRadioStationsSynced = UserDefaults.standard.bool(forKey: "HasRadioStationsSynced")
             
             if isFreshInstall || !hasRadioStationsSynced {
-                print("🔄 Radio station sync needed in ViewModel - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
-                print("⏭️ SEQUENCING: Radio station sync will be handled by DataSyncManager to prevent CloudKit rate limiting")
                 // NOTE: Radio station sync is now handled by DataSyncManager in sequence to prevent CloudKit rate limiting
-                // syncStationsWithCloudKit() - REMOVED to prevent parallel CloudKit operations
             } else {
-                print("⚡ Skipping CloudKit radio station sync in ViewModel - loading from local storage only for better performance")
-                
                 // Only check for CloudKit changes if we haven't done a complete check recently or if changes are expected
                 Task {
                     await checkForCloudKitChangesIfNeeded()
@@ -244,16 +221,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 print("First time setup or new default stations detected, initializing default stations and saving to local and CloudKit.")
                 initializeStationsForFirstTime()
             } else {
-                print("App relaunch detected.")
                 // Removed the second syncStationsWithCloudKit() call for performance optimization
             }
             
             // INSTANT STARTUP: Skip automatic API refresh on startup to show cached stations immediately
             // Users can manually refresh if they want fresh stations from the API
             // This ensures cached stations appear instantly without any loading states
-            if selectedCountry != "Select Country" {
-                print("⚡ Instant startup: Showing cached stations for \(selectedCountry). API refresh available via manual refresh.")
-            }
             
             // Setup instant sync listener for real-time cross-device updates
             setupInstantSyncListener()
@@ -578,8 +551,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Smart CloudKit change detection that only runs when needed
     private func checkForCloudKitChangesIfNeeded() async {
-        print("🔍 Checking if CloudKit change detection is needed...")
-        
         // Check if we've already done a complete sync check recently
         let lastSyncCheckTime = UserDefaults.standard.object(forKey: "LastSyncCheckTime") as? Date ?? Date.distantPast
         let timeSinceLastCheck = Date().timeIntervalSince(lastSyncCheckTime)
@@ -594,32 +565,24 @@ class RadioStationViewModel: NSObject, ObservableObject {
                                 lastSyncCheckTime == Date.distantPast
         
         if shouldPerformCheck {
-            print("✅ Performing CloudKit change detection - last check: \(Int(timeSinceLastCheck))s ago")
             await checkForCloudKitChangesOnLaunch()
-        } else {
-            print("⏭️ Skipping CloudKit change detection - checked recently (\(Int(timeSinceLastCheck))s ago)")
         }
     }
     
     /// Check for CloudKit changes on app launch and trigger sync banner if needed
     private func checkForCloudKitChangesOnLaunch() async {
-        print("🔍 Checking for CloudKit changes on app launch...")
         
         do {
             // Get the count of stations in CloudKit
             let cloudKitStationCount = try await RadioStationCloudKitManager.shared.getCloudKitStationCount()
             let localStationCount = stations.count
             
-            print("📊 Station count comparison - CloudKit: \(cloudKitStationCount), Local: \(localStationCount)")
-            
             // Check if there are more stations in CloudKit than locally (new stations added on other devices)
             if cloudKitStationCount > localStationCount {
                 let newStationsCount = cloudKitStationCount - localStationCount
-                print("🆕 Detected \(newStationsCount) new stations in CloudKit")
                 
                 // CRITICAL PERFORMANCE: Defer radio station sync to prevent CPU spikes during episode loading
                 // Schedule sync for later to avoid interfering with podcast operations
-                print("⚡ PERFORMANCE: Deferring radio station sync to prevent interference with podcast loading")
                 
                 await MainActor.run {
                     // Update DataSyncManager to show that sync is needed but deferred
@@ -688,7 +651,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
             } else {
                 // Station counts match - only sync if there are significant changes worth showing to user
-                print("📊 Station counts match (\(localStationCount)), checking for significant modifications...")
                 
                 // Be more conservative: only check for modifications if the user hasn't synced recently
                 let lastSyncTime = UserDefaults.standard.object(forKey: "LastCloudKitSyncTime") as? Date ?? Date.distantPast
@@ -699,7 +661,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations)
                     
                     if hasModifications {
-                        print("📝 Detected station modifications on other devices, triggering sync")
                         
                         await MainActor.run {
                             // Update DataSyncManager to show sync banner
@@ -713,12 +674,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         // Trigger the sync with progress tracking
                         await syncStationsFromCloudKitWithProgress()
                     } else {
-                        print("✅ No significant CloudKit changes detected - station counts and modification times match")
-                        print("ℹ️ Skipping sync banner - no changes needed")
+                        // No significant CloudKit changes detected
                     }
                 } else {
-                    print("⏭️ Skipping modification check - synced recently (\(Int(timeSinceLastSync))s ago)")
-                    print("ℹ️ Skipping sync banner - no changes needed")
+                    // Skipping modification check - synced recently
                 }
             }
             
@@ -730,7 +689,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Mark that we've completed a sync check and clear any expectation flags
         UserDefaults.standard.set(Date(), forKey: "LastSyncCheckTime")
         UserDefaults.standard.set(false, forKey: "ExpectingCloudKitChanges")
-        print("📝 Sync check completed and timestamp saved")
     }
     
     /// Mark that CloudKit changes are expected and should be checked on next launch
@@ -783,40 +741,41 @@ class RadioStationViewModel: NSObject, ObservableObject {
         let stationName = station.name.lowercased()
         let stationCountry = station.country
         
+        // IMPORTANT: Check US stations FIRST as they have generic names that 
+        // could accidentally match patterns from other countries
+        // If it's a known US station, it should be in United States
+        if isUSStation(stationName) {
+            return stationCountry == "United States"
+        }
+        
         // Check for obvious country mismatches based on station names
         
         // Italian stations should only be in Italy
-        if stationCountry != "Italy" && isItalianStation(stationName) {
-            return false
+        if isItalianStation(stationName) {
+            return stationCountry == "Italy"
         }
         
         // UK stations should only be in United Kingdom
-        if stationCountry != "United Kingdom" && isUKStation(stationName) {
-            return false
+        if isUKStation(stationName) {
+            return stationCountry == "United Kingdom"
         }
         
         // German stations should only be in Germany
-        if stationCountry != "Germany" && isGermanStation(stationName) {
-            return false
+        if isGermanStation(stationName) {
+            return stationCountry == "Germany"
         }
         
         // French stations should only be in France
-        if stationCountry != "France" && isFrenchStation(stationName) {
-            return false
+        if isFrenchStation(stationName) {
+            return stationCountry == "France"
         }
         
         // Spanish stations should only be in Spain
-        if stationCountry != "Spain" && isSpanishStation(stationName) {
-            return false
+        if isSpanishStation(stationName) {
+            return stationCountry == "Spain"
         }
         
-        // US stations should only be in United States
-        if stationCountry != "United States" && isUSStation(stationName) {
-            return false
-        }
-        
-        // Add more country validations as needed
-        
+        // If no specific country pattern matched, the station is valid as-is
         return true
     }
     
@@ -824,6 +783,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
     private func attemptStationCountryCorrection(_ station: RadioStation) -> RadioStation? {
         let stationName = station.name.lowercased()
         var correctedStation = station
+        
+        // IMPORTANT: Check US stations FIRST
+        if isUSStation(stationName) {
+            correctedStation.country = "United States"
+            return correctedStation
+        }
         
         // Attempt to determine correct country based on station name
         if isItalianStation(stationName) {
@@ -841,65 +806,82 @@ class RadioStationViewModel: NSObject, ObservableObject {
         } else if isSpanishStation(stationName) {
             correctedStation.country = "Spain"
             return correctedStation
-        } else if isUSStation(stationName) {
-            correctedStation.country = "United States"
-            return correctedStation
         }
         
-        // Could not determine correct country
-        return nil
+        // Could not determine correct country - trust the original country assignment
+        // This prevents false corrections for stations we don't have patterns for
+        return station
     }
     
     // MARK: - Country Detection Helpers
     
     private func isItalianStation(_ name: String) -> Bool {
-        return name.contains("radio rai") || 
-               name.contains("rai radio") ||
-               name.contains("radio italia") ||
-               name.contains("virgin radio italia") ||
-               name.contains("radio kiss kiss") ||
-               name.contains("radio norba") ||
-               name.contains("radio monte carlo") ||
-               name.hasPrefix("rai ") ||
-               name.contains("radio maria") ||
-               name.contains("radio popolare") ||
-               name.contains("radio deejay") ||
-               name.contains("radio 105") ||
-               name.contains("rtl 102.5") ||
-               name.contains("radio capitale") ||
-               name.contains("radio 24") ||
-               name.contains("radio lombardia")
+        // Use specific patterns for Italian stations
+        // Note: "Radio Maria" exists in many countries, so don't use it as a generic Italian marker
+        let italianPatterns = [
+            "radio rai", "rai radio", "rai 1", "rai 2", "rai 3",
+            "radio italia", "radio italia solo",
+            "virgin radio italia",
+            "radio kiss kiss italia",
+            "radio norba",
+            "radio monte carlo italia", "rmc italia",
+            "rai isoradio", "rai gr parlamento",
+            "radio popolare milano",
+            "radio deejay", "radio dj",
+            "radio 105 italia",
+            "rtl 102.5",
+            "radio capitale roma",
+            "radio 24 italia",
+            "radio lombardia",
+            "radio freccia",
+            "radio subasio",
+            "radio dimensione suono",
+            "m2o"
+        ]
+        return italianPatterns.contains { name.contains($0) }
     }
     
     private func isUKStation(_ name: String) -> Bool {
-        return name.contains("bbc") ||
-               name.contains("talksport") ||
-               name.contains("talkradio") ||
-               name.contains("virgin radio uk") ||
-               name.contains("smooth radio") ||
-               name.contains("resonance fm") ||
-               name.contains("sky news uk") ||
-               name.contains("gb news") ||
-               name.contains("capital fm") ||
-               name.contains("heart radio") ||
-               name.contains("magic radio") ||
-               name.contains("classic fm") ||
-               name.contains("lbc") ||
-               name.contains("radio x")
+        // Use specific patterns to avoid false matches
+        let ukPatterns = [
+            "bbc radio", "bbc 1", "bbc 2", "bbc 3", "bbc 4", "bbc 5", "bbc 6",
+            "bbc world", "bbc news", "bbc sounds",
+            "talksport",
+            "talk radio uk", "talkradio uk",
+            "virgin radio uk",
+            "smooth radio uk", "smooth extra",
+            "resonance fm",
+            "sky news uk",
+            "gb news",
+            "capital fm uk", "capital xtra",
+            "heart fm", "heart radio uk",  // Not just "heart" to avoid "iHeart"
+            "magic fm", "magic radio uk",
+            "classic fm uk",
+            "lbc ", " lbc", "lbc news",  // LBC with boundaries
+            "radio x uk", "radio x ",  // Radio X with boundaries
+            "absolute radio",
+            "kisstory", "kiss fm uk"
+        ]
+        return ukPatterns.contains { name.contains($0) }
     }
     
     private func isGermanStation(_ name: String) -> Bool {
-        return name.contains("deutschlandfunk") ||
-               name.contains("wdr") ||
-               name.contains("swr") ||
-               name.contains("ndr") ||
-               name.contains("br klassik") ||
-               name.contains("hr") ||
-               name.contains("mdr") ||
-               name.contains("rbb") ||
-               name.contains("antenne bayern") ||
-               name.contains("radio ffh") ||
-               name.contains("1live")
+        // Use word boundaries to prevent false matches like "iHeart" matching "hr"
+        // or "Christmas" matching "hr" in "Christ"
+        let germanPatterns = [
+            "deutschlandfunk",
+            "wdr ", " wdr", "wdr1", "wdr2", "wdr3", "wdr4", "wdr5",  // WDR with boundaries
+            "swr ", " swr", "swr1", "swr2", "swr3", "swr4",  // SWR with boundaries
+            "ndr ", " ndr", "ndr1", "ndr2", "ndr info",  // NDR with boundaries
+            "br klassik", "br24", "bayern 1", "bayern 2", "bayern 3",  // Bayerischer Rundfunk
+            "hr info", "hr1", "hr2", "hr3", "hr4", "hessischer rundfunk",  // HR with numbers only
+            "mdr ", " mdr", "mdr jump", "mdr sputnik",  // MDR with boundaries
+            "rbb ", " rbb", "rbb 88.8", "radioeins",  // RBB with boundaries
+            "antenne bayern",
+            "radio ffh",
+            "1live", "einslive"
+        ]
+        return germanPatterns.contains { name.contains($0) }
     }
     
     private func isFrenchStation(_ name: String) -> Bool {
@@ -928,18 +910,28 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     private func isUSStation(_ name: String) -> Bool {
-        return name.contains("npr") ||
-               name.contains("cnn") ||
-               name.contains("fox news") ||
-               name.contains("msnbc") ||
-               name.contains("bloomberg") ||
-               name.contains("espn radio") ||
-               name.contains("siriusxm") ||
-               name.contains("iheartradio") ||
-               name.contains("kqed") ||
-               name.contains("wnyc") ||
-               name.contains("wxrt") ||
-               name.contains("kroq")
+        let usPatterns = [
+            "npr", "national public radio",
+            "cnn radio", "cnn news",
+            "fox news radio", "fox news talk",
+            "msnbc",
+            "bloomberg radio",
+            "espn radio",
+            "siriusxm", "sirius xm",
+            "iheart", "iheartradio", "iheart radio",  // All iHeart variations
+            "somafm", "soma fm",  // SomaFM is US-based
+            "kqed",
+            "wnyc", "wbur", "wgbh", "whyy", "wbez", "kcrw", "kpbs", "kut ", " kut",
+            "wxrt", "wxpn",
+            "kroq", "kexp",
+            "infowars",  // US-based
+            "thegooshradio",  // US station
+            "radiostorm",  // US-based
+            "christian rock dot net", "christian power praise", "christian hard rock",
+            "christiancountrygospel", "christian fm", "christian top",
+            "chris tdl radio"
+        ]
+        return usPatterns.contains { name.contains($0) }
     }
     
     // MARK: - Data Integrity & Cleanup
@@ -947,8 +939,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
     /// Perform comprehensive cleanup of cross-country contamination
     @MainActor
     func performCrossCountryContaminationCleanup() async {
-        print("🛡️ STARTING COMPREHENSIVE CROSS-COUNTRY CONTAMINATION CLEANUP")
-        
         let originalCount = stations.count
         
         // Apply validation and cleanup to all stations
@@ -964,13 +954,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Also clean up CloudKit by uploading the cleaned data
             syncStationsWithCloudKit()
             
-            print("🛡️ CONTAMINATION CLEANUP COMPLETE: Removed/corrected \(removedCount) contaminated stations out of \(originalCount) total")
-            print("🛡️ CLEAN STATIONS REMAINING: \(stations.count)")
-            
             // Force UI refresh
             objectWillChange.send()
-        } else {
-            print("🛡️ CONTAMINATION CLEANUP: No contaminated stations found - data is clean")
         }
     }
     
@@ -981,13 +966,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
         let currentVersion = "2.0.6" // Update this when making cleanup improvements
         
         if lastCleanupVersion != currentVersion {
-            print("🛡️ CONTAMINATION CHECK: Running cleanup for version \(currentVersion) (last cleanup: \(lastCleanupVersion))")
             await performCrossCountryContaminationCleanup()
             
             // Mark cleanup as completed for this version
             UserDefaults.standard.set(currentVersion, forKey: "LastContaminationCleanupVersion")
-        } else {
-            print("🛡️ CONTAMINATION CHECK: Data already cleaned for version \(currentVersion)")
         }
     }
     
@@ -996,7 +978,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         // CROSS-COUNTRY CONTAMINATION PREVENTION: Validate and filter CloudKit stations
         let validatedCloudKitStations = validateAndCleanStationsCountry(cloudKitStations)
-        print("🛡️ COUNTRY VALIDATION: Filtered \(cloudKitStations.count - validatedCloudKitStations.count) contaminated stations from CloudKit")
         
         // Create a dictionary of current local stations by ID for fast lookup
         var localStationsById: [String: RadioStation] = [:]
@@ -1014,17 +995,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // CRITICAL IMPORT PROTECTION: Preserve user-imported custom data
                 if localStation.iconData != nil || localStation.iTunesArtworkData != nil {
-                    print("🛡️ IMPORT PROTECTION: Preserving custom icon data for user-imported station '\(localStation.name)'")
                     mergedStation.iconData = localStation.iconData
                     mergedStation.iTunesArtworkData = localStation.iTunesArtworkData
                 }
                 
                 // CROSS-COUNTRY CONTAMINATION PREVENTION: Validate country consistency
                 if localStation.country != cloudKitStation.country {
-                    print("🚨 COUNTRY CONTAMINATION DETECTED: Station '\(cloudKitStation.name)' has mismatched countries - Local: '\(localStation.country)' vs CloudKit: '\(cloudKitStation.country)'")
                     // Keep local country as it's more trusted (user has been using it)
                     mergedStation.country = localStation.country
-                    print("🛡️ COUNTRY PROTECTION: Preserved local country '\(localStation.country)' for station '\(cloudKitStation.name)'")
                 }
                 
                 // PRESERVE LOCAL STATE: These fields should never be overwritten by CloudKit
@@ -1087,7 +1065,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Sync stations from CloudKit with progress tracking for automatic sync
     private func syncStationsFromCloudKitWithProgress() async {
-        print("🔄 Starting automatic CloudKit sync with progress tracking")
         
         do {
             // Use DataStore's fetchRadioStationsWithProgress for banner integration
@@ -1124,8 +1101,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                                     // Update the last sync time to prevent false positives on next check
                                     UserDefaults.standard.set(Date(), forKey: "LastCloudKitSyncTime")
                                 }
-                                
-                                print("✅ Auto-synced \(self?.stations.count ?? cloudKitStations.count) stations from CloudKit with local state preserved")
                             }
                         } else if let error = error {
                             Task { @MainActor in
@@ -1163,7 +1138,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     // Find and update the station in the stations array
                     if let index = self.stations.firstIndex(where: { $0.id == stationId }) {
                         self.stations[index] = updatedStation
-                        print("📡 🔄 CLOUDKIT STATION REFRESH: ✅ Updated station \\(updatedStation.name)")
                         
                         // Save the updated station to Core Data
                         self.saveStationsToCoreData()
@@ -1173,7 +1147,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     } else {
                         // Station not found locally, add it
                         self.stations.append(updatedStation)
-                        print("📡 🔄 CLOUDKIT STATION REFRESH: ✅ Added new station \\(updatedStation.name)")
                         
                         // Save to Core Data
                         self.saveStationsToCoreData()
@@ -1182,11 +1155,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         self.objectWillChange.send()
                     }
                 }
-            } else {
-                print("📡 🔄 CLOUDKIT STATION REFRESH: ❌ Station \\(stationId) not found in CloudKit")
             }
         } catch {
-            print("📡 🔄 CLOUDKIT STATION REFRESH: ❌ Error refreshing station \\(stationId): \\(error)")
+            // Error refreshing station
         }
     }
     
@@ -2494,7 +2465,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
                         
                         NotificationCenter.default.post(name: .stationsUpdated, object: nil)
-                        print("✅ Regular CloudKit sync completed with local state preserved")
                     }
                 } else if let error = error {
                     print("❌ Error syncing with CloudKit: \(error.localizedDescription)")
@@ -3351,7 +3321,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         loadingPhase = "Fetching stations"
         
         do {
-            print("🌐 Radio Browser API: Fetching stations for \(country.name) with API code: \(country.apiCountryCode)")
             logDeletedStationsCount()
             
             await MainActor.run {
@@ -3384,94 +3353,55 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
             
-            // Fetch stations using multiple strategies to ensure we get exactly 500 unique stations
+            // Fetch stations using multiple strategies to ensure we get enough unique stations
+            // API already deduplicates within each fetch, we only need to merge results
             let targetUniqueStations = 500
             var allApiStations: [RadioBrowserStation] = []
             var uniqueURLs = Set<String>()
             
-            print("🎯 TARGET: Fetching stations using multiple strategies until we have \(targetUniqueStations) unique stations")
+            // Helper to add stations avoiding cross-strategy duplicates
+            func addUniqueStations(_ stations: [RadioBrowserStation]) {
+                for station in stations {
+                    guard uniqueURLs.count < targetUniqueStations else { break }
+                    let normalizedURL = station.url.lowercased()
+                        .replacingOccurrences(of: "https://", with: "")
+                        .replacingOccurrences(of: "http://", with: "")
+                    if !uniqueURLs.contains(normalizedURL) {
+                        uniqueURLs.insert(normalizedURL)
+                        allApiStations.append(station)
+                    }
+                }
+            }
             
             // Strategy 1: Fetch by clickcount (most popular first)
-            print("📡 Strategy 1: Fetching by clickcount...")
             let clickcountStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(
                 countryCode: country.apiCountryCode, 
-                limit: 1000,
+                limit: 600, // Reduced from 1000 since API now deduplicates
                 offset: 0,
                 order: "clickcount"
             )
+            addUniqueStations(clickcountStations)
             
-            // Add unique stations from clickcount strategy
-            for station in clickcountStations {
-                let normalizedURL = station.url.lowercased()
-                    .replacingOccurrences(of: "https://", with: "")
-                    .replacingOccurrences(of: "http://", with: "")
-                
-                if !uniqueURLs.contains(normalizedURL) {
-                    uniqueURLs.insert(normalizedURL)
-                    allApiStations.append(station)
-                }
-                
-                if uniqueURLs.count >= targetUniqueStations {
-                    break
-                }
-            }
-            
-            print("📡 Strategy 1: Added \(uniqueURLs.count) unique stations from clickcount")
-            
-            // Strategy 2: If we still need more, fetch by votes (highest rated)
+            // Strategy 2: If we still need more, fetch by votes
             if uniqueURLs.count < targetUniqueStations {
-                print("📡 Strategy 2: Fetching by votes...")
                 let votesStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(
                     countryCode: country.apiCountryCode, 
-                    limit: 1000,
+                    limit: 600,
                     offset: 0,
                     order: "votes"
                 )
-                
-                for station in votesStations {
-                    let normalizedURL = station.url.lowercased()
-                        .replacingOccurrences(of: "https://", with: "")
-                        .replacingOccurrences(of: "http://", with: "")
-                    
-                    if !uniqueURLs.contains(normalizedURL) {
-                        uniqueURLs.insert(normalizedURL)
-                        allApiStations.append(station)
-                    }
-                    
-                    if uniqueURLs.count >= targetUniqueStations {
-                        break
-                    }
-                }
-                
-                print("📡 Strategy 2: Total unique stations after votes: \(uniqueURLs.count)")
+                addUniqueStations(votesStations)
             }
             
-            // Strategy 3: If we still need more, fetch by lastchangetime (recently updated)
+            // Strategy 3: If we still need more, fetch by lastchangetime
             if uniqueURLs.count < targetUniqueStations {
-                print("📡 Strategy 3: Fetching by lastchangetime...")
                 let recentStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(
                     countryCode: country.apiCountryCode, 
-                    limit: 1000,
+                    limit: 600,
                     offset: 0,
                     order: "lastchangetime"
                 )
-                
-                for station in recentStations {
-                    let normalizedURL = station.url.lowercased()
-                        .replacingOccurrences(of: "https://", with: "")
-                        .replacingOccurrences(of: "http://", with: "")
-                    
-                    if !uniqueURLs.contains(normalizedURL) {
-                        uniqueURLs.insert(normalizedURL)
-                        allApiStations.append(station)
-                    }
-                    
-                    if uniqueURLs.count >= targetUniqueStations {
-                        break
-                    }
-                }
-                
-                print("📡 Strategy 3: Total unique stations after recent: \(uniqueURLs.count)")
+                addUniqueStations(recentStations)
             }
             
             // Trim to exact target if we have more than needed
@@ -3480,23 +3410,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             let apiStations = allApiStations
-            print("🎯 FINAL: Collected \(apiStations.count) unique stations for processing")
             
             // Cancel progress simulation as API call completed
             progressTask.cancel()
             
-            print("📡 RadioBrowserAPI: Received \(apiStations.count) stations for \(country.name)")
-            
-            // Debug logging for specific countries that have issues
-            if country.name == "Saint Vincent & Grenadines" || country.name == "Saint Pierre & Miquelon" {
-                print("🔍 Debug: API returned \(apiStations.count) stations for \(country.name) (code: \(country.apiCountryCode))")
-                if !apiStations.isEmpty {
-                    print("🔍 Debug: First few stations: \(apiStations.prefix(3).map { $0.name })")
-                    print("🔍 Debug: Station countries from API: \(apiStations.prefix(3).map { $0.country ?? "nil" })")
-                } else {
-                    print("🔍 Debug: API returned empty result - checking if country code '\(country.apiCountryCode)' is valid")
-                }
-            }
+            // API now returns deduplicated stations with normalized country names
             
             await MainActor.run {
                 loadingProgress = 0.3
@@ -3504,7 +3422,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             guard !apiStations.isEmpty else {
-                print("📡 RadioBrowserAPI: No stations found for \(country.name)")
                 isLoadingFromAPI = false
                 isLoading = false
                 loadingProgress = 0.0
@@ -3512,88 +3429,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 return
             }
             
-            await MainActor.run {
-                totalStationsToLoad = apiStations.count
-                loadingPhase = "Preparing to process \(totalStationsToLoad) stations"
-                loadingProgress = 0.32
-            }
+            // API already deduplicates by URL and normalizes country names
+            // No need for redundant processing here
+            let processedAPIStations = apiStations
             
-            // DEDUPLICATION: Filter out stations with identical URLs from the API response
-            // Prioritize HTTPS URLs over HTTP when same URL exists with both protocols
-            await MainActor.run {
-                loadingPhase = "Checking for duplicates"
-                loadingProgress = 0.35
-            }
-            
-            var urlToStationMap = [String: RadioBrowserStation]()
-            var processedCount = 0
-            
-            // First pass: collect all stations and handle HTTP/HTTPS duplicates
-            for apiStation in apiStations {
-                processedCount += 1
-                
-                // Update progress during deduplication
-                if processedCount % 50 == 0 || processedCount == apiStations.count {
-                    let dedupeProgress = Double(processedCount) / Double(apiStations.count) * 0.15 // 15% range for deduplication
-                    Task { @MainActor in
-                        loadingProgress = 0.35 + dedupeProgress
-                        loadingPhase = "Checking duplicates \(processedCount)/\(apiStations.count)"
-                    }
-                }
-                
-                guard !apiStation.url.isEmpty else { continue }
-                
-                let url = apiStation.url.lowercased()
-                
-                // Create normalized URL by removing protocol to check for HTTP/HTTPS duplicates
-                let normalizedURL: String
-                if url.hasPrefix("https://") {
-                    normalizedURL = String(url.dropFirst(8)) // Remove "https://"
-                } else if url.hasPrefix("http://") {
-                    normalizedURL = String(url.dropFirst(7)) // Remove "http://"
-                } else {
-                    normalizedURL = url
-                }
-                
-                // Check if we already have this URL with a different protocol
-                let httpsURL = "https://" + normalizedURL
-                let httpURL = "http://" + normalizedURL
-                
-                let currentURL = apiStation.url
-                
-                if let existingStation = urlToStationMap[normalizedURL] {
-                    // We have a duplicate - prioritize HTTPS
-                    let existingIsHTTPS = existingStation.url.lowercased().hasPrefix("https://")
-                    let currentIsHTTPS = currentURL.lowercased().hasPrefix("https://")
-                    
-                    if currentIsHTTPS && !existingIsHTTPS {
-                        // Current is HTTPS, existing is HTTP - replace with HTTPS
-                        print("🔄 Replacing HTTP with HTTPS: \(existingStation.url) -> \(currentURL) (Station: \(apiStation.name))")
-                        urlToStationMap[normalizedURL] = apiStation
-                    } else if !currentIsHTTPS && existingIsHTTPS {
-                        // Current is HTTP, existing is HTTPS - keep existing
-                        print("🔄 Skipping HTTP (keeping HTTPS): \(currentURL) (Station: \(apiStation.name))")
-                    } else {
-                        // Both same protocol or both non-standard - keep first (usually higher click count)
-                        print("🔄 Skipping duplicate URL: \(currentURL) (Station: \(apiStation.name))")
-                    }
-                } else {
-                    // New URL - add it
-                    urlToStationMap[normalizedURL] = apiStation
-                }
-            }
-            
-            let deduplicatedStations = Array(urlToStationMap.values)
-            
-            let duplicatesSkippedFromAPI = apiStations.count - deduplicatedStations.count
-            if duplicatesSkippedFromAPI > 0 {
-                print("⚡ URL Deduplication: Filtered out \(duplicatesSkippedFromAPI) stations with duplicate URLs from API response")
-            }
-            
-            print("📡 RadioBrowserAPI: Processing \(deduplicatedStations.count) unique stations (removed \(duplicatesSkippedFromAPI) URL duplicates)")
-            
-            // Use deduplicated stations for processing
-            let processedAPIStations = deduplicatedStations
             await MainActor.run {
                 totalStationsToLoad = processedAPIStations.count
                 loadingPhase = "Converting \(totalStationsToLoad) stations"
@@ -3647,18 +3486,19 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // CRITICAL: Skip API stations that duplicate manual stations
                 if ManualStationManager.shared.isManualStation(name: apiStation.name, country: country.name) {
-                    print("📻 Skipping API station '\(apiStation.name)' - duplicate of manual station")
                     return nil
                 }
                 
-                // CROSS-COUNTRY CONTAMINATION PREVENTION: Validate station country
-                let stationCountryFromAPI = apiStation.country ?? country.name
+                // Country is already normalized by API (RadioBrowserAPI.normalizeCountryName)
+                let stationCountry = apiStation.country ?? country.name
+                
+                // Simple contamination check - skip if station name clearly belongs to different country
                 let tempStation = RadioStation(
                     id: apiStation.stationuuid,
                     name: apiStation.name,
                     url: apiStation.url,
                     iconData: nil,
-                    country: stationCountryFromAPI,
+                    country: stationCountry,
                     isFavorite: false,
                     favoritedAt: nil,
                     favoriteOrder: nil,
@@ -3667,24 +3507,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 )
                 
                 if !isStationCountryValid(tempStation) {
-                    print("🚨 API CONTAMINATION BLOCKED: Station '\(apiStation.name)' (API Country: '\(stationCountryFromAPI)') failed validation for '\(country.name)'")
-                    
-                    // Try to correct the country
-                    if let correctedStation = attemptStationCountryCorrection(tempStation) {
-                        print("🛡️ API CONTAMINATION FIXED: Corrected station '\(apiStation.name)' country to '\(correctedStation.country)'")
-                        // Continue with corrected country
-                    } else {
-                        print("🗑️ API CONTAMINATION REMOVED: Discarded station '\(apiStation.name)' - could not determine correct country")
+                    // Try to correct the country, otherwise skip
+                    if attemptStationCountryCorrection(tempStation) == nil {
                         return nil
                     }
                 }
                 
                 // Check if we already have this station and preserve its favorite status and icon data
-                // Check both Core Data (existingStationsMap) and in-memory stations
                 let existingStationFromCoreData = existingStationsMap[apiStation.stationuuid]
                 let existingStationFromMemory = stations.first { $0.id == apiStation.stationuuid || $0.url == apiStation.url }
-                
-                // Prioritize in-memory station (more up-to-date) over Core Data
                 let existingStation = existingStationFromMemory ?? existingStationFromCoreData
                 let existingIconData = existingStation?.iconData
                 
@@ -3692,74 +3523,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     cachedFaviconCount += 1
                 }
                 
-                // Log when preserving favorite status
-                if existingStation?.isFavorite == true {
-                    print("⭐ FAVORITE PRESERVED: Keeping favorite status for API station '\(apiStation.name)'")
-                }
-                
-                // Clean station name by trimming whitespace and ALL leading special characters
-                var cleanedName = apiStation.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                // Remove all leading special characters (non-alphanumeric)
-                while !cleanedName.isEmpty && !cleanedName.first!.isLetter && !cleanedName.first!.isNumber {
-                    cleanedName.removeFirst()
-                    cleanedName = cleanedName.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                
-                // Final trim to ensure no trailing whitespace
-                cleanedName = cleanedName.trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                // Use actual country from API if available, otherwise use selected country as fallback
-                // Never assign "Select Country" or other invalid country names to stations
-                let stationCountry: String
-                if let apiCountry = apiStation.country, !apiCountry.isEmpty && apiCountry.trimmingCharacters(in: .whitespacesAndNewlines) != "" {
-                    let trimmedApiCountry = apiCountry.trimmingCharacters(in: .whitespacesAndNewlines)
-                    // Debug logging for Vatican City and other small countries
-                    if country.name == "Vatican City" || trimmedApiCountry.lowercased().contains("vatican") || trimmedApiCountry.lowercased().contains("holy") {
-                        print("🏛️ Vatican Debug: API returned '\(trimmedApiCountry)' for selected country '\(country.name)'")
-                    }
-                    
-                    // Debug logging for Saint Vincent & Grenadines
-                    if country.name == "Saint Vincent & Grenadines" || trimmedApiCountry.lowercased().contains("saint vincent") || trimmedApiCountry.lowercased().contains("st. vincent") || trimmedApiCountry.lowercased().contains("grenadines") {
-                        print("🏝️ Saint Vincent Debug: API returned '\(trimmedApiCountry)' for selected country '\(country.name)'")
-                    }
-                    
-                    // Debug logging for Saint Pierre & Miquelon
-                    if country.name == "Saint Pierre & Miquelon" || trimmedApiCountry.lowercased().contains("saint pierre") || trimmedApiCountry.lowercased().contains("st. pierre") || trimmedApiCountry.lowercased().contains("miquelon") {
-                        print("🇫🇷 Saint Pierre Debug: API returned '\(trimmedApiCountry)' for selected country '\(country.name)'")
-                    }
-                    
-                    // Normalize API country names to match our Country model
-                    let normalizedCountry = normalizeAPICountryName(trimmedApiCountry)
-                    stationCountry = normalizedCountry ?? country.name
-                    
-                    // Debug logging for normalization results
-                    if country.name == "Vatican City" || trimmedApiCountry.lowercased().contains("vatican") || trimmedApiCountry.lowercased().contains("holy") {
-                        print("🏛️ Vatican Debug: Normalized to '\(stationCountry)'")
-                    }
-                    
-                    if country.name == "Saint Vincent & Grenadines" || trimmedApiCountry.lowercased().contains("saint vincent") || trimmedApiCountry.lowercased().contains("st. vincent") || trimmedApiCountry.lowercased().contains("grenadines") {
-                        print("🏝️ Saint Vincent Debug: Normalized to '\(stationCountry)'")
-                    }
-                    
-                    if country.name == "Saint Pierre & Miquelon" || trimmedApiCountry.lowercased().contains("saint pierre") || trimmedApiCountry.lowercased().contains("st. pierre") || trimmedApiCountry.lowercased().contains("miquelon") {
-                        print("🇫🇷 Saint Pierre Debug: Normalized to '\(stationCountry)'")
-                    }
-                } else if country.name != "Select Country" && !country.name.isEmpty {
-                    stationCountry = country.name
-                    if country.name == "Vatican City" {
-                        print("🏛️ Vatican Debug: Using fallback country name '\(stationCountry)'")
-                    }
-                    if country.name == "Saint Vincent & Grenadines" {
-                        print("🏝️ Saint Vincent Debug: Using fallback country name '\(stationCountry)'")
-                    }
-                    if country.name == "Saint Pierre & Miquelon" {
-                        print("🇫🇷 Saint Pierre Debug: Using fallback country name '\(stationCountry)'")
-                    }
-                } else {
-                    // Skip stations that don't have valid country information
-                    return nil
-                }
+                // Station name is already cleaned by API (RadioBrowserAPI.cleanStationName)
+                let cleanedName = apiStation.name
                 
                 return RadioStation(
                     id: apiStation.stationuuid,
@@ -3830,7 +3595,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // If URL exists in Core Data, skip
                 if urlExistsInCoreData {
-                    print("🚫 IMPORT PROTECTION: Skipping API station '\(station.name)' - URL exists in Core Data")
                     return false
                 }
                 
@@ -3852,24 +3616,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // CRITICAL: Exclude manual stations entirely from API processing
                 guard !station.id.hasPrefix("manual_") else {
-                    print("📻 🚫 MANUAL STATION EXCLUDED: Manual station \(station.name) (ID: \(station.id)) excluded from API CloudKit save")
                     return false
                 }
                 
                 return true
-            }
-            
-            // Debug logging for Canada to track duplicate issue
-            if country.name == "Canada" {
-                print("🍁 Canada Debug: API returned \(apiStations.count) stations")
-                print("🍁 Canada Debug: After URL deduplication: \(processedAPIStations.count) stations")
-                print("🍁 Canada Debug: After conversion: \(newStations.count) stations")
-                print("🍁 Canada Debug: Existing URLs in Core Data: \(existingURLs.count)")
-                print("🍁 Canada Debug: Unique new stations to add: \(uniqueNewStations.count)")
-                if !uniqueNewStations.isEmpty {
-                    print("🍁 Canada Debug: New station URLs: \(uniqueNewStations.map { $0.url })")
-                    print("🍁 Canada Debug: New station names: \(uniqueNewStations.map { $0.name })")
-                }
             }
             
             await MainActor.run {
@@ -3880,14 +3630,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Calculate counts for notification
             let totalFetched = apiStations.count
             let totalAfterURLDeduplication = processedAPIStations.count
+            let duplicatesSkippedFromAPI = 0  // Deduplication now happens at API level
             let deletedStationsFiltered = totalAfterURLDeduplication - newStations.count
             let newStationsAdded = uniqueNewStations.count
             let duplicatesSkipped = newStations.count - newStationsAdded
             
             if uniqueNewStations.isEmpty {
-                print("📡 RadioBrowserAPI: All fetched stations already exist for \(country.name) - stations are up to date")
+                // Stations are up to date
             } else {
-                print("📡 RadioBrowserAPI: Found \(newStationsAdded) new stations for \(country.name)")
+                // Found new stations
             }
             
             await MainActor.run {
@@ -3901,7 +3652,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Add to local stations array (new stations at the top) - only if there are new stations
             if !uniqueNewStations.isEmpty {
-                print("📡 RadioBrowserAPI: Adding \(uniqueNewStations.count) new stations for \(country.name)")
                 
                 for newStation in uniqueNewStations.reversed() {
                     // CRITICAL PROTECTION: Double-check that we're not overwriting an imported station with custom data
@@ -3910,7 +3660,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         let existingStation = stations[existingIndex]
                         // If existing station has custom icon data or is manually imported, preserve it
                         if existingStation.iconData != nil || existingStation.iTunesArtworkData != nil || existingStation.id.hasPrefix("manual_") {
-                            print("🛡️ IMPORT PROTECTION: Preserving user-imported station '\(existingStation.name)' with custom data over API station")
                             continue // Skip adding this API station
                         }
                     }
@@ -3924,27 +3673,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     // Insert new station at the beginning of the array
                     stations.insert(newStation, at: 0)
                 }
-            }
-            
-            if uniqueNewStations.isEmpty {
-                print("✅ Stations for \(country.name) are up to date - no new stations found")
-            } else {
-                print("✅ Added \(uniqueNewStations.count) new stations for \(country.name)")
-            }
-            if country.name == "Vatican City" {
-                print("🏛️ Vatican Debug: Added stations with countries: \(uniqueNewStations.map { $0.country })")
-                print("🏛️ Vatican Debug: Station names: \(uniqueNewStations.map { $0.name })")
-            }
-            if country.name == "Saint Vincent & Grenadines" {
-                print("🏝️ Saint Vincent Debug: Added stations with countries: \(uniqueNewStations.map { $0.country })")
-                print("🏝️ Saint Vincent Debug: Station names: \(uniqueNewStations.map { $0.name })")
-            }
-            if country.name == "Saint Pierre & Miquelon" {
-                print("🇫🇷 Saint Pierre Debug: Added stations with countries: \(uniqueNewStations.map { $0.country })")
-                print("🇫🇷 Saint Pierre Debug: Station names: \(uniqueNewStations.map { $0.name })")
-            }
-            if cachedFaviconCount > 0 {
-                print("🖼️ Using \(cachedFaviconCount) cached favicons, downloading \(uniqueNewStations.count - cachedFaviconCount) new ones")
             }
             
             // Only save and sync if there are new stations to process
@@ -3963,9 +3691,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
             
-            // Only save to Core Data if there are new stations
+            // Only save to Core Data if there are new stations - use optimized batch insert
             if !uniqueNewStations.isEmpty {
-                saveStationsToCoreData()
+                // Use optimized method that only inserts new stations
+                saveNewStationsToCoreData(uniqueNewStations)
                 DispatchQueue.main.async {
                     self.objectWillChange.send()
                     NotificationCenter.default.post(name: .stationsUpdated, object: nil)
@@ -4041,114 +3770,52 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     }
                 } else {
                     // Determine which stations to save based on first load vs subsequent loads
-                    let stationsToSave: [RadioStation]
-                    if isFirstLoad {
-                        // First load: Save all API stations to CloudKit
-                        stationsToSave = apiOnlyNewStations
-                        print("📡 🔄 FIRST LOAD: Saving ALL \(apiOnlyNewStations.count) API stations to CloudKit for \(country.name)")
-                    } else {
-                        // Subsequent loads: Only save stations that are actually new (not in CloudKit)
-                        print("📡 🔄 SUBSEQUENT LOAD: Only saving truly new stations to CloudKit for \(country.name)")
-                        stationsToSave = apiOnlyNewStations
-                    }
+                    let stationsToSave = apiOnlyNewStations
                     
-                    print("📡 🔄 Saving \(stationsToSave.count) API stations to CloudKit (excluding \(uniqueNewStations.count - apiOnlyNewStations.count) manual stations)")
-                    
-                    // Use different save methods based on first load vs subsequent loads
-                    if isFirstLoad {
-                        // First load: Use batch save method to save all stations efficiently
-                        Task {
-                            do {
-                                try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(
-                                    stationsToSave,
-                                    country: country.name,
-                                    progressCallback: { progress, count, message in
-                                        Task { @MainActor in
-                                            DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: message)
-                                        }
+                    // Use unified batch save method for both first and subsequent loads
+                    // CloudKit duplicate checking is now optimized with targeted queries
+                    Task {
+                        do {
+                            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(
+                                stationsToSave,
+                                country: country.name,
+                                progressCallback: { progress, count, message in
+                                    Task { @MainActor in
+                                        DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: message)
                                     }
-                                )
-                                
-                                // Mark first load as complete
+                                }
+                            )
+                            
+                            // Mark first load as complete if applicable
+                            if isFirstLoad {
                                 userDefaults.set(true, forKey: firstLoadKey)
                                 userDefaults.synchronize()
-                                print("📡 ✅ FIRST LOAD COMPLETE: Marked API stations as loaded for \(country.name)")
-                                
-                                await MainActor.run {
-                                    DataSyncManager.shared.radioStationsStatus = .completed
-                                    DataSyncManager.shared.radioStationsOperation = "Saved \(stationsToSave.count) stations to iCloud (first load)"
-                                    DataSyncManager.shared.radioStationsProgress = 1.0
-                                    DataSyncManager.shared.radioStationsCurrentCount = stationsToSave.count
-                                    
-                                    // Show notification
-                                    self.showStationFetchNotification(
-                                        country: country,
-                                        actualNewStations: stationsToSave.count,
-                                        duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
-                                        duplicatesSkipped: duplicatesSkipped,
-                                        deletedStationsFiltered: deletedStationsFiltered
-                                    )
-                                }
-                            } catch {
-                                print("📡 ❌ First load CloudKit save failed: \(error)")
-                                await MainActor.run {
-                                    DataSyncManager.shared.radioStationsStatus = .failed
-                                    DataSyncManager.shared.radioStationsOperation = "Failed to save stations: \(error.localizedDescription)"
-                                }
                             }
-                        }
-                    } else {
-                        // Subsequent loads: Use selective save method (existing logic)
-                        DataStore.shared.saveNewStationsToCloudKit(stations: stationsToSave) { success, recordIDs in
-                DispatchQueue.main.async {
-                    let actualSavedCount = recordIDs?.count ?? 0
-                    
-                    if success {
-                        print("📡 ✅ Successfully saved \(actualSavedCount) API-fetched stations to CloudKit for \(country.name)")
-                        
-                        // Update DataSyncManager on success
-                        DataSyncManager.shared.radioStationsStatus = .completed
-                        DataSyncManager.shared.radioStationsOperation = "Saved \(actualSavedCount) new stations to iCloud"
-                        DataSyncManager.shared.radioStationsProgress = 1.0
-                        DataSyncManager.shared.radioStationsCurrentCount = actualSavedCount
-                        // Re-save merged set to Core Data to ensure we don't lose just-added items
-                        self.saveStationsToCoreData()
-                        NotificationCenter.default.post(name: .stationsUpdated, object: nil)
-                        
-                        // FIXED: Show notification with actual count of saved stations
-                        Task { @MainActor in
-                            self.showStationFetchNotification(
-                                country: country,
-                                actualNewStations: actualSavedCount,
-                                duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
-                                duplicatesSkipped: duplicatesSkipped,
-                                deletedStationsFiltered: deletedStationsFiltered
-                            )
-                        }
-                    } else {
-                        print("📡 ⚠️ Failed to save some API-fetched stations to CloudKit for \(country.name)")
-                        
-                        // Update DataSyncManager on failure
-                        DataSyncManager.shared.radioStationsStatus = .failed
-                        DataSyncManager.shared.radioStationsOperation = "Failed to save new stations to iCloud"
-                        DataSyncManager.shared.radioStationsProgress = 0.0
-                        
-                        // Show notification for failure case
-                        Task { @MainActor in
-                            self.showStationFetchNotification(
-                                country: country,
-                                actualNewStations: 0,
-                                duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
-                                duplicatesSkipped: duplicatesSkipped,
-                                deletedStationsFiltered: deletedStationsFiltered
-                            )
-                        }
-                    }
+                            
+                            await MainActor.run {
+                                DataSyncManager.shared.radioStationsStatus = .completed
+                                DataSyncManager.shared.radioStationsOperation = "Saved \(stationsToSave.count) stations to iCloud"
+                                DataSyncManager.shared.radioStationsProgress = 1.0
+                                DataSyncManager.shared.radioStationsCurrentCount = stationsToSave.count
+                                
+                                self.showStationFetchNotification(
+                                    country: country,
+                                    actualNewStations: stationsToSave.count,
+                                    duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
+                                    duplicatesSkipped: duplicatesSkipped,
+                                    deletedStationsFiltered: deletedStationsFiltered
+                                )
+                            }
+                        } catch {
+                            print("📡 ❌ CloudKit save failed: \(error)")
+                            await MainActor.run {
+                                DataSyncManager.shared.radioStationsStatus = .failed
+                                DataSyncManager.shared.radioStationsOperation = "Failed to save stations: \(error.localizedDescription)"
+                            }
                         }
                     }
                 }
             }
-            } // End of uniqueNewStations.isEmpty condition
             
             await MainActor.run {
                 loadingPhase = "Completing sync"
@@ -4173,9 +3840,78 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
         } catch {
             print("❌ RadioBrowserAPI: Failed to fetch stations for \(country.name): \(error)")
+            
+            // Show alert to inform user that API is unavailable (throttled to once per 5 seconds)
             await MainActor.run {
-                loadingPhase = "Failed to load stations"
-                loadingProgress = 0.0
+                let now = Date()
+                if self.lastAPIAlertShownTime == nil || now.timeIntervalSince(self.lastAPIAlertShownTime!) > 5 {
+                    print("🔔 Triggering API unavailable alert")
+                    self.showAPIUnavailableAlert = true
+                    self.lastAPIAlertShownTime = now
+                } else {
+                    print("🔕 Alert throttled - last shown \(now.timeIntervalSince(self.lastAPIAlertShownTime!)) seconds ago")
+                }
+            }
+            
+            // FALLBACK: Try to load from CloudKit if API fails
+            await MainActor.run {
+                loadingPhase = "API unavailable - checking iCloud backup..."
+                loadingProgress = 0.3
+            }
+            
+            do {
+                // Check if we have stations for this country in CloudKit
+                let cloudKitStations = try await DataStore.shared.fetchStationsForCountry(country.name)
+                
+                if !cloudKitStations.isEmpty {
+                    print("☁️ CloudKit Fallback: Loaded \(cloudKitStations.count) stations for \(country.name) from iCloud")
+                    
+                    await MainActor.run {
+                        loadingPhase = "Loaded \(cloudKitStations.count) stations from iCloud"
+                        loadingProgress = 0.8
+                    }
+                    
+                    // Update in-memory stations with CloudKit data
+                    // Only add stations that don't already exist in memory
+                    let existingURLs = Set(stations.map { $0.url })
+                    let newFromCloudKit = cloudKitStations.filter { !existingURLs.contains($0.url) }
+                    
+                    if !newFromCloudKit.isEmpty {
+                        await MainActor.run {
+                            for station in newFromCloudKit {
+                                if !self.stations.contains(where: { $0.id == station.id }) {
+                                    self.stations.append(station)
+                                }
+                            }
+                            self.objectWillChange.send()
+                        }
+                        
+                        // Save to Core Data
+                        saveNewStationsToCoreData(newFromCloudKit)
+                    }
+                    
+                    await MainActor.run {
+                        loadingPhase = "✅ Loaded from iCloud backup"
+                        loadingProgress = 1.0
+                    }
+                    
+                    // Post notification
+                    NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                } else {
+                    print("☁️ CloudKit Fallback: No stations found for \(country.name) in iCloud")
+                    
+                    await MainActor.run {
+                        loadingPhase = "No stations available offline"
+                        loadingProgress = 0.0
+                    }
+                }
+            } catch {
+                print("❌ CloudKit Fallback also failed: \(error.localizedDescription)")
+                
+                await MainActor.run {
+                    loadingPhase = "Failed to load stations (API and iCloud unavailable)"
+                    loadingProgress = 0.0
+                }
             }
         }
         
@@ -4202,10 +3938,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @MainActor
     func fetchStationsForAllCountries() async {
-        print("🌐 Radio Browser API: Starting to fetch stations for all countries")
         
         let supportedCountries = countries.filter { $0.supportsRadioLookup }
-        print("🌐 Radio Browser API: Found \(supportedCountries.count) supported countries")
         
         let initialStationCount = stations.count
         
@@ -4218,8 +3952,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         let finalStationCount = stations.count
         let totalStationsAdded = finalStationCount - initialStationCount
-        
-        print("🌐 Radio Browser API: Finished fetching stations for all countries")
         
         // Notify user about the overall results (only when new stations were added)
         if totalStationsAdded > 0 {
@@ -4235,7 +3967,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @MainActor
     func fetchStationsForCurrentCountry() async {
         guard let currentCountry = countries.first(where: { $0.name == selectedCountry }) else {
-            print("🌐 Radio Browser API: No country selected or country not found")
             return
         }
         
@@ -4244,7 +3975,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @MainActor
     func fetchStationsForSelectedCountry(forceRefresh: Bool = false) async {
-        print("🌐 Manual + API Station Loading: fetchStationsForSelectedCountry called for country: \(selectedCountry), forceRefresh: \(forceRefresh)")
         
         // Cancel any ongoing fetch to prevent memory issues and conflicts
         currentFetchTask?.cancel()
@@ -4258,22 +3988,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let countriesArray = self.countries
             
             // STEP 1: Load manual stations first (they take priority)
-            print("📻 🔍 DEBUG: About to load manual stations for \(selectedCountryName)")
             await self.loadManualStationsForCountry(selectedCountryName)
-            print("📻 🔍 DEBUG: Finished loading manual stations for \(selectedCountryName)")
             
             // STEP 2: Always check API for new stations, but handle existing ones efficiently
             let existingAPIStationsCount = await self.getExistingAPIStationsCount(for: selectedCountryName)
             
             if !forceRefresh && existingAPIStationsCount > 0 {
-                print("🌐 🔄 INCREMENTAL UPDATE: Found \(existingAPIStationsCount) existing API stations for \(selectedCountryName), checking for new stations from API")
                 
                 // Load existing stations from Core Data to display them immediately
                 await self.loadExistingStationsForCountry(selectedCountryName)
-            } else if forceRefresh {
-                print("🌐 🔄 FORCE REFRESH: Fetching fresh stations from API for \(selectedCountryName)")
-            } else {
-                print("🌐 📡 FIRST TIME FETCH: No existing API stations found for \(selectedCountryName), proceeding with full API fetch")
             }
             
             // STEP 3: Always fetch from API to check for new stations (existing ones will be filtered out)
@@ -4282,21 +4005,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // If not found (common on fresh install), create a country object as fallback
             if currentCountry == nil && selectedCountryName != "Select Country" {
-                print("🌐 Radio Browser API: Country not found in array, creating fallback country object for: \(selectedCountryName)")
                 currentCountry = Country(name: selectedCountryName, flag: "")
-                print("🌐 Radio Browser API: Created fallback country with API code: \(currentCountry?.apiCountryCode ?? "nil")")
             }
             
             guard let country = currentCountry else {
-                print("🌐 Radio Browser API: No country selected or could not create country object for: \(selectedCountryName)")
                 return
             }
             
-            print("🌐 Radio Browser API: Found/created country: \(country.name) with API code: \(country.apiCountryCode)")
-            
             // Check if task was cancelled before proceeding
             guard !Task.isCancelled else {
-                print("🌐 Radio Browser API: Fetch task was cancelled before execution")
                 return
             }
             
@@ -4380,12 +4097,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // Keep all non-country stations + existing country stations + new loaded stations
                 stations = stations.filter { $0.country != country } + existingCountryStations + newLoadedStations
-                print("🌐 ✅ Loaded \(loadedStations.count) cached stations for \(country) from Core Data (added \(newLoadedStations.count) new, preserved \(existingCountryStations.count) existing)")
             } catch {
-                print("⚠️ Error loading cached stations for \(country): \(error)")
+                // Error loading cached stations
             }
-        } else {
-            print("🌐 ✅ Displaying \(countryStations.count) cached stations for \(country) from memory")
         }
     }
 
@@ -4395,26 +4109,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
         guard country != "Select Country" else { return }
         
         let allManualStations = ManualStationManager.shared.getManualStations(for: country)
-        print("📻 🔍 DEBUG: Found \(allManualStations.count) total manual stations for \(country)")
-        
-        // Debug: Log all manual station IDs and their deleted status
-        for station in allManualStations {
-            let isDeleted = isStationDeleted(station.id)
-            print("📻 🔍 Manual station: \(station.name) (ID: \(station.id)) - Deleted: \(isDeleted)")
-        }
         
         // CRITICAL: Filter out manually deleted stations
         // Apply the same protection rule as API stations
         let manualStations = allManualStations.filter { station in
             if isStationDeleted(station.id) {
-                print("🚫 Skipping deleted manual station: \(station.name) (ID: \(station.id))")
                 return false
             }
             return true
         }
         
         if !manualStations.isEmpty {
-            print("📻 Loading \(manualStations.count) manual stations for \(country) (filtered \(allManualStations.count - manualStations.count) deleted)")
             
             // Add manual stations to the beginning of the stations array
             // This ensures they appear first and have priority
@@ -4432,8 +4137,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Only sync if never synced before OR it's been more than 24 hours since last sync
             if lastSyncTime == 0 || (currentTime - lastSyncTime) > syncInterval {
-                print("📻 ☁️ SYNC CHECK: Manual stations for \(country) need syncing - lastSync: \(lastSyncTime == 0 ? "never" : "\(Date(timeIntervalSince1970: lastSyncTime))"), interval: \(currentTime - lastSyncTime) seconds")
-                print("📻 ☁️ Syncing \(manualStations.count) manual stations to CloudKit for \(country) (last sync: \(lastSyncTime == 0 ? "never" : "\(Int((currentTime - lastSyncTime) / 3600)) hours ago"))...")
                 Task {
                     do {
                         // Use batch syncing for better performance
@@ -4441,31 +4144,19 @@ class RadioStationViewModel: NSObject, ObservableObject {
                             manualStations,
                             country: country,
                             progressCallback: { progress, count, message in
-                                print("📻 ☁️ Manual stations batch sync progress: \(Int(progress * 100))% - \(message)")
+                                // Progress tracked silently
                             }
                         )
-                        print("📻 ☁️ ✅ Successfully completed batch syncing \(manualStations.count) manual stations to CloudKit for \(country)")
                         
                         // Mark as synced with current timestamp
                         UserDefaults.standard.set(currentTime, forKey: "\(syncKey)_Time")
                     } catch {
-                        print("📻 ☁️ ❌ Failed to batch sync manual stations to CloudKit for \(country): \(error)")
-                        print("📻 ☁️ Error details: \(error.localizedDescription)")
-                        if let ckError = error as? CKError {
-                            print("📻 ☁️ CloudKit error code: \(ckError.code.rawValue)")
-                            print("📻 ☁️ CloudKit error description: \(ckError.localizedDescription)")
-                        }
                         // Don't mark as synced if it failed, so it will retry next time
                     }
                 }
             } else {
-                print("📻 ☁️ SYNC SKIPPED: Manual stations for \(country) already synced recently - last sync: \(Date(timeIntervalSince1970: lastSyncTime)), \(Int((currentTime - lastSyncTime) / 3600)) hours ago")
-                print("📻 ☁️ Manual stations for \(country) recently synced (\(Int((currentTime - lastSyncTime) / 3600)) hours ago), skipping sync")
+                // Manual stations for country recently synced, skipping sync
             }
-            
-            print("📻 ✅ Successfully loaded \(manualStations.count) manual stations for \(country)")
-        } else {
-            print("📻 No manual stations defined for \(country)")
         }
     }
     
@@ -4675,23 +4366,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
     /// Migrate existing stations to use normalized country names and fix massive database corruption
     @MainActor
     func migrateStationCountryNames() {
-        print("🔄 Starting country name migration for existing stations...")
-        
         let context = CoreDataStack.shared.context
         var migrationCount = 0
         var corruptedStationsRemoved = 0
         var countryReassignments = 0
         
-        // Debug: Check all unique country names currently in stations
+        // Detect unique country names currently in stations
         let uniqueCountries = Set(stations.map { $0.country })
-        print("🔍 Current unique country names: \(uniqueCountries.sorted())")
         
         // CRITICAL FIX: Detect massive database corruption where all stations are assigned to "Italy"
         let italyStationCount = stations.filter { $0.country == "Italy" }.count
         let totalStationCount = stations.count
         let corruptionPercentage = totalStationCount > 0 ? Double(italyStationCount) / Double(totalStationCount) * 100 : 0
-        
-        print("🚨 CORRUPTION ANALYSIS: \(italyStationCount) of \(totalStationCount) stations (\(String(format: "%.1f", corruptionPercentage))%) assigned to Italy")
         
         // Check if we've done cleanup recently to prevent endless loops
         let lastCleanupTime = UserDefaults.standard.double(forKey: "LastStationCleanupTime")
@@ -4700,22 +4386,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         // Only run cleanup if it's been more than 1 hour since last cleanup
         if timeSinceLastCleanup < 3600 && lastCleanupTime > 0 { // 3600 = 1 hour
-            print("⏭️ Skipping station cleanup (last cleanup: \(Int(timeSinceLastCleanup/60)) minutes ago)")
             return
         }
         
         // If more than 80% of stations are assigned to Italy, this indicates database corruption
         if corruptionPercentage > 80.0 {
-            print("🚨 MASSIVE DATABASE CORRUPTION DETECTED!")
-            print("🔧 Attempting to fix country assignments using API country codes...")
-            
             // Fix corrupted country assignments by inferring correct countries from station names
             for station in stations {
                 if station.country == "Italy" {
                     // Try to determine correct country from station name patterns
                     if let correctCountry = inferCountryFromStationName(station.name), correctCountry != "Italy" {
-                        print("🔧 Reassigning '\(station.name)' from Italy to '\(correctCountry)'")
-                        
                         // Update in memory
                         if let index = stations.firstIndex(where: { $0.id == station.id }) {
                             var updatedStation = stations[index]
@@ -4742,8 +4422,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         // ENHANCED CROSS-COUNTRY CONTAMINATION CLEANUP
-        print("🛡️ Starting comprehensive cross-country contamination cleanup...")
-        
         var stationsToRemove: [RadioStation] = []
         var stationsToCorrect: [(original: RadioStation, corrected: RadioStation)] = []
         
@@ -4752,10 +4430,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // Try to correct the station first
                 if let correctedStation = attemptStationCountryCorrection(station) {
                     stationsToCorrect.append((original: station, corrected: correctedStation))
-                    print("🛡️ CLEANUP: Will correct station '\(station.name)' from '\(station.country)' to '\(correctedStation.country)'")
                 } else {
                     stationsToRemove.append(station)
-                    print("🗑️ CLEANUP: Will remove contaminated station '\(station.name)' (Country: '\(station.country)') - could not determine correct country")
                 }
             }
         }
@@ -4766,8 +4442,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 stations[index] = correction.corrected
             }
         }
-        
-        print("🛡️ CLEANUP SUMMARY: Corrected \(stationsToCorrect.count) stations, will remove \(stationsToRemove.count) stations")
         
         // Remove corrupted stations from memory and Core Data
         for station in stationsToRemove {
@@ -4824,10 +4498,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         if migrationCount > 0 || corruptedStationsRemoved > 0 || countryReassignments > 0 {
             do {
                 try context.save()
-                print("✅ Database cleanup completed:")
-                print("   - Reassigned \(countryReassignments) stations from corrupted Italy assignments")
-                print("   - Migrated \(migrationCount) stations to correct country names")
-                print("   - Removed \(corruptedStationsRemoved) corrupted stations")
                 
                 // Update cleanup timestamp to prevent repeated cleanup
                 UserDefaults.standard.set(currentTime, forKey: "LastStationCleanupTime")
@@ -4837,8 +4507,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
             } catch {
                 print("❌ Failed to save database cleanup: \(error)")
             }
-        } else {
-            print("✅ No stations needed migration or cleanup")
         }
     }
     
@@ -5497,7 +5165,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 if let iconData = iconData,
                    let index = self.stations.firstIndex(where: { $0.id == stationId }) {
                     self.stations[index].iconData = iconData
-                    print("✅ Favicon downloaded and cached for station: \(self.stations[index].name)")
                     
                     // Save to Core Data in background for persistent caching with weak self
                     Task.detached { [weak self] in
@@ -5581,6 +5248,99 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     print("❌ Failed to cache favicon to Core Data: \(error)")
                 }
             }
+        }
+    }
+    
+    // MARK: - Optimized Batch Operations
+    
+    /// Saves only NEW stations to Core Data (much faster than full save)
+    /// Use this when adding stations from API instead of saveStationsToCoreData()
+    func saveNewStationsToCoreData(_ newStations: [RadioStation]) {
+        guard !newStations.isEmpty else { return }
+        
+        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+        
+        backgroundContext.perform {
+            backgroundContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            
+            // Only check if these specific IDs exist (not all stations)
+            let newIDs = newStations.map { $0.id }
+            let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id IN %@", newIDs)
+            fetchRequest.propertiesToFetch = ["id"]
+            
+            do {
+                let existingStations = try backgroundContext.fetch(fetchRequest)
+                let existingIDs = Set(existingStations.compactMap { $0.id })
+                
+                var insertedCount = 0
+                for station in newStations {
+                    // Skip if already exists
+                    if existingIDs.contains(station.id) { continue }
+                    
+                    let newCDStation = CDStation(context: backgroundContext)
+                    newCDStation.id = station.id
+                    newCDStation.name = station.name
+                    newCDStation.url = station.url
+                    newCDStation.iconData = station.iconData
+                    newCDStation.country = station.country
+                    newCDStation.isFavorite = station.isFavorite
+                    newCDStation.favoritedAt = station.favoritedAt
+                    newCDStation.favoriteOrder = station.favoriteOrder.map { Int32($0) } ?? -1
+                    newCDStation.order = Int16(station.order)
+                    newCDStation.lastPlayed = station.lastPlayed
+                    insertedCount += 1
+                }
+                
+                if backgroundContext.hasChanges {
+                    try backgroundContext.save()
+                    print("✅ Inserted \(insertedCount) new stations to Core Data")
+                }
+            } catch {
+                print("❌ Failed to save new stations: \(error)")
+            }
+        }
+    }
+    
+    /// Debounced CloudKit sync - batches multiple sync requests together
+    private static var cloudKitSyncWorkItem: DispatchWorkItem?
+    private static var pendingCloudKitStations: [RadioStation] = []
+    private static let cloudKitSyncQueue = DispatchQueue(label: "com.streamradios.cloudkitsync")
+    
+    func scheduleCloudKitSync(for stations: [RadioStation], country: String) {
+        Self.cloudKitSyncQueue.async {
+            // Add to pending batch
+            Self.pendingCloudKitStations.append(contentsOf: stations)
+            
+            // Cancel previous scheduled sync
+            Self.cloudKitSyncWorkItem?.cancel()
+            
+            // Schedule new sync after 2 second delay (batches rapid adds)
+            let workItem = DispatchWorkItem { [weak self] in
+                let stationsToSync = Self.pendingCloudKitStations
+                Self.pendingCloudKitStations = []
+                
+                guard !stationsToSync.isEmpty else { return }
+                
+                Task {
+                    do {
+                        try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(
+                            stationsToSync,
+                            country: country
+                        ) { progress, count, message in
+                            Task { @MainActor in
+                                DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: message)
+                            }
+                        }
+                        print("✅ CloudKit batch sync completed: \(stationsToSync.count) stations")
+                    } catch {
+                        print("❌ CloudKit batch sync failed: \(error)")
+                    }
+                }
+            }
+            
+            Self.cloudKitSyncWorkItem = workItem
+            Self.cloudKitSyncQueue.asyncAfter(deadline: .now() + 2.0, execute: workItem)
         }
     }
 }
@@ -5688,7 +5448,6 @@ extension RadioStationViewModel {
                     }
                     
                     if !stationIDs.contains(existingStationId) {
-                        print("🗑️ Removing station no longer in current set: \(existingStation.name ?? "Unknown")")
                         backgroundContext.delete(existingStation)
                     }
                 }
@@ -5794,7 +5553,6 @@ extension RadioStationViewModel {
                     lastPlayed: cdStation.lastPlayed
                 )
             }
-            print("⚡ Instantly loaded \(stations.count) stations from CoreData.")
             
             // Set loading to false immediately to show stations
             isLoading = false
@@ -5868,7 +5626,6 @@ extension RadioStationViewModel {
         
         // Save changes if any were made
         if hasChanges {
-            print("Initialized order values for stations")
             saveStationsToCoreData()
         }
     }
@@ -6150,7 +5907,6 @@ extension RadioStationViewModel {
             await MainActor.run {
                 self.stationSnapshotCache[country] = sortedStations
                 self.snapshotTimestamps[country] = Date()
-                print("📸 STATION SNAPSHOT: Cached \(sortedStations.count) stations for country \(country)")
             }
             
             // Update DataSyncManager snapshot readiness tracking
@@ -6226,8 +5982,6 @@ extension RadioStationViewModel {
         await MainActor.run {
             let countriesWithStations = Dictionary(grouping: self.stations) { $0.country }
                 .filter { !$0.key.isEmpty && $0.key != "Unknown Region" && $0.key != "Select Country" }
-            
-            print("📸 Creating station snapshots for \(countriesWithStations.count) countries...")
             
             for (country, stations) in countriesWithStations {
                 self.updateStationSnapshot(for: country, stations: stations)
