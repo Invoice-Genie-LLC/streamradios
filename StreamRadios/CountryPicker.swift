@@ -187,8 +187,14 @@ struct CountryPicker: View {
                                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                             }
                         }
-                        .foregroundColor(.blue)
                         .font(.system(size: 16))
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+                        )
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -201,7 +207,7 @@ struct CountryPicker: View {
                     // Recent selections section
                     if !filteredRecentCountries.isEmpty && searchText.isEmpty {
                         Section {
-                            ForEach(filteredRecentCountries, id: \.id) { country in
+                            ForEach(filteredRecentCountries.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }, id: \.id) { country in
                                 CountryRow(
                                     country: country,
                                     isSelected: selectedCountry == country.name,
@@ -237,7 +243,7 @@ struct CountryPicker: View {
                     // Popular countries section (if no search)
                     if searchText.isEmpty {
                         Section {
-                            ForEach(popularCountries, id: \.id) { country in
+                            ForEach(popularCountries.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }, id: \.id) { country in
                                 CountryRow(
                                     country: country,
                                     isSelected: selectedCountry == country.name,
@@ -329,7 +335,6 @@ struct CountryPicker: View {
                     Button("Cancel") {
                         presentationMode.wrappedValue.dismiss()
                     }
-                    .foregroundColor(.blue)
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -343,9 +348,9 @@ struct CountryPicker: View {
                                 .foregroundColor(.adaptivePrimaryText)
                                 .font(.system(size: 16, weight: .medium))
                                 .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 8)
+                        .buttonStyle(.plain)
                         
                         
                         // Search button
@@ -361,9 +366,9 @@ struct CountryPicker: View {
                                 .foregroundColor(.adaptivePrimaryText)
                                 .font(.system(size: 16, weight: .medium))
                                 .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 8)
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -510,7 +515,7 @@ struct CountryRow: View {
                 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.blue)
+                        
                         .font(.body)
                 }
             }
@@ -698,16 +703,24 @@ struct CountryPickerButton: View {
     var countries: [Country]
     var stationCount: ((String) -> Int)?
     var onSelect: ((String) -> Void)? = nil
+    var isDisabled: Bool = false
     @State private var showingPicker = false
     
     var body: some View {
         Button(action: {
-            showingPicker = true
+            if !isDisabled {
+                showingPicker = true
+            }
         }) {
             HStack(spacing: 8) {
                 // Flag
                 Group {
-                    if let selectedCountryData = countries.first(where: { $0.name == selectedCountry }),
+                    if isDisabled {
+                        Image(systemName: "wifi.slash")
+                            .foregroundColor(.gray)
+                            .font(.body)
+                            .frame(width: 30, height: 20)
+                    } else if let selectedCountryData = countries.first(where: { $0.name == selectedCountry }),
                        !selectedCountryData.flag.isEmpty,
                        let flag = Flag(countryCode: selectedCountryData.flag) {
                         Image(uiImage: flag.image(style: .roundedRect))
@@ -728,14 +741,14 @@ struct CountryPickerButton: View {
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(selectedCountry.isEmpty || selectedCountry == "Select Country" ? "Select Country" : selectedCountry)
+                    Text(isDisabled ? "Offline - Country Browser Disabled" : (selectedCountry.isEmpty || selectedCountry == "Select Country" ? "Select Country" : selectedCountry))
                         .font(.body)
-                        .foregroundColor(.adaptivePrimaryText)
+                        .foregroundColor(isDisabled ? .gray : .adaptivePrimaryText)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     
                     // Show station count for selected country
-                    if let count = stationCount?(selectedCountry), count > 0, selectedCountry != "Select Country" && !selectedCountry.isEmpty {
+                    if !isDisabled, let count = stationCount?(selectedCountry), count > 0, selectedCountry != "Select Country" && !selectedCountry.isEmpty {
                         Text("\(count) stations")
                             .font(.caption)
                             .foregroundColor(.adaptiveSecondaryText)
@@ -746,13 +759,14 @@ struct CountryPickerButton: View {
                 
                 Image(systemName: "chevron.down")
                     .font(.body)
-                    .foregroundColor(.adaptiveSecondaryText)
+                    .foregroundColor(isDisabled ? .gray : .adaptiveSecondaryText)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.adaptiveFieldBackground)
+            .background(isDisabled ? Color.gray.opacity(0.2) : Color.adaptiveFieldBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
+        .disabled(isDisabled)
         .sheet(isPresented: $showingPicker) {
             CountryPicker(selectedCountry: $selectedCountry, countries: countries, stationCount: stationCount, onSelect: { country in
                 onSelect?(country)

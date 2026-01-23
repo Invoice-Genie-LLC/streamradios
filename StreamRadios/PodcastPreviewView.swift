@@ -78,7 +78,6 @@ struct PodcastPreviewView: View {
                 Button("Cancel") {
                     isPresented = false
                 }
-                .foregroundColor(.accentColor)
             )
         }
         .onAppear {

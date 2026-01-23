@@ -854,7 +854,7 @@ struct PodcastPlayerSheetView: View {
                             // Downloaded state - filled icon
                             Image(systemName: "arrow.down.circle.fill")
                                 .font(.system(size: 24))
-                                .foregroundColor(.blue)
+                                
                         } else if isDownloading {
                             // Downloading state - circular progress with percentage
                             ZStack {
@@ -875,11 +875,11 @@ struct PodcastPlayerSheetView: View {
                                 if downloadProgress > 0.05 { // Show percentage after 5% to avoid cramped text
                                     Text("\(Int(downloadProgress * 100))%")
                                         .font(.caption2)
-                                        .foregroundColor(.blue)
+                                        
                                 } else {
                                     Image(systemName: "arrow.down")
                                         .font(.caption2)
-                                        .foregroundColor(.blue)
+                                        
                                 }
                             }
                         } else {
@@ -1258,7 +1258,7 @@ struct PodcastPlayerSheetView: View {
                 if podcastPlayer.currentEpisode?.id == episode.id {
                     Text("Current: \(formatTime(podcastPlayer.currentTime))")
                         .font(.caption)
-                        .foregroundColor(.blue)
+                        
                 }
             }
             
@@ -1602,7 +1602,7 @@ struct SleepTimerSheet: View {
                                 HStack {
                                     Text("Custom...")
                                         .font(.body)
-                                        .foregroundColor(.blue)
+                                        
                                     Spacer()
                                 }
                                 .padding(.horizontal, 20)
@@ -1664,7 +1664,7 @@ struct SleepTimerSheet: View {
                                     Spacer()
                                     if case .endOfEpisode = sleepTimerMode {
                                         Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.blue)
+                                            
                                             .font(.title3)
                                     }
                                 }

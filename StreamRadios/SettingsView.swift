@@ -427,7 +427,7 @@ struct RestorePurchasesButton: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.blue.opacity(0.1))
             )
-            .foregroundColor(.blue)
+            
         }
         .disabled(isLoading)
         .alert("Restore Purchases", isPresented: $showingAlert) {
@@ -493,7 +493,7 @@ extension SettingsView {
                      HStack(spacing: 8) {
                          Image(systemName: "eye.slash.fill")
                              .font(.headline)
-                             .foregroundColor(.blue)
+                             
                              .frame(width: 20)
                          
                          Text("Hidden Countries")
@@ -530,7 +530,7 @@ extension SettingsView {
                     HStack(spacing: 8) {
                         Image(systemName: "alarm.fill")
                             .font(.headline)
-                            .foregroundColor(.blue)
+                            
                             .frame(width: 20)
                         
                         Text("Configure Alarms")
@@ -572,7 +572,7 @@ extension SettingsView {
                     HStack(spacing: 8) {
                         Image(systemName: "externaldrive.fill")
                             .font(.headline)
-                            .foregroundColor(.blue)
+                            
                             .frame(width: 20)
                         
                         Text("Manage App Data")
@@ -605,7 +605,7 @@ extension SettingsView {
                 HStack(spacing: 8) {
                     Image(systemName: "antenna.radiowaves.left.and.right")
                         .font(.headline)
-                        .foregroundColor(.blue)
+                        
                         .frame(width: 20)
                     
                     Text("Submit radio station or podcast")
@@ -639,7 +639,7 @@ extension SettingsView {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle.fill")
                         .font(.headline)
-                        .foregroundColor(.blue)
+                        
                         .frame(width: 20)
                     
                     Text("About StreamRadios")
@@ -745,7 +745,7 @@ extension SettingsView {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Image(systemName: "lock.shield")
-                            .foregroundColor(.blue)
+                            
                             .font(.caption)
                         Text("Privacy Notice")
                             .font(.caption)
@@ -1999,7 +1999,7 @@ struct ToggleRow: View {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                     .frame(width: 20)
                 
                 Text(title)
@@ -2035,7 +2035,7 @@ struct ActionButton: View {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
                         .font(.headline)
-                        .foregroundColor(.blue)
+                        
                         .frame(width: 20)
                     
                     Text(title)
@@ -2390,7 +2390,7 @@ struct InternalDataManagementView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "globe")
                                 .font(.body)
-                                .foregroundColor(.blue)
+                                
                                 .frame(width: 20)
                             
                             Text("Country Selection")
@@ -2431,7 +2431,7 @@ struct InternalDataManagementView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.body)
-                                .foregroundColor(.blue)
+                                
                                 .frame(width: 20)
                             
                             Text("Export Country Stations")
@@ -3664,7 +3664,7 @@ struct ModernActionButton: View {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.title2)
-                    .foregroundColor(.blue)
+                    
                     .frame(width: 32, height: 32)
                 
                 VStack(alignment: .leading, spacing: 2) {

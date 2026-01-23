@@ -75,6 +75,9 @@ struct RadioStationListView: View {
     // Country picker sheet state
     @State private var showingCountryPicker = false
     
+    // Network status for disabling country picker when offline
+    @State private var isOffline = false
+    
     // Search container state
     @Binding var isSearchPresented: Bool
     
@@ -111,6 +114,8 @@ struct RadioStationListView: View {
             setup()
             // Removed playFavoriteStation() - automatic playback should be controlled by Auto-Play Last Station setting
             loadHiddenCountries()
+            // Check network status
+            isOffline = !ReachabilityCheck.isConnectedToNetwork()
         }
         .onDisappear(perform: cleanup)
         .onChange(of: viewModel.showAPIUnavailableAlert) { showAlert in
@@ -185,7 +190,14 @@ struct RadioStationListView: View {
                                 isEditing = false
                             }
                             .font(.body)
-                            .foregroundColor(.blue)
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+                            )
+                            
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
@@ -289,13 +301,8 @@ struct RadioStationListView: View {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 }
-                .foregroundColor(.blue)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(Color.clear)
-                )
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
             } else {
                 HStack(spacing: 8) {
                     // Search toggle button - Shows in all tabs
@@ -418,17 +425,18 @@ struct RadioStationListView: View {
                                 HStack {
                                     Image(systemName: "globe")
                                         .font(.system(size: 16, weight: .medium))
-                                    Text("Choose Different Country")
+                                    Text(isOffline ? "Offline - Country Browser Disabled" : "Choose Different Country")
                                         .font(.system(size: 16, weight: .medium))
                                 }
-                                .foregroundColor(.blue)
+                                .foregroundColor(isOffline ? .gray : .blue)
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 10)
                                 .background(
                                     RoundedRectangle(cornerRadius: 20)
-                                        .stroke(Color.blue, lineWidth: 1)
+                                        .stroke(isOffline ? Color.gray : Color.blue, lineWidth: 1)
                                 )
                             }
+                            .disabled(isOffline)
                         }
                         .padding(.top, 8)
                     }
@@ -452,17 +460,18 @@ struct RadioStationListView: View {
                             showingCountryPicker = true
                         }) {
                             HStack {
-                                Image(systemName: "globe")
-                                Text("Select Country")
+                                Image(systemName: isOffline ? "wifi.slash" : "globe")
+                                Text(isOffline ? "Offline" : "Select Country")
                             }
                             .font(.body)
                             .foregroundColor(.white)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
-                            .background(.blue)
+                            .background(isOffline ? Color.gray : Color.blue)
                             .cornerRadius(8)
         
                         }
+                        .disabled(isOffline)
                     }
                     
                     Spacer()
@@ -491,9 +500,9 @@ struct RadioStationListView: View {
                             showingCountryPicker = true
                         }) {
                             HStack {
-                                Image(systemName: "globe")
+                                Image(systemName: isOffline ? "wifi.slash" : "globe")
                                     .font(.system(size: 16, weight: .medium))
-                                Text("Browse Countries")
+                                Text(isOffline ? "Offline" : "Browse Countries")
                                     .font(.system(size: 16, weight: .medium))
                             }
                             .foregroundColor(.white)
@@ -503,14 +512,15 @@ struct RadioStationListView: View {
                                 RoundedRectangle(cornerRadius: 25)
                                     .fill(
                                         LinearGradient(
-                                            gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                            gradient: Gradient(colors: isOffline ? [Color.gray, Color.gray.opacity(0.8)] : [Color.blue, Color.blue.opacity(0.8)]),
                                             startPoint: .leading,
                                             endPoint: .trailing
                                         )
                                     )
                             )
-                            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                            .shadow(color: isOffline ? Color.gray.opacity(0.3) : Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
                         }
+                        .disabled(isOffline)
                         .padding(.top, 20)
                     }
                     
@@ -784,7 +794,7 @@ struct RadioStationListView: View {
                             // Country text - blue text as per screenshot
                             Text(station.country)
                                 .font(.subheadline)
-                                .foregroundColor(.blue)
+                                
                                 .lineLimit(1)
                             
                             Spacer()

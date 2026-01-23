@@ -107,6 +107,7 @@ struct GlobalPlayerView: View {
                 }
             }
         }
+        .frame(maxWidth: UIDevice.current.userInterfaceIdiom == .pad ? 600 : .infinity)
         .background(
             // Invisible background to block tap-through while allowing button interactions
             Rectangle()
@@ -292,7 +293,7 @@ struct HomeButton: View {
                             )
                             .frame(width: 55, height: 55)
                         
-                        Image(systemName: "line.3.horizontal")
+                        Image(systemName: "house.fill")
                             .font(.system(size: 22, weight: .medium))
                             .foregroundColor(iconColor)
                             .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)

@@ -174,7 +174,7 @@ struct HiddenCountriesSettingsView: View {
                                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                             }
                         }
-                        .foregroundColor(.blue)
+                        
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(

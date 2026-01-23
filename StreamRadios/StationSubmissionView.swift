@@ -218,7 +218,7 @@ struct ContentSubmissionView: View {
                     Button("Cancel") {
                         dismiss()
                     }
-                    .foregroundColor(.blue)
+                    
                 }
             }
         .sheet(isPresented: $showingTerms) {
@@ -572,7 +572,7 @@ struct ContentSubmissionView: View {
                             showingTerms = true
                             hasOpenedTerms = true
                         }
-                        .foregroundColor(.blue)
+                        
                         .underline()
                         
                         Text(".")

@@ -14,8 +14,14 @@ struct CustomAlertView: View {
     var buttonAction: () -> Void
     var secondaryButtonText: String?
     var secondaryButtonAction: (() -> Void)?
+    var isDestructive: Bool = false
     
     @Environment(\.colorScheme) var colorScheme
+    
+    // Determine if this is a destructive action based on button text
+    private var isDestructiveAction: Bool {
+        isDestructive || buttonText.lowercased().contains("delete") || buttonText.lowercased().contains("remove") || buttonText.lowercased().contains("clear")
+    }
     
     var body: some View {
         VStack {
@@ -36,7 +42,7 @@ struct CustomAlertView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .background(Color.accentColor)
+            .background(isDestructiveAction ? Color.red : Color.accentColor)
             .cornerRadius(10)
             .contentShape(Rectangle())
             .padding([.leading, .trailing], 20)
@@ -46,10 +52,10 @@ struct CustomAlertView: View {
                 Button(action: secondaryButtonAction) {
                     Text(secondaryButtonText)
                         .fontWeight(.medium)
-                        .foregroundColor(.primary)
+                        .foregroundColor(.accentColor)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .background(Color.secondary.opacity(0.1))
+                .background(Color.secondary.opacity(0.2))
                 .cornerRadius(10)
                 .contentShape(Rectangle())
                 .padding([.leading, .trailing], 20)

@@ -84,14 +84,14 @@ struct EditStationView: View {
                     Button("Cancel") {
                         activeSheet = nil
                     }
-                    .foregroundColor(.blue)
+                    
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
                         saveStation()
                     }
-                    .foregroundColor(.blue)
+                    
                 }
             }
         }
@@ -280,7 +280,7 @@ struct SimpleTextField: View {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                 
                 Text(title)
                     .font(.body)
@@ -327,7 +327,7 @@ struct SimpleCountryPicker: View {
             HStack(spacing: 8) {
                 Image(systemName: "flag")
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                 
                 Text(title)
                     .font(.body)

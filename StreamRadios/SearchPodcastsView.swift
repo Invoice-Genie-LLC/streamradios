@@ -68,6 +68,7 @@ struct SearchPodcastsView: View {
                             } else {
                                 // Show popular podcasts section when no search
                                 popularPodcastsSection
+                                    .id("popularPodcasts-\(isSearchPresented)") // Force recreation when search state changes
                             }
                             
                             // Error Message
@@ -108,7 +109,7 @@ struct SearchPodcastsView: View {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                         isPresented = false
                     }
-                    .foregroundColor(.blue)
+                    
                 }
                 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -123,7 +124,7 @@ struct SearchPodcastsView: View {
                                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                                 }
                             }
-                            .foregroundColor(.blue)
+                            
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                             .background(
@@ -155,7 +156,7 @@ struct SearchPodcastsView: View {
                                     newPodcastURL = ""
                                     showingAddPodcast = true
                                 }
-                                .foregroundColor(.blue)
+                                
                             }
                         }
                     }
@@ -364,7 +365,7 @@ struct SearchPodcastsView: View {
                             .font(.headline)
                             .foregroundColor(.adaptiveSecondaryText)
                         
-                        Text("Fetching 300+ podcasts across 20 categories")
+                        Text("Fetching podcasts across 20 categories")
                             .font(.caption)
                             .foregroundColor(.adaptiveSecondaryText.opacity(0.8))
                     }
@@ -425,6 +426,7 @@ struct SearchPodcastsView: View {
                                             // Show preview for the selected podcast
                                             showPreview(for: podcast)
                                         }
+                                        .id("\(podcast.id)-\(podcast.artworkUrl ?? "")")  // Force recreation with unique ID
                                     }
                                 }
                                 .padding(.horizontal, 4)
@@ -657,14 +659,14 @@ struct PopularPodcastItem: View {
     var body: some View {
         VStack(spacing: 8) {
             VStack(spacing: 8) {
-                // Podcast Artwork - Album style with enhanced quality
+                // Podcast Artwork - Album style
                 AsyncImage(url: URL(string: podcast.artworkUrl ?? "")) { phase in
                     switch phase {
                     case .success(let image):
                         image
                             .resizable()
-                            .interpolation(.high) // High quality scaling
-                            .aspectRatio(1.0, contentMode: .fill) // Perfect square aspect ratio
+                            .interpolation(.high)
+                            .aspectRatio(1.0, contentMode: .fill)
                             .clipped()
                     case .failure:
                         Rectangle()
@@ -708,6 +710,7 @@ struct PopularPodcastItem: View {
                             .aspectRatio(1.0, contentMode: .fill)
                     }
                 }
+                .id(podcast.id)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
                 .overlay(

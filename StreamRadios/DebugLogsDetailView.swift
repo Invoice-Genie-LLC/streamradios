@@ -124,7 +124,7 @@ struct DebugLogsDetailView: View {
                     Text("\(String(format: "%.1f MB", getMemoryUsage()))")
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                        .foregroundColor(.blue)
+                        
                 }
             }
             
@@ -304,7 +304,7 @@ struct DebugLogsDetailView: View {
                     // Could expand to show all entries
                 }
                 .font(.subheadline)
-                .foregroundColor(.blue)
+                
                 .padding(.top, 8)
             }
         }
@@ -623,7 +623,7 @@ struct LogEntryRowView: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(.blue.opacity(0.2))
-                            .foregroundColor(.blue)
+                            
                             .cornerRadius(4)
                         
                         Text("\(entry.file):\(entry.line)")
@@ -646,7 +646,7 @@ struct LogEntryRowView: View {
                     }
                 } label: {
                     Image(systemName: isExpanded ? "chevron.up.circle" : "chevron.down.circle")
-                        .foregroundColor(.blue)
+                        
                 }
             }
             
@@ -664,7 +664,7 @@ struct LogEntryRowView: View {
                         if let userAction = entry.userAction {
                             Text("User Action: \(userAction)")
                                 .font(.caption)
-                                .foregroundColor(.blue)
+                                
                         }
                         
                         if let errorDomain = entry.errorDomain, let errorCode = entry.errorCode {
@@ -692,7 +692,7 @@ struct LogEntryRowView: View {
                             if entry.stackTrace.count > 3 {
                                 Text("... \(entry.stackTrace.count - 3) more frames")
                                     .font(.caption)
-                                    .foregroundColor(.blue)
+                                    
                             }
                         }
                     }

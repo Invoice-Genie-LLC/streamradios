@@ -1228,7 +1228,7 @@ struct PlaylistPickerView: View {
                                     default:
                                         Image(systemName: "music.note")
                                             .font(.title)
-                                            .foregroundColor(.blue)
+                                            
                                             .frame(width: 60, height: 60)
                                             .background(Color(.systemGray5))
                                             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1312,7 +1312,7 @@ struct PlaylistPickerView: View {
                                     .foregroundColor(.green)
                             } else {
                                 Image(systemName: "plus.circle")
-                                    .foregroundColor(.blue)
+                                    
                             }
                         }
                         .contentShape(Rectangle())

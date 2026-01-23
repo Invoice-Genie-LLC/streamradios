@@ -812,7 +812,7 @@ struct StationPicker: View {
             HStack(spacing: 8) {
                 Image(systemName: "radio")
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                     .frame(width: 20)
                 
                 Text("Selected Station")
@@ -873,7 +873,7 @@ struct TimePicker: View {
             HStack(spacing: 8) {
                 Image(systemName: "clock")
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                     .frame(width: 20)
                 
                 Text("Alert Time")
@@ -908,7 +908,7 @@ struct DaySelector: View {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                     .frame(width: 20)
                 
                 Text("Repeat on these days")
@@ -961,7 +961,7 @@ struct ShowNameField: View {
             HStack(spacing: 8) {
                 Image(systemName: "text.bubble")
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                     .frame(width: 20)
                 
                 Text("Show Name")

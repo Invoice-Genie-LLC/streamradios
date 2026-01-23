@@ -296,7 +296,7 @@ struct SubscriptionView: View {
         VStack(spacing: 24) {
             Image(systemName: "arrow.clockwise.circle.fill")
                 .font(.system(size: 80))
-                .foregroundColor(.blue)
+                
                 .shadow(color: cardShadow, radius: cardShadowRadius)
             
             VStack(spacing: 12) {
@@ -493,7 +493,7 @@ struct SubscriptionView: View {
                         
                         Text("One-time purchase")
                             .font(.subheadline)
-                            .foregroundColor(.blue)
+                            
                     }
                     
                     Spacer()
@@ -502,7 +502,7 @@ struct SubscriptionView: View {
                         Text("$29.99")
                             .font(.title3)
                             .fontWeight(.bold)
-                            .foregroundColor(.blue)
+                            
                         
                         Text("Pay once, use forever")
                             .font(.caption)

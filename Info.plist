@@ -31,7 +31,7 @@
 	<key>CFBundleVersion</key>
 	<string>7</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.0.6</string>
+	<string>3.0.2</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>StreamRadios needs access to your Apple Music library to add Shazam-identified songs to your playlists</string>
 	<key>CFBundleURLTypes</key>

@@ -511,7 +511,6 @@ struct AddPodcastView: View {
                             isPresented = false
                         }
                     }
-                    .foregroundColor(isAddingPodcast ? .gray : .blue)
                     .disabled(isAddingPodcast)
                 }
                 
@@ -519,7 +518,6 @@ struct AddPodcastView: View {
                     Button(actionButtonText) {
                         validateAndSavePodcast()
                     }
-                    .foregroundColor(isAddingPodcast ? .gray : .blue)
                     .disabled(isAddingPodcast)
                 }
             }
@@ -884,7 +882,7 @@ struct PodcastAddingProgressView: View {
                 
                 Image(systemName: "microphone")
                     .font(.largeTitle)
-                    .foregroundColor(.blue)
+                    
             }
             
             // Progress percentage

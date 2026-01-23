@@ -151,7 +151,7 @@ struct PodcastChaptersNotesView: View {
                 if podcastPlayer.currentEpisode?.id == episode.id {
                     Text("Current: \(formatTime(podcastPlayer.currentTime))")
                         .font(.caption)
-                        .foregroundColor(.blue)
+                        
                 }
             }
             
@@ -605,7 +605,7 @@ struct ChapterRowView: View {
                         if isCurrentChapter {
                             Text("Current")
                                 .font(.caption2)
-                                .foregroundColor(.blue)
+                                
                         }
                     }
                     .frame(width: 60, alignment: .leading)
@@ -640,7 +640,7 @@ struct ChapterRowView: View {
                                 Button(action: onLinkTap) {
                                     Image(systemName: "link")
                                         .font(.caption)
-                                        .foregroundColor(.blue)
+                                        
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 .accessibilityLabel("Open chapter link")
@@ -648,7 +648,7 @@ struct ChapterRowView: View {
                             if isCurrentChapter {
                                 Image(systemName: "waveform")
                                     .font(.caption)
-                                    .foregroundColor(.blue)
+                                    
                             }
                         }
                     }
@@ -739,7 +739,7 @@ struct LinkRowView: View {
             HStack(spacing: 12) {
                 Image(systemName: "link")
                     .font(.caption)
-                    .foregroundColor(.blue)
+                    
                     .frame(width: 16)
                 
                 VStack(alignment: .leading, spacing: 2) {
@@ -751,7 +751,7 @@ struct LinkRowView: View {
                     
                     Text(link.url)
                         .font(.caption)
-                        .foregroundColor(.blue)
+                        
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     
@@ -766,7 +766,7 @@ struct LinkRowView: View {
                 
                 Image(systemName: "arrow.up.right")
                     .font(.caption)
-                    .foregroundColor(.blue)
+                    
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
@@ -1136,7 +1136,7 @@ struct FlowTextView: View {
                     }) {
                         Text(component.text)
                             .font(.body)
-                            .foregroundColor(.blue)
+                            
                             .underline()
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -1251,7 +1251,7 @@ struct CodeBlockView: View {
             Button(action: copy) {
                 Image(systemName: "doc.on.doc")
                     .font(.caption)
-                    .foregroundColor(.blue)
+                    
                     .padding(8)
             }
         }

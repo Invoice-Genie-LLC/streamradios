@@ -107,14 +107,12 @@ struct AddStationView: View {
                     Button("Cancel") {
                         presentedSheet = nil
                     }
-                    .foregroundColor(.blue)
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Add") {
                         saveStation()
                     }
-                    .foregroundColor(.blue)
                 }
             }
         }
@@ -369,7 +367,7 @@ struct AddSimpleTextField: View {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                 
                 Text(title)
                     .font(.body)
@@ -418,7 +416,7 @@ struct AddSimpleCountryPicker: View {
             HStack(spacing: 8) {
                 Image(systemName: "flag")
                     .font(.body)
-                    .foregroundColor(.blue)
+                    
                 
                 Text(title)
                     .font(.body)

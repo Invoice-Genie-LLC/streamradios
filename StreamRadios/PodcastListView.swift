@@ -476,7 +476,14 @@ struct PodcastListView: View {
                         refreshID = UUID()
                     }
                     .font(.body)
-                    .foregroundColor(.blue)
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                    
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -896,7 +903,7 @@ struct PodcastListView: View {
                     
                     Image(systemName: "waveform.circle.fill")
                         .font(.system(size: 70))
-                        .foregroundColor(.blue)
+                        
                         .symbolRenderingMode(.hierarchical)
                 }
                 .padding(.bottom, 32)
@@ -953,7 +960,7 @@ struct PodcastListView: View {
                         Text("Add by RSS URL")
                             .font(.system(size: 17, weight: .semibold))
                     }
-                    .foregroundColor(.blue)
+                    
                     .frame(maxWidth: .infinity)
                     .frame(height: 54)
                     .background(Color.blue.opacity(0.1))
@@ -990,7 +997,7 @@ struct PodcastListView: View {
         HStack(alignment: .top, spacing: 16) {
             Image(systemName: icon)
                 .font(.system(size: 24))
-                .foregroundColor(.blue)
+                
                 .frame(width: 40)
             
             VStack(alignment: .leading, spacing: 4) {
@@ -1452,10 +1459,10 @@ struct PodcastRowView: View {
                             }) {
                                 HStack {
                                     Image(systemName: "pause.circle.fill")
-                                        .foregroundColor(.blue)
+                                        
                                     Text("Pause")
                                         .font(.footnote)
-                                        .foregroundColor(.blue)
+                                        
                                 }
                             }
                             .buttonStyle(.plain)
@@ -1472,7 +1479,7 @@ struct PodcastRowView: View {
                                             Image(systemName: "arrow.2.circlepath.circle.fill")
                                                 .resizable()
                                                 .frame(width: buttonSize, height: buttonSize)
-                                                .foregroundColor(.blue)
+                                                
                                                 .rotationEffect(.degrees(360))
                                                 .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
                                         } else {
@@ -2046,7 +2053,7 @@ struct EpisodeRowView: View {
                         Text(Self.dateFormatter.string(from: episode.publicationDate))
                             .font(.caption)
                             .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
-                            .foregroundColor(.blue)
+                            
                             .lineLimit(1)
                             .layoutPriority(2) // Medium priority
                         
@@ -2291,11 +2298,11 @@ struct EpisodeRowView: View {
                         if progress > 0.05 { // Show percentage after 5% to avoid cramped text
                             Text("\(Int(progress * 100))%")
                                 .font(.caption2)
-                                .foregroundColor(.blue)
+                                
                         } else {
                             Image(systemName: "arrow.down")
                                 .font(.caption2)
-                                .foregroundColor(.blue)
+                                
                         }
                     }
                 } else {
@@ -3015,7 +3022,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                             Image(systemName: cachedPlayButtonIcon)
                                 .font(.title2)
                                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-                                .foregroundColor(.blue)
+                                
                                 .opacity(0.6)
                         } else {
                             // FIX: Use real-time EpisodeStateManager for button display
@@ -3089,7 +3096,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     Text(cachedDateString)
                         .font(.caption)
                         .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
-                        .foregroundColor(.blue)
+                        
                         .lineLimit(1)
                         .layoutPriority(2) // Medium priority
                     
@@ -3270,11 +3277,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         if downloadProgress > 0.05 { // Show percentage after 5% to avoid cramped text
                             Text("\(Int(downloadProgress * 100))%")
                                 .font(.caption2)
-                                .foregroundColor(.blue)
+                                
                         } else {
                             Image(systemName: "arrow.down")
                                 .font(.caption2)
-                                .foregroundColor(.blue)
+                                
                         }
                     }
                 } else {
@@ -3494,7 +3501,7 @@ struct PodcastPlayerView: View {
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.title2)
-                        .foregroundColor(.blue)
+                        
                         .padding(8) // Increase tappable area
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -3517,7 +3524,7 @@ struct PodcastPlayerView: View {
                             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                         }
                     }
-                    .foregroundColor(.blue)
+                    
                 } else {
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.3)) {
@@ -3837,7 +3844,7 @@ struct PodcastPlayerView: View {
                                 
                                 Text("Loading more episodes...")
                                     .font(.subheadline)
-                                    .foregroundColor(.blue)
+                                    
                             }
                             .padding(.vertical, 20)
                             .transition(.opacity.combined(with: .scale))
@@ -3847,7 +3854,7 @@ struct PodcastPlayerView: View {
                                 // Animated up arrow
                                 Image(systemName: "arrow.up")
                                     .font(.title2)
-                                    .foregroundColor(.blue)
+                                    
                                     .scaleEffect(endIndicatorScale)
                                     .animation(
                                         .easeInOut(duration: 1.5)
@@ -4500,7 +4507,7 @@ struct PodcastPlayerView: View {
                 let beforeMatch = String(text[..<range.lowerBound])
                 let match = String(text[range])
                 let afterMatch = String(text[range.upperBound...])
-                return Text(beforeMatch) + Text(match).foregroundColor(.blue).bold() + highlightedText(afterMatch, query: query)
+                return Text(beforeMatch) + Text(match).bold() + highlightedText(afterMatch, query: query)
             }
             return Text(text)
         }
@@ -4509,7 +4516,7 @@ struct PodcastPlayerView: View {
         for (index, part) in parts.enumerated() {
             result = result + Text(part)
             if index < parts.count - 1 {
-                result = result + Text(query).foregroundColor(.blue).bold()
+                result = result + Text(query).bold()
             }
         }
         return result

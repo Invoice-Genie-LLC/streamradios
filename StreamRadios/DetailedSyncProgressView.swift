@@ -49,7 +49,7 @@ struct DetailedSyncProgressView: View {
         VStack(spacing: 12) {
             Image(systemName: "icloud.and.arrow.up")
                 .font(.system(size: 50))
-                .foregroundColor(.blue)
+                
             
             Text("CloudKit Synchronization")
                 .font(.title2)
@@ -67,7 +67,7 @@ struct DetailedSyncProgressView: View {
         VStack(spacing: 16) {
             HStack {
                 Image(systemName: "radio")
-                    .foregroundColor(.blue)
+                    
                 Text("Radio Stations")
                     .font(.headline)
                 Spacer()
@@ -84,7 +84,7 @@ struct DetailedSyncProgressView: View {
                     Text("\(Int(syncManager.radioStationsProgress * 100))%")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                        .foregroundColor(.blue)
+                        
                 }
                 
                 ProgressView(value: syncManager.radioStationsProgress)

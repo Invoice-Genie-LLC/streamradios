@@ -140,6 +140,9 @@ struct ContentView: View {
     @State private var isFooterMenuHidden = false // Start with menu visible
     @State private var isScrolling = false
     @State private var homeButtonExplicitlyShowingTabView = false // Track when home button forces TabView visible
+    
+    // Network status for disabling country picker when offline
+    @State private var isOffline = false
 
     init() {
         // Always start on radio tab - player loading is independent of tab selection
@@ -174,9 +177,9 @@ struct ContentView: View {
         ]
         
         // Configure selected state
-        appearance.stackedLayoutAppearance.selected.iconColor = UIColor.systemBlue
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor.secondaryLabel
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
-            .foregroundColor: UIColor.systemBlue,
+            .foregroundColor: UIColor.secondaryLabel,
             .font: UIFont.preferredFont(forTextStyle: .caption2)
         ]
         
@@ -330,7 +333,6 @@ struct ContentView: View {
         }
         .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
         .environment(\.horizontalSizeClass, .compact)
-        .accentColor(.blue)
         // CONSISTENT SPACING FIX: Adjust TabView position to maintain visual consistency
         // When footer menu is hidden (scrolling), move TabView up to compensate for fixed player spacing
         .offset(y: shouldHideFooterMenu ? -10 : 0)
@@ -352,6 +354,9 @@ struct ContentView: View {
             setupTabView()
             checkAndStartDataSync()
             checkSubscriptionStatus()
+            
+            // Check network status for country picker
+            isOffline = !ReachabilityCheck.isConnectedToNetwork()
             
             // SAFETY: Ensure TabView is visible on app appear
             ensureTabViewIsVisible()
@@ -438,7 +443,9 @@ struct ContentView: View {
         // Removed tab state persistence - app always starts on radio tab
         .overlay(alignment: .bottom) {
             // Global Player positioned above tab bar, never covering it
-            if shouldShowGlobalPlayer {
+            // Hide during search unless something is actively playing
+            let isActivelyPlaying = radioPlayer.isPlaying || podcastPlayer.isPlaying
+            if shouldShowGlobalPlayer && (!isSearchPresented || isActivelyPlaying) {
                 GlobalPlayerView(
                     selectedPodcast: $selectedPodcast,
                     isPlayerSheetPresented: $isPlayerSheetPresented,
@@ -450,7 +457,11 @@ struct ContentView: View {
                 .environmentObject(viewModel)
                 .environmentObject(podcastPlayer)
                 .environmentObject(podcastViewModel)
-                .padding(.bottom, isFooterMenuHidden ? 15 : 55)
+                .padding(.bottom, {
+                    let baseOffset: CGFloat = isFooterMenuHidden ? 15 : 55
+                    let iPadOffset: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 10 : 0
+                    return baseOffset + iPadOffset
+                }())
                 // Add smooth sliding animation when TabView shows/hides
                 .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
                 // Add subtle scale and opacity animation for enhanced visual feedback
@@ -668,12 +679,12 @@ struct ContentView: View {
                                                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                                             }
                                         }
-                                        .foregroundColor(.blue)
+                                        .foregroundColor(.primary)
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 8)
                                         .background(
                                             Capsule()
-                                                .fill(Color.clear)
+                                                .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
                                         )
                                     } else {
                                         // Toolbar buttons when search is not active
@@ -742,39 +753,42 @@ struct ContentView: View {
                             // Search box for filtering stations - positioned above country picker
                             searchBar
                             
-                            // Country picker - now more prominent
-                            HStack {
-                                CountryPickerButton(
-                                    selectedCountry: $viewModel.selectedCountry,
-                                    countries: viewModel.countries,
-                                    stationCount: { country in
-                                        let stationCount = viewModel.stations.filter { $0.country == country }.count
-                                        
-                                        // Don't show count for countries with manual stations on fresh installs
-                                        // Only show count when both manual and API stations are combined
-                                        let hasManualStations = ManualStationManager.shared.hasManualStations(for: country)
-                                        let hasAPIStations = viewModel.stations.filter { $0.country == country }.count > ManualStationManager.shared.getManualStationCount(for: country)
-                                        
-                                        // Show count only if:
-                                        // 1. Country has no manual stations, OR
-                                        // 2. Country has both manual and API stations
-                                        if !hasManualStations || (hasManualStations && hasAPIStations) {
-                                            return stationCount
-                                        } else {
-                                            return 0 // Hide count for manual-only stations
-                                        }
-                                    },
-                                    onSelect: { [weak viewModel] country in
-                                        // Load stations for selected country (use cache if available)
-                                        Task {
-                                            UIDevice.playHapticFeedback()
-                                            await viewModel?.fetchStationsForSelectedCountry(forceRefresh: false)
-                                            await MainActor.run {
-                                                viewModel?.syncStationsWithCloudKit()
+                            // Country picker - hide when search is active to give more room for results
+                            if !isSearchPresented {
+                                HStack {
+                                    CountryPickerButton(
+                                        selectedCountry: $viewModel.selectedCountry,
+                                        countries: viewModel.countries,
+                                        stationCount: { country in
+                                            let stationCount = viewModel.stations.filter { $0.country == country }.count
+                                            
+                                            // Don't show count for countries with manual stations on fresh installs
+                                            // Only show count when both manual and API stations are combined
+                                            let hasManualStations = ManualStationManager.shared.hasManualStations(for: country)
+                                            let hasAPIStations = viewModel.stations.filter { $0.country == country }.count > ManualStationManager.shared.getManualStationCount(for: country)
+                                            
+                                            // Show count only if:
+                                            // 1. Country has no manual stations, OR
+                                            // 2. Country has both manual and API stations
+                                            if !hasManualStations || (hasManualStations && hasAPIStations) {
+                                                return stationCount
+                                            } else {
+                                                return 0 // Hide count for manual-only stations
                                             }
-                                        }
-                                    }
-                                )
+                                        },
+                                        onSelect: { [weak viewModel] country in
+                                            // Load stations for selected country (use cache if available)
+                                            Task {
+                                                UIDevice.playHapticFeedback()
+                                                await viewModel?.fetchStationsForSelectedCountry(forceRefresh: false)
+                                                await MainActor.run {
+                                                    viewModel?.syncStationsWithCloudKit()
+                                                }
+                                            }
+                                        },
+                                        isDisabled: isOffline
+                                    )
+                                }
                             }
                         }
                         .padding(16)
@@ -783,8 +797,8 @@ struct ContentView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 4)
                         
-                        // Radio syncing indicator - positioned above tabs
-                        if selectedTab == .radio {
+                        // Radio syncing indicator - hide when search is active
+                        if selectedTab == .radio && !isSearchPresented {
                             HStack {
                                 RadioSyncIndicator()
                                 Spacer()
@@ -793,12 +807,14 @@ struct ContentView: View {
                             .padding(.top, -4)
                         }
                         
-                        // Sub-tabs: Recent, Favorites, All - moved below search
-                        elegantTabBar
+                        // Sub-tabs: Recent, Favorites, All - hide when search is active
+                        if !isSearchPresented {
+                            elegantTabBar
+                        }
 
                     }
                     .padding(.top, topPadding)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, isSearchPresented ? 4 : 10)
                     .background(Color.adaptiveBackground)
                     
                     // RadioStationListView now handles its own sub-tabs internally
@@ -892,7 +908,7 @@ struct ContentView: View {
                                 activeSheet = nil
                             }
                             .font(.body)
-                            .foregroundColor(.blue)
+                            
                             .padding(.horizontal, 32)
                             .padding(.vertical, 12)
                             .background(Color.blue.opacity(0.1))
@@ -2027,7 +2043,7 @@ struct UnifiedPodcastPlayerView: View {
                     .tint(.blue)
                 Text("Loading...")
                     .font(.caption2)
-                    .foregroundColor(.blue)
+                    
             case .connecting:
                 ProgressView()
                     .scaleEffect(0.4)
@@ -2423,7 +2439,7 @@ struct UnifiedRadioProgressBanner: View {
                         VStack(spacing: 8) {
                             Image(systemName: "icloud.and.arrow.up")
                                 .font(.system(size: 40))
-                                .foregroundColor(.blue)
+                                
                             
                             Text("CloudKit Sync")
                                 .font(.title2)

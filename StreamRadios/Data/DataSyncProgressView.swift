@@ -20,7 +20,7 @@ struct DataSyncProgressView: View {
                     // App icon or logo (smaller)
                     Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                         .font(.title)
-                        .foregroundColor(.blue)
+                        
                         .rotationEffect(.degrees(animateProgress ? 360 : 0))
                         .animation(
                             Animation.linear(duration: 2.0)
@@ -46,7 +46,7 @@ struct DataSyncProgressView: View {
                         HStack {
                             Image(systemName: "info.circle.fill")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.blue)
+                                
                             
                             Text("Please Wait")
                                 .font(.subheadline)
@@ -269,7 +269,7 @@ struct FeedParsingProgressItem: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .foregroundColor(.blue)
+                    
                     .font(.subheadline)
                     .frame(width: 20)
                 
@@ -428,7 +428,7 @@ struct DetailedSyncStatusItem: View {
                 .foregroundColor(.secondary)
         case .inProgress:
             Image(systemName: "arrow.2.circlepath")
-                .foregroundColor(.blue)
+                
                 .rotationEffect(.degrees(Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 2) * 180))
                 .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: status)
         case .completed:
@@ -506,7 +506,7 @@ struct SyncStatusItem: View {
                 .foregroundColor(.secondary)
         case .inProgress:
             Image(systemName: "arrow.2.circlepath")
-                .foregroundColor(.blue)
+                
                 .rotationEffect(.degrees(Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 2) * 180))
                 .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: status)
         case .completed:

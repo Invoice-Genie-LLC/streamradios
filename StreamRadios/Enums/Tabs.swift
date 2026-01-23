@@ -15,7 +15,7 @@ enum Tab: Int, CaseIterable {
     var title: String {
         switch self {
         case .radio:
-            return "Radio"
+            return "Home"
         case .podcast:
             return "Podcast"
         case .settings:
@@ -26,7 +26,7 @@ enum Tab: Int, CaseIterable {
     var icon: String {
         switch self {
         case .radio:
-            return "radio"
+            return "house.fill"
         case .podcast:
             return "mic.circle"
         case .settings:

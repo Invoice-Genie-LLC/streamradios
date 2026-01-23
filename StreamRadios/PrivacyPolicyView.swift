@@ -112,7 +112,7 @@ struct PrivacyPolicyView: View {
                 Button("Done") {
                     dismiss()
                 }
-                .foregroundColor(.blue)
+                
             }
         }
     }

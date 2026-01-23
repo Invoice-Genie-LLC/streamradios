@@ -171,7 +171,7 @@ struct TermsAndConditionsView: View {
                 Button("Done") {
                     dismiss()
                 }
-                .foregroundColor(.blue)
+                
             }
         }
     }

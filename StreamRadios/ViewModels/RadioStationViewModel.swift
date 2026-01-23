@@ -83,6 +83,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var showAPIUnavailableAlert = false
     private var lastAPIAlertShownTime: Date?
     
+    // Network connectivity status
+    var isOffline: Bool {
+        return !ReachabilityCheck.isConnectedToNetwork()
+    }
+    
     // Track stations currently being processed for favicon updates to prevent duplicates
     private var stationsBeingProcessed: Set<String> = []
     private let processingQueue = DispatchQueue(label: "com.streamradios.favicon", qos: .utility)
