@@ -848,6 +848,94 @@ class RadioStationCloudKitManager: ObservableObject {
     
     // MARK: - CloudKit Change Detection Methods
     
+    /// Removes `streamingRadios` records that only mirror the Radio Browser API.
+    ///
+    /// Older builds uploaded every newly discovered station, so an account can hold thousands of
+    /// records that are freely re-fetchable. Returns the number of records removed.
+    func pruneNonUserOwnedStations(localStations: [RadioStation],
+                                   progressCallback: @escaping (Double, Int, String) -> Void = { _, _, _ in }) async throws -> Int {
+        var customArtworkURLs = Set<String>()
+        for station in localStations where station.iconData != nil || station.iTunesArtworkData != nil {
+            customArtworkURLs.insert(station.url.lowercased())
+        }
+        
+        let query = CKQuery(recordType: RecordType.radioStation, predicate: NSPredicate(value: true))
+        var disposable: [CKRecord.ID] = []
+        var inspected = 0
+        var cursor: CKQueryOperation.Cursor? = nil
+        
+        repeat {
+            let operation = CKQueryOperation(query: query)
+            operation.cursor = cursor
+            operation.resultsLimit = 400
+            // Scalars only. Naming the asset fields here would download every stored icon.
+            operation.desiredKeys = ["url", "isFavorite", "favoritedAt", "favoriteOrder", "lastPlayed"]
+            
+            let (records, nextCursor): ([CKRecord], CKQueryOperation.Cursor?) = try await withCheckedThrowingContinuation { continuation in
+                var fetched: [CKRecord] = []
+                
+                operation.recordMatchedBlock = { _, result in
+                    if case .success(let record) = result {
+                        fetched.append(record)
+                    }
+                }
+                
+                operation.queryResultBlock = { result in
+                    switch result {
+                    case .success(let next):
+                        continuation.resume(returning: (fetched, next))
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+                
+                privateDatabase.add(operation)
+            }
+            
+            for record in records {
+                inspected += 1
+                if Self.recordIsUserOwned(record, customArtworkURLs: customArtworkURLs) { continue }
+                disposable.append(record.recordID)
+            }
+            
+            cursor = nextCursor
+            
+            let reviewed = inspected
+            await MainActor.run {
+                progressCallback(0.0, reviewed, "Reviewing \(reviewed) stations in iCloud...")
+            }
+            
+        } while cursor != nil
+        
+        os_log("📡 🧹 PRUNE Inspected %d records, %d are re-fetchable API stations", log: log, type: .info, inspected, disposable.count)
+        
+        guard !disposable.isEmpty else { return 0 }
+        
+        let total = disposable.count
+        try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: disposable) { progress in
+            Task { @MainActor in
+                progressCallback(progress, Int(progress * Double(total)), "Freeing iCloud storage: removing \(total) stations...")
+            }
+        }
+        
+        return total
+    }
+    
+    /// A record is worth keeping only when it carries something the user cannot get back from the API.
+    private static func recordIsUserOwned(_ record: CKRecord, customArtworkURLs: Set<String>) -> Bool {
+        let recordName = record.recordID.recordName
+        if recordName.hasPrefix("manual_") || recordName.hasPrefix("import_") { return true }
+        
+        if let favorite = record["isFavorite"] as? String, favorite.lowercased() == "true" { return true }
+        if let favorite = record["isFavorite"] as? Int, favorite != 0 { return true }
+        if record["favoritedAt"] != nil || record["favoriteOrder"] != nil { return true }
+        if record["lastPlayed"] != nil { return true }
+        
+        if let url = record["url"] as? String, customArtworkURLs.contains(url.lowercased()) { return true }
+        
+        return false
+    }
+    
     /// Get the count of radio stations in CloudKit with proper pagination
     func getCloudKitStationCount() async throws -> Int {
         let query = CKQuery(recordType: RecordType.radioStation, predicate: NSPredicate(value: true))
@@ -1041,9 +1129,18 @@ class RadioStationCloudKitManager: ObservableObject {
     // MARK: - Public API Methods
     
     /// Save multiple radio stations to CloudKit in batches for improved performance with resumable support
-    func saveRadioStationsBatchToCloudKit(_ stations: [RadioStation], country: String? = nil, progressCallback: @escaping (Double, Int, String) -> Void = { _, _, _ in }) async throws {
+    ///
+    /// Plain Radio Browser results are dropped here: they are re-fetchable from the API, so replicating
+    /// them into the user's private iCloud database only consumes their storage quota. Enforcing the
+    /// policy at this single choke point keeps every caller honest.
+    func saveRadioStationsBatchToCloudKit(_ requestedStations: [RadioStation], country: String? = nil, progressCallback: @escaping (Double, Int, String) -> Void = { _, _, _ in }) async throws {
+        let stations = requestedStations.filter { $0.isUserOwned }
+        
         guard !stations.isEmpty else {
-            os_log("⚠️ RADIO No stations to save in batch", log: log, type: .info)
+            os_log("⚠️ RADIO No user-owned stations to save in batch (%d skipped)", log: log, type: .info, requestedStations.count)
+            await MainActor.run {
+                progressCallback(1.0, 0, "Nothing to sync")
+            }
             return
         }
         

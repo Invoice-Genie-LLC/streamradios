@@ -162,26 +162,34 @@ class BackgroundTaskManager {
     // MARK: - Original Background Task Handling
     
     private func handleAppRefresh(task: BGAppRefreshTask) {
+        // Always queue the next one, otherwise this fires at most once per launch.
+        scheduleAppRefresh()
+        
+        let work = Task { @MainActor in
+            await PodcastViewModel.shared.prefetchNewEpisodesForAllFeeds(minimumInterval: 0)
+        }
+        
         task.expirationHandler = {
+            work.cancel()
             task.setTaskCompleted(success: false)
         }
         
         // Enhanced refresh to include CarPlay artwork if needed
         if CarPlayManager.shared.isCarPlayConnected && RadioPlayer.shared.isPlaying {
             if let metadata = RadioPlayer.shared.metadata, !metadata.isEmpty, RadioPlayer.shared.iTunesAlbumArt == nil {
-                performBackgroundArtworkFetch(metadata: metadata) { success in
-                    task.setTaskCompleted(success: success)
-                }
-                return
+                performBackgroundArtworkFetch(metadata: metadata) { _ in }
             }
         }
         
-        task.setTaskCompleted(success: true)
+        Task {
+            await work.value
+            task.setTaskCompleted(success: true)
+        }
     }
 
     func scheduleAppRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: "com.radio.streamradios.backgroundfetch")
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600) // Schedule after 1 hour
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 900) // Earliest the system will consider: 15 min
         do {
             try BGTaskScheduler.shared.submit(request)
             print("App refresh scheduled.")

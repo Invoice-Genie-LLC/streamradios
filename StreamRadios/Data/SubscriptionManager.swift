@@ -54,7 +54,19 @@ class SubscriptionManager: ObservableObject {
     }
     
     // MARK: - Published Properties
-    @Published var subscriptionStatus: SubscriptionStatus = .unknown
+    @Published var subscriptionStatus: SubscriptionStatus = .unknown {
+        didSet {
+            SubscriptionManager.entitlementSnapshot = (
+                isEntitled: subscriptionStatus.isSubscribed,
+                isResolved: subscriptionStatus != .unknown
+            )
+        }
+    }
+    
+    /// Mirror of `subscriptionStatus` readable from any isolation context. The players and the
+    /// CarPlay scene have to check entitlement from nonisolated callers.
+    nonisolated(unsafe) static var entitlementSnapshot: (isEntitled: Bool, isResolved: Bool) = (false, false)
+
     @Published var products: [Product] = []
     @Published var purchasedSubscriptions: [Product] = []
     // @Published var subscriptionGroupStatus: RenewalState? // Not available in simulation mode

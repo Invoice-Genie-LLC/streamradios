@@ -9,6 +9,7 @@ import SwiftUI
 import AVKit
 import Combine
 import MusicKit
+import StreamRadiosKit
 import WebKit
 
 // MARK: - View Extension for Conditional Modifiers
@@ -75,9 +76,16 @@ public struct LibraryPlaylist: Codable, MusicItem {
     }
 }
 
+private struct ShazamActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
 struct RadioPlayerSheetView: View {
-    @Environment(\.colorScheme) var colorScheme
-    
+    @Environment(\.colorScheme) var colorScheme    
     // Computed properties for adaptive colors
     private var backButtonColor: Color {
         colorScheme == .dark ? .white : .black
@@ -106,7 +114,7 @@ struct RadioPlayerSheetView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
     @StateObject private var permissionManager = PermissionManager()
     @Environment(\.presentationMode) var presentationMode
-    @StateObject private var shazamViewModel = ShazamViewModel()
+    @ObservedObject private var shazamViewModel = ShazamViewModel.shared
     @State private var isShazaming = false
     @State private var pulse = false
     @State private var showingConfirmationDialog = false
@@ -115,6 +123,9 @@ struct RadioPlayerSheetView: View {
     @State private var selectedTab = 0 // 0: Now Playing, 1: Shazam, 2: YouTube
     @State private var activeSheet: ActiveSheetPlayer?
     @State private var showYouTubePlayer = false
+    /// The YouTube embed steals the audio session, so remember whether to hand it back on dismiss.
+    @State private var wasRadioPlayingBeforeYouTube = false
+    @State private var youtubeReturnTab = 1
     @State private var forceTokenRefresh = false
     @State private var debugLog = ""
     @State private var debugMessage = ""
@@ -123,74 +134,208 @@ struct RadioPlayerSheetView: View {
     @State private var sleepTimerEndTime: Date?
     @State private var isFavorite = false
     @State private var timerCheckTimer: Timer?
+    @Namespace private var playerTabNamespace
     
     // UserDefaults keys for timer persistence
     private let timerActiveKey = "RadioSleepTimerActive"
     private let timerEndTimeKey = "RadioSleepTimerEndTime"
     
+    // MARK: - Shazam actions
+
+    private var hasShazamMatch: Bool {
+        guard let title = shazamViewModel.shazamMedia.title else { return false }
+        return !title.isEmpty
+    }
+
+    private var isListeningForMatch: Bool {
+        shazamViewModel.isRecording && !hasShazamMatch
+    }
+
+    private var shazamStatusTitle: String {
+        if hasShazamMatch { return shazamViewModel.shazamMedia.title ?? "" }
+        return isListeningForMatch ? "Listening…" : "No song recognized"
+    }
+
+    private var shazamStatusSubtitle: String {
+        if hasShazamMatch { return shazamViewModel.shazamMedia.artistName ?? "" }
+        guard isListeningForMatch else { return "Tap the artwork to try again" }
+        if let index = radioPlayer.currentStationIndex,
+           let station = viewModel.stations[safe: index] {
+            return "Matching what's playing on \(station.name)"
+        }
+        return "Matching what's playing right now"
+    }
+
+    private func restartShazamListening() {
+        guard !shazamViewModel.isRecording else { return }
+        shazamViewModel.startOrEndListening()
+        isShazaming = true
+    }
+
+    private func shazamActionButton(
+        title: String,
+        systemImage: String,
+        tint: Color,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(.white.opacity(0.18)))
+
+                Text(title)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                    // The Apple Music label is the widest thing on the row; shrink rather than truncate.
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(LinearGradient(colors: [tint, tint.opacity(0.72)],
+                                         startPoint: .topLeading,
+                                         endPoint: .bottomTrailing))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: tint.opacity(isEnabled ? 0.35 : 0), radius: 10, y: 5)
+            .opacity(isEnabled ? 1 : 0.45)
+        }
+        .buttonStyle(ShazamActionButtonStyle())
+        .disabled(!isEnabled)
+    }
+
+    // MARK: - Header
+
+    /// Mirrors the radio home header: a leading capsule button plus a capsule segmented control.
+    private var playerHeader: some View {        HStack(spacing: 10) {
+            Button {
+                if selectedTab == 2 {
+                    exitYouTubeTab()
+                } else {
+                    presentationMode.wrappedValue.dismiss()
+                    if isShazaming {
+                        shazamViewModel.stopListening()
+                        isShazaming = false
+                    }
+                }
+            } label: {
+                Image(systemName: selectedTab == 2 ? "chevron.left" : "chevron.down")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.adaptivePrimaryText)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+            .conditionalGlassEffect(cornerRadius: 20)
+
+            playerTabBar
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(Color.adaptiveBackground)
+    }
+
+    @ViewBuilder
+    private var playerTabBar: some View {
+        if ShazamFeatureSwitch.isHideTapToShazamEnabled {
+            Text("Now Playing")
+                .font(.headline)
+                .foregroundColor(.adaptivePrimaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 4) {
+                playerTabButton("Now Playing", icon: "waveform", tag: 0)
+                playerTabButton("Shazam", icon: "music.mic", tag: 1)
+            }
+            .padding(3)
+            .background(Capsule().fill(Color.adaptiveSectionBackground))
+        }
+    }
+
+    private func playerTabButton(_ title: String, icon: String, tag: Int) -> some View {
+        let isSelected = selectedTab == tag
+
+        return Button {
+            UIDevice.playHapticFeedback()
+            withAnimation(.snappy(duration: 0.28)) { selectedTab = tag }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.semibold))
+                Text(title)
+                    .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? selectedTabForeground : Color.adaptiveSecondaryText)
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(selectedTabFill)
+                        .shadow(color: colorScheme == .dark ? .clear : SRColor.accent.opacity(0.35),
+                                radius: 4, y: 2)
+                        .matchedGeometryEffect(id: "selectedPlayerTab", in: playerTabNamespace)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    /// A solid pill is what makes the selection readable on white; on black the subtle tint already
+    /// reads as active and a solid one is too heavy.
+    private var selectedTabFill: Color {
+        colorScheme == .dark ? Color.blue.opacity(0.15) : SRColor.accent
+    }
+
+    private var selectedTabForeground: Color {
+        colorScheme == .dark ? .blue : .white
+    }
+
+    /// The YouTube tab is a push, not a modal: back returns to whichever tab launched it.
+    private func exitYouTubeTab() {
+        let shouldResumeRadio = wasRadioPlayingBeforeYouTube
+        wasRadioPlayingBeforeYouTube = false
+
+        withAnimation(.easeInOut(duration: 0.3)) {
+            selectedTab = youtubeReturnTab
+        }
+
+        // Dropping the tag while the page transition runs kills the animation.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            showYouTubePlayer = false
+            if shouldResumeRadio {
+                radioPlayer.play()
+            }
+        }
+    }
+
+    private func handleTabChange(_ newValue: Int) {        if newValue == 0 && isShazaming {
+            shazamViewModel.stopListening()
+            isShazaming = false
+        } else if newValue == 1 && !isShazaming {
+            // Recognition reads the station stream directly, so no microphone is involved.
+            shazamViewModel.startOrEndListening()
+            isShazaming = true
+        }
+    }
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Top navigation bar with custom segmented control
-                HStack(spacing: 16) {
-                    // Back button (downward arrow)
-                    Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                        if isShazaming {
-                            shazamViewModel.stopListening()
-                            isShazaming = false
-                        }
-                    }) {
-                        Image(systemName: "chevron.down")
-                            .font(.title2)
-                            .foregroundColor(backButtonColor)
-                            .frame(width: 44, height: 44)
-                    }
-                    
-                    // Simple segmented picker
-                    if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
-                        Picker("", selection: $selectedTab) {
-                            Text("Now Playing").tag(0)
-                            Text("Shazam").tag(1)
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                        .onChange(of: selectedTab) { newValue in
-                            if newValue == 0 && isShazaming {
-                                shazamViewModel.stopListening()
-                                isShazaming = false
-                            } else if newValue == 1 && !isShazaming {
-                                permissionManager.checkMicrophonePermission { granted in
-                                    DispatchQueue.main.async {
-                                        if granted {
-                                            shazamViewModel.startOrEndListening()
-                                            isShazaming = true
-                                        } else {
-                                            self.alertMessage = "Microphone access is required for Shazam. Please go to Settings > Privacy & Security > Microphone and enable access for this app, then try again."
-                                            self.showAlert = true
-                                            selectedTab = 0
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Picker("", selection: $selectedTab) {
-                            Text("Now Playing").tag(0)
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                    }
-                    
-                    // Spacer to balance layout
-                    Spacer()
-                        .frame(width: 44)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(topBarBackgroundColor)
-                )
-                .conditionalGlassEffect(cornerRadius: 24)
+                playerHeader
                 
                 // Swipeable content container
                 TabView(selection: $selectedTab) {
@@ -220,6 +365,9 @@ struct RadioPlayerSheetView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarHidden(true)
+        }
+        .onChange(of: selectedTab) { newValue in
+            handleTabChange(newValue)
         }
         .onAppear {
             startPulsing()
@@ -341,95 +489,50 @@ struct RadioPlayerSheetView: View {
             
             // Song information
             VStack(spacing: 8) {
-                Text(shazamViewModel.shazamMedia.title ?? "Listening...")
+                Text(shazamStatusTitle)
                     .font(.title2)
                     .fontWeight(.semibold)
                     .foregroundColor(.adaptivePrimaryText)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                 
-                Text(shazamViewModel.shazamMedia.artistName ?? "Tap to identify music")
+                Text(shazamStatusSubtitle)
                     .font(.subheadline)
                     .foregroundColor(.adaptiveSecondaryText)
                     .multilineTextAlignment(.center)
-                    .lineLimit(1)
+                    .lineLimit(hasShazamMatch ? 1 : nil)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 20)
+            .animation(.easeInOut(duration: 0.25), value: hasShazamMatch)
             
             // Shazam action buttons (always visible, but disabled until ready)
-            HStack(spacing: 10) {
-                // Apple Music button
-                Button(action: {
-                    if shazamViewModel.shazamMedia.title != nil && !shazamViewModel.shazamMedia.title!.isEmpty {
-                        requestMusicAuthorization()
-                    }
-                }) {
-                    VStack(spacing: 6) {
-                        Image(systemName: "apple.logo")
-                            .font(.title2)
-                            .fontWeight(.medium)
-                        Text("Save to Apple Music")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .multilineTextAlignment(.center)
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                    )
-                    .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
-                    .opacity((shazamViewModel.shazamMedia.title != nil && !shazamViewModel.shazamMedia.title!.isEmpty) ? 1.0 : 0.6)
+            HStack(spacing: 12) {
+                shazamActionButton(
+                    title: "Save to Apple Music",
+                    systemImage: "apple.logo",
+                    tint: .blue,
+                    isEnabled: hasShazamMatch
+                ) {
+                    requestMusicAuthorization()
                 }
-                .disabled(shazamViewModel.shazamMedia.title == nil || shazamViewModel.shazamMedia.title!.isEmpty)
-                
-                // YouTube button
-                Button(action: {
-                    if shazamViewModel.youtubeVideoId != nil {
-                        // Switch to YouTube tab
-                        selectedTab = 2
-                        showYouTubePlayer = true
-                    }
-                }) {
-                    VStack(spacing: 6) {
-                        Image(systemName: "play.rectangle.fill")
-                            .font(.title2)
-                            .fontWeight(.medium)
-                        Text("Play on YouTube")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .multilineTextAlignment(.center)
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.red, Color.red.opacity(0.8)]),
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                    )
-                    .shadow(color: Color.red.opacity(0.3), radius: 8, x: 0, y: 4)
-                    .opacity(shazamViewModel.youtubeVideoId == nil ? 0.6 : 1.0)
+
+                shazamActionButton(
+                    title: "Play on YouTube",
+                    systemImage: "play.rectangle.fill",
+                    tint: .red,
+                    isEnabled: shazamViewModel.youtubeVideoId != nil
+                ) {
+                    wasRadioPlayingBeforeYouTube = radioPlayer.isPlaying
+                    youtubeReturnTab = selectedTab
+                    selectedTab = 2
+                    showYouTubePlayer = true
                 }
-                .disabled(shazamViewModel.youtubeVideoId == nil)
             }
             .padding(.horizontal, 20)
             
             // Shazam disclaimer
-            Text("Note: Depending on your country and language settings, Shazam may not always discover the correct song.")
+            Text("Results can vary by country and language.")
                 .font(.caption)
                 .foregroundColor(.adaptiveSecondaryText.opacity(0.7))
                 .multilineTextAlignment(.leading)
@@ -454,7 +557,7 @@ struct RadioPlayerSheetView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color(white: 0.15).opacity(0.7))
+                    .background(Color(white: 0.15))
                     .cornerRadius(4)
                     .padding(.trailing, 20)
                     .padding(.top, 8)
@@ -502,7 +605,9 @@ struct RadioPlayerSheetView: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.adaptivePrimaryText)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    // Without fixedSize the surrounding Spacers squeeze this down to a single
+                    // truncated line instead of letting it wrap.
+                    .fixedSize(horizontal: false, vertical: true)
                 
                 Text(shazamViewModel.shazamMedia.artistName ?? "Unknown")
                     .font(.subheadline)
@@ -595,7 +700,7 @@ struct RadioPlayerSheetView: View {
             // Disclaimer
             HStack(spacing: 8) {
                 
-                Text("Note: Depending on your country and language settings, the YouTube player may not always display the correct song.")
+                Text("Results can vary by country and language.")
                     .font(.caption)
                     .foregroundColor(.adaptiveSecondaryText.opacity(0.7))
                     .multilineTextAlignment(.leading)
@@ -779,15 +884,15 @@ struct RadioPlayerSheetView: View {
     
     // MARK: - Bottom Menu
     private var bottomMenuView: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             // AirPlay button
-            VStack(spacing: 4) {
-                AirPlayButtonView()
-                    .frame(width: 44, height: 24)
-                    .tint(.adaptivePrimaryText)
-                Text("AirPlay")
-                    .font(.caption)
-                    .foregroundColor(.adaptiveSecondaryText)
+            VStack(spacing: 6) {
+                menuIcon(isActive: false) {
+                    AirPlayButtonView()
+                        .frame(width: 28, height: 24)
+                        .tint(.adaptivePrimaryText)
+                }
+                menuLabel("AirPlay", isActive: false)
             }
             .frame(maxWidth: .infinity)
             
@@ -795,13 +900,13 @@ struct RadioPlayerSheetView: View {
             Button(action: {
                 toggleFavorite()
             }) {
-                VStack(spacing: 4) {
-                    Image(systemName: isFavorite ? "heart.fill" : "heart")
-                        .font(.system(size: 24))
-                        .foregroundColor(isFavorite ? .red : .adaptivePrimaryText)
-                    Text(isFavorite ? "Favorited" : "Favorite")
-                        .font(.caption)
-                        .foregroundColor(.adaptiveSecondaryText)
+                VStack(spacing: 6) {
+                    menuIcon(isActive: isFavorite, tint: .red) {
+                        Image(systemName: isFavorite ? "heart.fill" : "heart")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(isFavorite ? .red : .adaptivePrimaryText)
+                    }
+                    menuLabel(isFavorite ? "Favorited" : "Favorite", isActive: isFavorite, tint: .red)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -810,19 +915,40 @@ struct RadioPlayerSheetView: View {
             Button(action: {
                 showSleepTimer = true
             }) {
-                VStack(spacing: 4) {
-                    Image(systemName: sleepTimerActive ? "moon.fill" : "moon")
-                        .font(.system(size: 24))
-                        .foregroundColor(sleepTimerActive ? .blue : .adaptivePrimaryText)
-                    Text(sleepTimerActive ? "Timer On" : "Timer")
-                        .font(.caption)
-                        .foregroundColor(.adaptiveSecondaryText)
+                VStack(spacing: 6) {
+                    menuIcon(isActive: sleepTimerActive) {
+                        Image(systemName: sleepTimerActive ? "moon.fill" : "moon")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(sleepTimerActive ? .blue : .adaptivePrimaryText)
+                    }
+                    menuLabel(sleepTimerActive ? "Timer On" : "Timer", isActive: sleepTimerActive)
                 }
             }
             .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 14)
+    }
+    
+    private func menuIcon<Content: View>(
+        isActive: Bool,
+        tint: Color = .blue,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(width: 40, height: 40)
+            .background(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(isActive ? tint.opacity(0.16) : Color.adaptiveFieldBackground)
+            )
+    }
+    
+    private func menuLabel(_ title: String, isActive: Bool, tint: Color = .blue) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundColor(isActive ? tint : .adaptiveSecondaryText)
     }
     
     private var hasChapters: Bool {
@@ -882,7 +1008,7 @@ struct RadioPlayerSheetView: View {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(
                             LinearGradient(
-                                gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.4)]),
+                                gradient: Gradient(colors: [Color.blue.opacity(0.9), Color.purple.opacity(0.75)]),
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -892,7 +1018,7 @@ struct RadioPlayerSheetView: View {
                         .overlay(
                             Image(systemName: "radio")
                                 .font(.largeTitle)
-                                .foregroundColor(.white.opacity(0.8))
+                                .foregroundColor(.white.opacity(0.9))
                         )
                     Spacer()
                 }
@@ -906,61 +1032,88 @@ struct RadioPlayerSheetView: View {
         GeometryReader { geometry in
             let artworkSize = min(geometry.size.width * 0.65, 240)
             
-            if let url = shazamViewModel.shazamMedia.albumArtURL {
-                HStack {
-                    Spacer()
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: artworkSize, height: artworkSize)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                        default:
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: artworkSize, height: artworkSize)
-                                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                                .overlay(
-                                    Image(systemName: "music.note")
-                                        .font(.largeTitle)
-                                        .foregroundColor(.white.opacity(0.8))
+            HStack {
+                Spacer()
+                Group {
+                    if let url = shazamViewModel.shazamMedia.albumArtURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                            default:
+                                ShazamListeningIndicator(size: artworkSize, isListening: isListeningForMatch)
+                            }
+                        }
+                    } else {
+                        ShazamListeningIndicator(size: artworkSize, isListening: isListeningForMatch)
+                    }
+                }
+                .frame(width: artworkSize, height: artworkSize)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                .scaleEffect(isListeningForMatch ? 1.0 : 0.98)
+                .animation(.spring(response: 0.45, dampingFraction: 0.7), value: isListeningForMatch)
+                .contentShape(RoundedRectangle(cornerRadius: 16))
+                .onTapGesture { restartShazamListening() }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+    
+    /// Expanding rings plus a bouncing equaliser, so the wait for a match reads as active listening.
+    private struct ShazamListeningIndicator: View {
+        let size: CGFloat
+        let isListening: Bool
+        @State private var animate = false
+        
+        private let peaks: [CGFloat] = [0.30, 0.52, 0.40, 0.60, 0.34]
+        
+        var body: some View {
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.purple.opacity(0.9), Color.blue.opacity(0.75)]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                
+                if isListening {
+                    ForEach(0..<3, id: \.self) { ring in
+                        Circle()
+                            .stroke(Color.white.opacity(0.4), lineWidth: 2)
+                            .frame(width: size * 0.3, height: size * 0.3)
+                            .scaleEffect(animate ? 2.3 : 0.7)
+                            .opacity(animate ? 0 : 0.7)
+                            .animation(
+                                .easeOut(duration: 2.4)
+                                .repeatForever(autoreverses: false)
+                                .delay(Double(ring) * 0.8),
+                                value: animate
+                            )
+                    }
+                    
+                    HStack(spacing: size * 0.035) {
+                        ForEach(Array(peaks.enumerated()), id: \.offset) { index, peak in
+                            Capsule()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: size * 0.03, height: animate ? size * peak : size * 0.08)
+                                .animation(
+                                    .easeInOut(duration: 0.42 + Double(index) * 0.07)
+                                    .repeatForever(autoreverses: true),
+                                    value: animate
                                 )
                         }
                     }
-                    Spacer()
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.largeTitle)
+                        .foregroundColor(.white.opacity(0.9))
                 }
-                .frame(maxWidth: .infinity)
-            } else {
-                HStack {
-                    Spacer()
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: artworkSize, height: artworkSize)
-                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                        .overlay(
-                            Image(systemName: "music.note")
-                                .font(.largeTitle)
-                                .foregroundColor(.white.opacity(0.8))
-                        )
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
             }
+            .onAppear { animate = isListening }
+            .onChange(of: isListening) { _, listening in animate = listening }
         }
     }
     

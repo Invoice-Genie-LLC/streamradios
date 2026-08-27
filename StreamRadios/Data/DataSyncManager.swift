@@ -52,6 +52,8 @@ class DataSyncManager: ObservableObject {
     @Published var overallProgress: Double = 0.0
     @Published var currentOperation = ""
     @Published var isFreshInstallUIReady = false
+
+    private var highestOverallProgress: Double = 0.0
     
     // Radio Stations
     @Published var radioStationsStatus: DataSyncStatus = .none
@@ -75,6 +77,11 @@ class DataSyncManager: ObservableObject {
     @Published var podcastFeedsOperation = ""
     @Published var podcastFeedsCurrentCount = 0
     @Published var podcastFeedsTotalCount = 0
+
+    /// Owns the auto-dismiss of the podcast feed banner. The banner view installs its own
+    /// `.onChange` observer, but it only exists while the banner is visible, so a short
+    /// operation can go straight to `.completed` without any observer ever seeing a change.
+    private var podcastFeedsDismissTask: Task<Void, Never>?
     
     // Cross-Device Feed Sync (when feeds exist on CloudKit but not locally)
     @Published var crossDeviceFeedSyncStatus: DataSyncStatus = .none
@@ -352,6 +359,42 @@ class DataSyncManager: ObservableObject {
         }
     }
     
+    /// Shows the podcast feed banner for a new operation and cancels any pending dismissal.
+    @MainActor
+    func beginPodcastFeedsSync(totalCount: Int, operation: String) {
+        podcastFeedsDismissTask?.cancel()
+        podcastFeedsDismissTask = nil
+
+        podcastFeedsStatus = .inProgress
+        podcastFeedsOperation = operation
+        podcastFeedsProgress = 0.0
+        podcastFeedsCurrentCount = 0
+        podcastFeedsTotalCount = totalCount
+    }
+
+    /// Marks the podcast feed banner complete and clears it after a brief display.
+    /// The reset happens here rather than in the banner view so it runs even when no
+    /// view was alive to observe the `.completed` transition.
+    @MainActor
+    func completePodcastFeedsSync(operation: String, displayDuration: TimeInterval = 2.0) {
+        podcastFeedsStatus = .completed
+        podcastFeedsOperation = operation
+        podcastFeedsProgress = 1.0
+
+        podcastFeedsDismissTask?.cancel()
+        podcastFeedsDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(displayDuration * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            guard self.podcastFeedsStatus == .completed else { return }
+
+            self.podcastFeedsStatus = .none
+            self.podcastFeedsProgress = 0.0
+            self.podcastFeedsOperation = ""
+            self.podcastFeedsCurrentCount = 0
+            self.podcastFeedsTotalCount = 0
+        }
+    }
+
     @MainActor
     private func syncPodcastFeeds() async {
         // Check how many feeds we expect to sync FIRST
@@ -569,44 +612,24 @@ class DataSyncManager: ObservableObject {
     @MainActor
     private func syncUserPreferences() async {
         userPreferencesStatus = .inProgress
-        userPreferencesOperation = "Loading user preferences..."
-        
-        do {
-            // Simulate loading preferences
-            for progress in stride(from: 0.0, through: 1.0, by: 0.33) {
-                userPreferencesProgress = progress
-                
-                switch progress {
-                case 0.33:
-                    userPreferencesOperation = "Loading app settings..."
-                case 0.66:
-                    userPreferencesOperation = "Configuring notifications..."
-                case 1.0:
-                    userPreferencesOperation = "✅ Preferences loaded"
-                default:
-                    break
-                }
-                
-                if progress < 1.0 {
-                    try await Task.sleep(nanoseconds: 400_000_000) // 0.4 seconds
-                }
-            }
-            
-            userPreferencesStatus = .completed
-            userPreferencesProgress = 1.0
-            userPreferencesOperation = "✅ User preferences completed"
-            print("✅ User preferences sync completed")
-            
-        } catch {
-            userPreferencesStatus = .failed
-            userPreferencesOperation = "❌ Failed to load preferences"
-            print("❌ User preferences sync failed: \(error)")
+        userPreferencesProgress = 0.3
+        userPreferencesOperation = "Restoring your settings..."
+
+        if let restored = RadioStationViewModel.shared.restoreSelectedCountryAfterSync() {
+            userPreferencesOperation = "✅ Restored \(restored)"
+        } else {
+            userPreferencesOperation = "✅ Preferences loaded"
         }
+
+        userPreferencesProgress = 1.0
+        userPreferencesStatus = .completed
+        print("✅ User preferences sync completed")
     }
     
     // MARK: - Helper Methods
     
     private func resetProgress() {
+        highestOverallProgress = 0.0
         overallProgress = 0.0
         currentOperation = "Initializing sync..."
         
@@ -1112,9 +1135,14 @@ class DataSyncManager: ObservableObject {
             ),
             $userPreferencesProgress
         )
-        .map { first, preference in
+        .map { [weak self] first, preference in
             let (radio, podcast, artwork, episode) = first
-            return (radio + podcast + artwork + episode + preference) / 5.0
+            let raw = min(1.0, (radio + podcast + artwork + episode + preference) / 5.0)
+            guard let self else { return raw }
+            // Stages restart at 0 when they re-enter (artwork tracking, feed re-phasing), which
+            // would visibly rewind the bar by up to 20%. Only ever move forward.
+            self.highestOverallProgress = max(self.highestOverallProgress, raw)
+            return self.highestOverallProgress
         }
         .assign(to: \.overallProgress, on: self)
         .store(in: &cancellables)
@@ -1244,6 +1272,9 @@ class DataSyncManager: ObservableObject {
         
         // CRITICAL: Ensure radio station caches are created for all countries before completion
         await ensureStationSnapshotsAreCreated(RadioStationViewModel.shared)
+
+        // Re-run in case the CloudKit merge landed after the preferences step; it no-ops once set.
+        await MainActor.run { RadioStationViewModel.shared.restoreSelectedCountryAfterSync() }
         
         // IMMEDIATE: Trigger PodcastViewModel UI refresh as soon as sync completes
         print("🚀 IMMEDIATE: Triggering UI refresh for fresh install completion")
@@ -1863,7 +1894,7 @@ class DataSyncManager: ObservableObject {
             DataStore.shared.fetchRadioStations { stations, error in
                 if let stations = stations {
                     DispatchQueue.main.async {
-                        viewModel.stations = stations
+                        viewModel.mergeStationsFromCloudKit(stations)
                         viewModel.saveStationsToCoreData()
                         print("✅ Synced \(stations.count) radio stations")
                         
@@ -1900,7 +1931,7 @@ class DataSyncManager: ObservableObject {
                 completion: { [weak self] stations, error in
                     if let stations = stations {
                         DispatchQueue.main.async {
-                            viewModel.stations = stations
+                            viewModel.mergeStationsFromCloudKit(stations)
                             viewModel.saveStationsToCoreData()
                             
                             // Update final counts

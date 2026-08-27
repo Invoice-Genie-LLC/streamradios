@@ -143,6 +143,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Stream URLs the user un-favourited locally, with when it happened. CloudKit is treated as the
+    /// source of truth for favourites, so without this a stale server record re-favourites the
+    /// station on the next sync.
+    private let unfavoritedStationURLsKey = "UnfavoritedStationURLs"
+    private var unfavoritedStationURLs: [String: Date] {
+        get { UserDefaults.standard.dictionary(forKey: unfavoritedStationURLsKey) as? [String: Date] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: unfavoritedStationURLsKey) }
+    }
+    
     var currentlyPlayingStation: RadioStation? {
             guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
                   stations.indices.contains(currentStationIndex) else {
@@ -160,6 +169,46 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     private func saveSelectedCountry() {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
+        // Mirrored to iCloud because UserDefaults doesn't survive a reinstall.
+        if selectedCountry != "Select Country" {
+            NSUbiquitousKeyValueStore.default.set(selectedCountry, forKey: "selectedCountry")
+        }
+    }
+
+    /// A fresh install has no `selectedCountry`, so the list renders empty even though the synced
+    /// stations are already in memory. Restores the iCloud-backed choice, or the largest country.
+    @MainActor
+    @discardableResult
+    func restoreSelectedCountryAfterSync() -> String? {
+        guard selectedCountry == "Select Country" else { return nil }
+
+        let hiddenData = UserDefaults.standard.data(forKey: "hiddenCountries") ?? Data()
+        let hidden = (try? JSONDecoder().decode(Set<String>.self, from: hiddenData)) ?? Set<String>()
+
+        var counts: [String: Int] = [:]
+        for station in stations {
+            let country = station.country
+            guard !country.isEmpty,
+                  country != "Unknown Region",
+                  country != "Select Country",
+                  !hidden.contains(country) else { continue }
+            counts[country, default: 0] += 1
+        }
+        guard !counts.isEmpty else { return nil }
+
+        let restored: String
+        if let stored = NSUbiquitousKeyValueStore.default.string(forKey: "selectedCountry"),
+           counts[stored] != nil {
+            restored = stored
+        } else {
+            restored = counts.sorted {
+                $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
+            }[0].key
+        }
+
+        print("🌍 RESTORE: Selecting '\(restored)' after sync (\(counts[restored] ?? 0) stations)")
+        selectedCountry = restored
+        return restored
     }
     
 
@@ -217,6 +266,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // CROSS-COUNTRY CONTAMINATION PREVENTION: Run cleanup after migration
                 await checkAndPerformContaminationCleanupIfNeeded()
+                
+                await pruneNonUserOwnedCloudKitStationsIfNeeded()
             }
             
             let userDefaults = UserDefaults.standard
@@ -373,7 +424,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         if let index = stations.firstIndex(where: { $0.id == stationId }) {
             let stationName = stations[index].name
             stations.remove(at: index)
-            saveStationsToCoreData()
+            removeStationFromCoreDataLocally(id: stationId)
             
             print("📡 Applied instant radio station removal sync: \(stationName)")
         }
@@ -426,7 +477,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             DispatchQueue.main.async {
                 self.stations.remove(at: index)
-                self.saveStationsToCoreData()
+                self.removeStationFromCoreDataLocally(id: stationId)
                 
                 print("📡 ☁️ CLOUDKIT STATION DELETE: ✅ Removed station from CloudKit deletion: \(stationName)")
             }
@@ -465,7 +516,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             DispatchQueue.main.async {
                 self.stations.remove(at: index)
-                self.saveStationsToCoreData()
+                self.removeStationFromCoreDataLocally(id: stationId)
                 
                 print("📡 🔔 INSTANT STATION DELETE: ✅ Applied real-time deletion: \(stationName)")
             }
@@ -580,7 +631,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
         do {
             // Get the count of stations in CloudKit
             let cloudKitStationCount = try await RadioStationCloudKitManager.shared.getCloudKitStationCount()
-            let localStationCount = stations.count
+            // Compare like with like: CloudKit holds user-owned stations only, while the local list
+            // also contains thousands of re-fetchable Radio Browser results that are never uploaded.
+            let localStationCount = stations.filter { $0.isUserOwned }.count
             
             // Check if there are more stations in CloudKit than locally (new stations added on other devices)
             if cloudKitStationCount > localStationCount {
@@ -663,7 +716,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 let minimumSyncInterval: TimeInterval = 300 // 5 minutes
                 
                 if timeSinceLastSync > minimumSyncInterval {
-                    let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations)
+                    let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations.filter { $0.isUserOwned })
                     
                     if hasModifications {
                         
@@ -694,6 +747,54 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Mark that we've completed a sync check and clear any expectation flags
         UserDefaults.standard.set(Date(), forKey: "LastSyncCheckTime")
         UserDefaults.standard.set(false, forKey: "ExpectingCloudKitChanges")
+    }
+    
+    /// One-time cleanup of `streamingRadios` records that older builds uploaded for every API station.
+    ///
+    /// Deferred well past launch: it is pure housekeeping and must never compete with playback or
+    /// the first paint. Only records the app can rebuild from Radio Browser are removed.
+    private func pruneNonUserOwnedCloudKitStationsIfNeeded() async {
+        let pruneKey = "CloudKitAPIStationPruneCompleted"
+        guard !UserDefaults.standard.bool(forKey: pruneKey) else { return }
+        guard !isImportInProgress && !isDeletionInProgress else { return }
+        
+        try? await Task.sleep(nanoseconds: 20_000_000_000)
+        
+        let localStations = await MainActor.run { self.stations }
+        
+        let taskID = await UIApplication.shared.beginBackgroundTask(withName: "CloudKitStationPrune")
+        defer {
+            if taskID != .invalid {
+                Task { @MainActor in UIApplication.shared.endBackgroundTask(taskID) }
+            }
+        }
+        
+        do {
+            let removed = try await RadioStationCloudKitManager.shared.pruneNonUserOwnedStations(
+                localStations: localStations
+            ) { progress, count, message in
+                Task { @MainActor in
+                    DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: message)
+                }
+            }
+            
+            UserDefaults.standard.set(true, forKey: pruneKey)
+            print("📡 🧹 PRUNE: Removed \(removed) re-fetchable API stations from iCloud")
+            
+            await MainActor.run {
+                DataSyncManager.shared.radioStationsStatus = .completed
+                DataSyncManager.shared.radioStationsProgress = 1.0
+                DataSyncManager.shared.radioStationsOperation = removed > 0
+                    ? "Freed iCloud storage - removed \(removed) re-downloadable stations"
+                    : "iCloud storage is already optimized"
+            }
+        } catch {
+            // Leave the flag unset so the next launch retries.
+            print("📡 🧹 PRUNE: Failed, will retry on next launch: \(error)")
+            await MainActor.run {
+                DataSyncManager.shared.radioStationsStatus = .completed
+            }
+        }
     }
     
     /// Mark that CloudKit changes are expected and should be checked on next launch
@@ -1061,11 +1162,48 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
         }
+        applyUnfavoriteTombstones(to: &mergedByURL, cloudKitStations: validatedCloudKitStations)
         stations = Array(mergedByURL.values)
         
         // Log recent stations count for verification
         let recentCount = stations.filter { $0.lastPlayed != nil }.count
         let favoriteCount = stations.filter { $0.isFavorite }.count
+    }
+    
+    /// Re-applies local un-favourites that CloudKit hasn't caught up with yet. A tombstone is dropped
+    /// once the server agrees, or when the server holds a *newer* favourite (another device).
+    private func applyUnfavoriteTombstones(to merged: inout [String: RadioStation],
+                                           cloudKitStations: [RadioStation]) {
+        var tombstones = unfavoritedStationURLs
+        guard !tombstones.isEmpty else { return }
+        
+        var cloudKitByURL: [String: RadioStation] = [:]
+        for station in cloudKitStations {
+            guard let key = Self.stationIdentityKey(station.url) else { continue }
+            cloudKitByURL[key] = station
+        }
+        
+        for mapKey in Array(merged.keys) {
+            guard let station = merged[mapKey],
+                  let key = Self.stationIdentityKey(station.url),
+                  let unfavoritedAt = tombstones[key] else { continue }
+            
+            let remote = cloudKitByURL[key]
+            if remote?.isFavorite == false {
+                tombstones.removeValue(forKey: key)
+            } else if let remoteFavoritedAt = remote?.favoritedAt, remoteFavoritedAt > unfavoritedAt {
+                tombstones.removeValue(forKey: key)
+            } else if station.isFavorite {
+                var corrected = station
+                corrected.isFavorite = false
+                corrected.favoritedAt = nil
+                corrected.favoriteOrder = nil
+                merged[mapKey] = corrected
+                print("⭐️ Re-applied local un-favourite for '\(station.name)' over stale CloudKit state")
+            }
+        }
+        
+        unfavoritedStationURLs = tombstones
     }
     
     /// Sync stations from CloudKit with progress tracking for automatic sync
@@ -2210,11 +2348,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Core Data only. The CloudKit sweep is driven by the caller (SettingsView) so it can report
+    /// progress; running it here too meant two concurrent deletions of the same records, which
+    /// doubled the traffic and made every batch fight partial "already deleted" failures.
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
         DispatchQueue.main.async {
             self.isDeletingData = true
             self.deletionComplete = false
-            self.isCloudKitOperationRunning = true
             self.isDeletionInProgress = true
         }
         
@@ -2236,84 +2376,26 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Set up observer for app entering background
         setupBackgroundObserver()
         
-        // First clear Core Data efficiently using batch deletion
         DispatchQueue.main.async {
             self.clearCoreData { coreDataSuccess, coreDataError in
-                if !isTaskCompleted {
-                    if coreDataSuccess {
-                        // Clear in-memory data immediately after successful Core Data deletion
-                        self.stations.removeAll()
-                        self.clearDeletedStationsList()
-                        
-                        // Now handle CloudKit deletion in background
-                        Task {
-                            await self.performCloudKitBatchDeletion(
-                                backgroundTaskID: backgroundTaskID,
-                                completion: completion
-                            ) { completed in
-                                isTaskCompleted = completed
-                            }
-                        }
-                    } else {
-                        isTaskCompleted = true
-                        self.cleanupAfterDeletion(success: false, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
-                    }
+                guard !isTaskCompleted else { return }
+                isTaskCompleted = true
+                
+                if coreDataSuccess {
+                    self.stations.removeAll()
+                    self.clearDeletedStationsList()
                 }
+                
+                self.cleanupAfterDeletion(
+                    success: coreDataSuccess,
+                    error: coreDataError,
+                    backgroundTaskID: backgroundTaskID,
+                    completion: completion
+                )
             }
         }
     }
     
-    /// Perform optimized CloudKit batch deletion with minimal sync notifications
-    private func performCloudKitBatchDeletion(
-        backgroundTaskID: UIBackgroundTaskIdentifier,
-        completion: @escaping (Bool, Error?) -> Void,
-        taskCompletionHandler: @escaping (Bool) -> Void
-    ) async {
-        do {
-            // Fetch all record IDs for 'streamingRadios' from CloudKit
-            let recordIDs = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
-                DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
-                    if let error = error {
-                        continuation.resume(throwing: error)
-                    } else if let recordIDs = recordIDs {
-                        continuation.resume(returning: recordIDs)
-                    } else {
-                        continuation.resume(throwing: NSError(domain: "RadioStationDeletion", code: -1, userInfo: [NSLocalizedDescriptionKey: "No record IDs found"]))
-                    }
-                }
-            }
-            
-            guard !recordIDs.isEmpty else {
-                print("✅ No radio stations found in CloudKit to delete")
-                DispatchQueue.main.async {
-                    taskCompletionHandler(true)
-                    self.cleanupAfterDeletion(success: true, error: nil, backgroundTaskID: backgroundTaskID, completion: completion)
-                }
-                return
-            }
-            
-            // Extract station IDs from record IDs
-            let stationIds = recordIDs.map { $0.recordName }
-            print("🗑️ Starting optimized batch deletion of \(stationIds.count) stations from CloudKit")
-            
-            // **OPTIMIZED**: Use the new batch deletion method that sends only one sync notification
-            try await RadioStationCloudKitManager.shared.deleteRadioStationsBatchFromCloudKit(stationIds)
-            
-            print("✅ Successfully completed batch deletion of \(stationIds.count) stations")
-            DispatchQueue.main.async {
-                taskCompletionHandler(true)
-                self.cleanupAfterDeletion(success: true, error: nil, backgroundTaskID: backgroundTaskID, completion: completion)
-            }
-            
-        } catch {
-            print("❌ CloudKit batch deletion failed: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                taskCompletionHandler(true)
-                self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
-            }
-        }
-    }
-
     private func cleanupAfterDeletion(success: Bool, error: Error?, backgroundTaskID: UIBackgroundTaskIdentifier, completion: @escaping (Bool, Error?) -> Void) {
         DispatchQueue.main.async {
             self.isDeletingData = false
@@ -2556,6 +2638,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             stations[index] = updatedStation
+            
+            if let key = Self.stationIdentityKey(updatedStation.url) {
+                var tombstones = unfavoritedStationURLs
+                if updatedStation.isFavorite { tombstones.removeValue(forKey: key) } else { tombstones[key] = Date() }
+                unfavoritedStationURLs = tombstones
+            }
             
             // Sync favorite changes to CloudKit using the comprehensive sync system
             syncStationToCloudKit(updatedStation, reason: "Favorite status changed")
@@ -3706,119 +3794,26 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
             
-            // Only do CloudKit sync if there are new stations
-            if !uniqueNewStations.isEmpty {
-                await MainActor.run {
-                    loadingPhase = "Saving to local storage"
-                    loadingProgress = 0.9
-                }
-                
-                // Save to CloudKit (using the same method as import for new stations)
-                await MainActor.run {
-                    loadingPhase = "Initiating cloud sync"
-                    loadingProgress = 0.93
-                    
-                    // Update DataSyncManager to show CloudKit save progress
-                    DataSyncManager.shared.radioStationsStatus = .inProgress
-                    DataSyncManager.shared.radioStationsOperation = "Saving \(uniqueNewStations.count) new stations to iCloud.\nWait for iCloud sync to complete before importing other stations."
-                    DataSyncManager.shared.radioStationsProgress = 0.95
-                    DataSyncManager.shared.radioStationsTotalCount = uniqueNewStations.count
-                    DataSyncManager.shared.radioStationsCurrentCount = 0
-                }
-            } else {
-                // Skip CloudKit sync when no new stations
-                await MainActor.run {
-                    loadingPhase = "No new stations to sync"
-                    loadingProgress = 0.93
-                }
+            // Radio Browser results stay local from here on. They are re-fetchable from the API, so
+            // uploading ~500 records per country into the user's private iCloud database burns their
+            // storage quota for nothing. CloudKit now carries user-owned stations only.
+            await MainActor.run {
+                loadingPhase = uniqueNewStations.isEmpty ? "No new stations to sync" : "Saving to local storage"
+                loadingProgress = 0.93
             }
             
-            // Only call CloudKit save if there are new stations
             if !uniqueNewStations.isEmpty {
-                // Check if this is the first time loading API stations for this country
-                let userDefaults = UserDefaults.standard
-                let firstLoadKey = "APIStationsFirstLoad_\(country.name)"
-                let isFirstLoad = !userDefaults.bool(forKey: firstLoadKey)
+                // Manual stations are counted separately; they sync through loadManualStationsForCountry.
+                let apiOnlyNewStations = uniqueNewStations.filter { !$0.id.hasPrefix("manual_") }
                 
-                print("📡 🔍 FIRST LOAD CHECK: Country \(country.name) - First load: \(isFirstLoad)")
-                
-                // ENHANCED FILTERING: Double-check to ensure we only save NEW API stations (not manual stations)
-                let manualStationsFound = uniqueNewStations.filter { $0.id.hasPrefix("manual_") }
-                let apiOnlyNewStations = uniqueNewStations.filter { station in
-                    // Exclude manual stations (they have their own sync process)
-                    let isManual = station.id.hasPrefix("manual_")
-                    if isManual {
-                        print("📻 🚫 DOUBLE-CHECK EXCLUSION: Manual station \(station.name) (ID: \(station.id)) excluded from CloudKit save")
-                    }
-                    return !isManual
-                }
-                
-                if !manualStationsFound.isEmpty {
-                    print("📻 ⚠️ WARNING: Found \(manualStationsFound.count) manual stations in uniqueNewStations that should not be there!")
-                    for manualStation in manualStationsFound {
-                        print("📻 ⚠️ Manual station found: \(manualStation.name) (ID: \(manualStation.id))")
-                    }
-                }
-                
-                if apiOnlyNewStations.isEmpty {
-                    print("📡 ℹ️ No new API stations to save to CloudKit - all new stations were manual stations (\(manualStationsFound.count) manual stations excluded)")
-                    
-                    // Show notification for no new stations case
-                    await MainActor.run {
-                        self.showStationFetchNotification(
-                            country: country,
-                            actualNewStations: 0,
-                            duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
-                            duplicatesSkipped: duplicatesSkipped,
-                            deletedStationsFiltered: deletedStationsFiltered
-                        )
-                    }
-                } else {
-                    // Determine which stations to save based on first load vs subsequent loads
-                    let stationsToSave = apiOnlyNewStations
-                    
-                    // Use unified batch save method for both first and subsequent loads
-                    // CloudKit duplicate checking is now optimized with targeted queries
-                    Task {
-                        do {
-                            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(
-                                stationsToSave,
-                                country: country.name,
-                                progressCallback: { progress, count, message in
-                                    Task { @MainActor in
-                                        DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: message)
-                                    }
-                                }
-                            )
-                            
-                            // Mark first load as complete if applicable
-                            if isFirstLoad {
-                                userDefaults.set(true, forKey: firstLoadKey)
-                                userDefaults.synchronize()
-                            }
-                            
-                            await MainActor.run {
-                                DataSyncManager.shared.radioStationsStatus = .completed
-                                DataSyncManager.shared.radioStationsOperation = "Saved \(stationsToSave.count) stations to iCloud"
-                                DataSyncManager.shared.radioStationsProgress = 1.0
-                                DataSyncManager.shared.radioStationsCurrentCount = stationsToSave.count
-                                
-                                self.showStationFetchNotification(
-                                    country: country,
-                                    actualNewStations: stationsToSave.count,
-                                    duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
-                                    duplicatesSkipped: duplicatesSkipped,
-                                    deletedStationsFiltered: deletedStationsFiltered
-                                )
-                            }
-                        } catch {
-                            print("📡 ❌ CloudKit save failed: \(error)")
-                            await MainActor.run {
-                                DataSyncManager.shared.radioStationsStatus = .failed
-                                DataSyncManager.shared.radioStationsOperation = "Failed to save stations: \(error.localizedDescription)"
-                            }
-                        }
-                    }
+                await MainActor.run {
+                    self.showStationFetchNotification(
+                        country: country,
+                        actualNewStations: apiOnlyNewStations.count,
+                        duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
+                        duplicatesSkipped: duplicatesSkipped,
+                        deletedStationsFiltered: deletedStationsFiltered
+                    )
                 }
             }
             
@@ -4001,7 +3996,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             if !forceRefresh && existingAPIStationsCount > 0 {
                 
                 // Load existing stations from Core Data to display them immediately
-                await self.loadExistingStationsForCountry(selectedCountryName)
+                await self.loadExistingStationsForCountry(selectedCountryName, storeCount: existingAPIStationsCount)
             }
             
             // STEP 3: Always fetch from API to check for new stations (existing ones will be filtered out)
@@ -4050,11 +4045,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Load existing stations for a country from Core Data and display them
     @MainActor
-    private func loadExistingStationsForCountry(_ country: String) async {
+    private func loadExistingStationsForCountry(_ country: String, storeCount: Int) async {
         // Filter and display stations for the selected country from the current in-memory stations
         let countryStations = stations.filter { $0.country == country }
         
-        if countryStations.isEmpty {
+        // `isEmpty` was too weak: a country with manual stations is never empty, so the rows already
+        // in the store were never pulled back into memory and every count derived from `stations`
+        // stayed wrong until the next launch.
+        if countryStations.count < storeCount {
             // If no stations in memory, load from Core Data
             let context = CoreDataStack.shared.persistentContainer.viewContext
             let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
@@ -4128,7 +4126,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Add manual stations to the beginning of the stations array
             // This ensures they appear first and have priority
-            let existingStations = stations.filter { $0.country != country }
+            // Only the stations being replaced are dropped — filtering the whole country out here
+            // silently discarded its API stations from memory.
+            let manualIDs = Set(manualStations.map { $0.id })
+            let manualURLs = Set(manualStations.compactMap { Self.stationIdentityKey($0.url) })
+            let existingStations = stations.filter { station in
+                if manualIDs.contains(station.id) { return false }
+                if let key = Self.stationIdentityKey(station.url), manualURLs.contains(key) { return false }
+                return true
+            }
             stations = manualStations + existingStations
             
             // Save to Core Data
@@ -5391,6 +5397,30 @@ extension RadioStationViewModel {
                     stationsByID[stationId] = station
                 }
             }
+
+            // Rows sharing a stream URL under different ids are the same station arriving from two
+            // sources (API fetch and CloudKit record). Collapse them onto the richer row.
+            var stationsByURL: [String: CDStation] = [:]
+            for station in stationsByID.values.sorted(by: { ($0.id ?? "") < ($1.id ?? "") }) {
+                guard let key = Self.stationIdentityKey(station.url) else { continue }
+                guard let incumbent = stationsByURL[key] else {
+                    stationsByURL[key] = station
+                    continue
+                }
+                let loser: CDStation
+                if self.shouldKeepExistingStation(existing: incumbent, duplicate: station) {
+                    loser = station
+                } else {
+                    loser = incumbent
+                    station.isFavorite = station.isFavorite || incumbent.isFavorite
+                    stationsByURL[key] = station
+                }
+                if let loserID = loser.id, stationsByID[loserID] === loser {
+                    stationsByID.removeValue(forKey: loserID)
+                }
+                duplicatesToDelete.append(loser)
+                print("🔄 Duplicate stream URL '\(key)' - deleting extra copy of '\(loser.name ?? "Unknown")'")
+            }
             
                 // Delete duplicates first
                 for duplicate in duplicatesToDelete {
@@ -5406,22 +5436,25 @@ extension RadioStationViewModel {
             
             let existingDict = stationsByID
             
-                for (index, station) in self.stations.enumerated() {
+                for station in self.stations {
+                let urlKey = Self.stationIdentityKey(station.url)
                 if let existingStation = existingDict[station.id] {
-                    // Update existing station
-                    existingStation.name = station.name
-                    existingStation.url = station.url
-                    existingStation.iconData = station.iconData
-                    existingStation.country = station.country
-                    existingStation.isFavorite = station.isFavorite
-                    existingStation.favoritedAt = station.favoritedAt
-                    if let favoriteOrder = station.favoriteOrder {
-                        existingStation.favoriteOrder = Int32(favoriteOrder)
-                    } else {
-                        existingStation.favoriteOrder = -1  // Use -1 to represent nil
-                    }
-                    existingStation.order = Int16(station.order)
-                    existingStation.lastPlayed = station.lastPlayed
+                    // Assign only what actually differs: an unconditional rewrite dirties every
+                    // row (blobs included) and makes a no-op save cost a full table write.
+                    if existingStation.name != station.name { existingStation.name = station.name }
+                    if existingStation.url != station.url { existingStation.url = station.url }
+                    if existingStation.iconData != station.iconData { existingStation.iconData = station.iconData }
+                    if existingStation.country != station.country { existingStation.country = station.country }
+                    if existingStation.isFavorite != station.isFavorite { existingStation.isFavorite = station.isFavorite }
+                    if existingStation.favoritedAt != station.favoritedAt { existingStation.favoritedAt = station.favoritedAt }
+                    let favoriteOrder = station.favoriteOrder.map { Int32($0) } ?? -1  // -1 represents nil
+                    if existingStation.favoriteOrder != favoriteOrder { existingStation.favoriteOrder = favoriteOrder }
+                    if existingStation.order != Int16(station.order) { existingStation.order = Int16(station.order) }
+                    if existingStation.lastPlayed != station.lastPlayed { existingStation.lastPlayed = station.lastPlayed }
+                } else if let urlKey, stationsByURL[urlKey] != nil {
+                    // The store already holds this stream under a different id; inserting here is
+                    // what turned every sync into another visible copy of the same station.
+                    continue
                 } else {
                     // Create new station if it doesn't exist
                     let newStation = CDStation(context: backgroundContext)
@@ -5439,34 +5472,24 @@ extension RadioStationViewModel {
                     }
                     newStation.order = Int16(station.order)
                     newStation.lastPlayed = station.lastPlayed
+                    if let urlKey { stationsByURL[urlKey] = newStation }
                 }
             }
             
-                // Remove stations that are no longer in the array
-                let stationIDs = Set(self.stations.map { $0.id })
-                for existingStation in existingStations {
-                    // Skip stations with nil IDs (they should have been cleaned up in duplicate detection above)
-                    guard let existingStationId = existingStation.id else {
-                        print("⚠️ Found existing station with nil ID during cleanup, deleting it: \(existingStation.name ?? "Unknown")")
-                        backgroundContext.delete(existingStation)
-                        continue
-                    }
-                    
-                    if !stationIDs.contains(existingStationId) {
-                        backgroundContext.delete(existingStation)
-                    }
+                // Stations with a nil ID can't be matched to anything, so drop them.
+                for existingStation in existingStations where existingStation.id == nil {
+                    print("⚠️ Found existing station with nil ID during cleanup, deleting it: \(existingStation.name ?? "Unknown")")
+                    backgroundContext.delete(existingStation)
                 }
                 
                 // Save changes in background context (independent context auto-merges with main context)
                 let hasChanges = backgroundContext.hasChanges
+                guard hasChanges else { return }
                 try backgroundContext.save()
                 // No need to manually save parent - independent context automatically merges changes
                 
-                // Only log if there were actual changes
-                if hasChanges {
-                    DispatchQueue.main.async {
-                        print("✅ CoreData stations updated successfully.")
-                    }
+                DispatchQueue.main.async {
+                    print("✅ CoreData stations updated successfully.")
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -5480,9 +5503,132 @@ extension RadioStationViewModel {
         }
     }
     
+    /// Folds a CloudKit result set into the in-memory list by id.
+    ///
+    /// Replacing `stations` wholesale used to drop any station that CloudKit didn't return —
+    /// including local-only ones — and, before the save became non-destructive, deleted them.
+    @MainActor
+    func mergeStationsFromCloudKit(_ incoming: [RadioStation]) {
+        guard !incoming.isEmpty else { return }
+
+        var indexByID = Dictionary(
+            stations.enumerated().map { ($0.element.id, $0.offset) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // A station already fetched from the API is the same station CloudKit is handing back,
+        // but the two carry different ids — so it has to be matched on the stream URL as well
+        // or the append below creates a visible duplicate row.
+        var indexByURL: [String: Int] = [:]
+        for (index, station) in stations.enumerated() {
+            guard let key = Self.stationIdentityKey(station.url) else { continue }
+            if indexByURL[key] == nil { indexByURL[key] = index }
+        }
+
+        for station in incoming {
+            let urlKey = Self.stationIdentityKey(station.url)
+
+            if let index = indexByID[station.id] {
+                stations[index] = station
+            } else if let urlKey, let index = indexByURL[urlKey] {
+                // Keep the local id so favourites, ordering and Core Data rows stay attached to it.
+                let localID = stations[index].id
+                var folded = station
+                folded.id = localID
+                stations[index] = folded
+            } else {
+                indexByID[station.id] = stations.count
+                if let urlKey { indexByURL[urlKey] = stations.count }
+                stations.append(station)
+            }
+        }
+
+        deduplicateStationsInMemory()
+    }
+
+    /// Identity of a station as the rest of the app treats it: the stream URL, normalised.
+    ///
+    /// Ids are not stable across sources — the same station arrives with a Radio Browser uuid
+    /// from the API and a record name from CloudKit — so the URL is the only durable key.
+    static func stationIdentityKey(_ url: String?) -> String? {
+        guard var key = url?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !key.isEmpty else { return nil }
+        if key.hasPrefix("https://") { key.removeFirst(8) }
+        else if key.hasPrefix("http://") { key.removeFirst(7) }
+        while key.hasSuffix("/") { key.removeLast() }
+        return key.isEmpty ? nil : key
+    }
+
+    /// Collapses stations that share a stream URL, keeping the richest copy of each.
+    @discardableResult
+    func deduplicateStationsInMemory() -> Int {
+        var keptIndexByURL: [String: Int] = [:]
+        var kept: [RadioStation] = []
+        kept.reserveCapacity(stations.count)
+
+        for station in stations {
+            guard let key = Self.stationIdentityKey(station.url) else {
+                kept.append(station)
+                continue
+            }
+            guard let index = keptIndexByURL[key] else {
+                keptIndexByURL[key] = kept.count
+                kept.append(station)
+                continue
+            }
+            if Self.stationRichness(station) > Self.stationRichness(kept[index]) {
+                // Preserve the surviving id so Core Data and CloudKit keep pointing at one row.
+                var winner = station
+                winner.id = kept[index].id
+                winner.isFavorite = station.isFavorite || kept[index].isFavorite
+                kept[index] = winner
+            } else if station.isFavorite {
+                kept[index].isFavorite = true
+            }
+        }
+
+        let removed = stations.count - kept.count
+        if removed > 0 {
+            print("🧹 DEDUPE: Collapsed \(removed) duplicate station(s) sharing a stream URL")
+            stations = kept
+        }
+        return removed
+    }
+
+    private static func stationRichness(_ station: RadioStation) -> Int {
+        var score = 0
+        if !station.name.isEmpty { score += 1 }
+        if station.iconData != nil { score += 2 }
+        if station.iTunesArtworkData != nil { score += 2 }
+        if station.isFavorite { score += 1 }
+        if station.lastPlayed != nil { score += 1 }
+        if station.id.hasPrefix("manual_") || station.id.hasPrefix("import_") { score += 3 }
+        return score
+    }
+
+    /// Deletes a station locally without echoing the deletion back to CloudKit.
+    ///
+    /// Used by the sync handlers, which are *reacting* to a remote deletion. `saveStationsToCoreData()`
+    /// no longer removes rows that are missing from the in-memory array, so they have to be explicit.
+    func removeStationFromCoreDataLocally(id: String) {
+        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+        backgroundContext.perform {
+            let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", id)
+            do {
+                for object in try backgroundContext.fetch(request) {
+                    backgroundContext.delete(object)
+                }
+                if backgroundContext.hasChanges {
+                    try backgroundContext.save()
+                }
+            } catch {
+                print("❌ Failed to delete station \(id) from CoreData: \(error)")
+            }
+        }
+    }
+
     // Helper method to decide which duplicate station to keep
-    private func shouldKeepExistingStation(existing: CDStation, duplicate: CDStation) -> Bool {
-        // Prefer station with more complete data
+    private func shouldKeepExistingStation(existing: CDStation, duplicate: CDStation) -> Bool {        // Prefer station with more complete data
         let existingScore = stationDataScore(existing)
         let duplicateScore = stationDataScore(duplicate)
         
@@ -5561,6 +5707,11 @@ extension RadioStationViewModel {
             
             // Set loading to false immediately to show stations
             isLoading = false
+
+            // Repairs a store that accumulated URL-duplicate rows; the save collapses them for good.
+            if deduplicateStationsInMemory() > 0 {
+                saveStationsToCoreData()
+            }
             
             // PERFORMANCE: Create station snapshots for all countries after loading
             Task {
@@ -5998,6 +6149,9 @@ extension RadioStationViewModel {
 extension Notification.Name {
     static let countrySelected = Notification.Name("countrySelected")
     static let stationsUpdated = Notification.Name("stationsUpdated")
+    /// A single station was edited in place. Distinct from `stationsUpdated`, which also nudges the
+    /// list back to the All tab.
+    static let stationDetailsUpdated = Notification.Name("stationDetailsUpdated")
     static let countryChanged = Notification.Name("countryChanged")
     static let hiddenCountriesChanged = Notification.Name("hiddenCountriesChanged")
     static let selectedCountryCleared = Notification.Name("selectedCountryCleared")

@@ -66,53 +66,56 @@ struct AddStationView: View {
     }
     
     var body: some View {
-        NavigationView {
-            GeometryReader { geometry in
-                ZStack(alignment: .bottom) {
-                    VStack(spacing: 0) {
-                        ScrollView {
-                            VStack(spacing: 40) {
-                                stationIconSection
-                                formFieldsSection
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.top, 20)
-                            .padding(.bottom, keyboardHeight + 60) // Extra padding for keyboard + buffer
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    ScrollView {
+                        VStack(spacing: 40) {
+                            stationIconSection
+                            formFieldsSection
                         }
-                        .scrollDisabled(false) // Disable automatic scrolling
-                        .scrollDismissesKeyboard(.never)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 20)
+                        .padding(.bottom, keyboardHeight + 60) // Extra padding for keyboard + buffer
                     }
-                    // Use a slightly different background for sheets to avoid
-                    // blending with the underlying list on iPad
-                    .background(
-                        Color.adaptiveSheetBackground
-                            .ignoresSafeArea()
-                            .onTapGesture {
-                                // Dismiss keyboard when tapping on background areas only
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            }
-                    )
+                    .scrollDisabled(false) // Disable automatic scrolling
+                    .scrollDismissesKeyboard(.never)
                 }
+                // Use a slightly different background so the form doesn't blend
+                // with the underlying list on iPad
+                .background(
+                    Color.adaptiveSheetBackground
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            // Dismiss keyboard when tapping on background areas only
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                )
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Add Station")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.adaptivePrimaryText)
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Add Station")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.adaptivePrimaryText)
+            }
+
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    presentedSheet = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
                 }
-                
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentedSheet = nil
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Add") {
-                        saveStation()
-                    }
+                .accessibilityLabel("Back")
+            }
+
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Add") {
+                    saveStation()
                 }
             }
         }

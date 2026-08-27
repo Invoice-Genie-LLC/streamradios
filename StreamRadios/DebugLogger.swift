@@ -651,21 +651,36 @@ class DebugLogger: ObservableObject {
     /// Monitor for main thread blocks
     static func startMainThreadMonitoring() {
         let monitorQueue = DispatchQueue(label: "com.streamradios.mainthread.monitor", qos: .utility)
+        let activityLock = NSLock()
         var lastMainThreadActivity = Date()
         
         // Update activity on main thread
-        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        let heartbeat = Timer(timeInterval: 0.1, repeats: true) { _ in
+            activityLock.lock()
             lastMainThreadActivity = Date()
+            activityLock.unlock()
         }
+        // Default mode stops firing during scroll tracking, which reads as a permanent hang.
+        RunLoop.main.add(heartbeat, forMode: .common)
         
         // Monitor from background
         monitorQueue.async {
+            var reportedCurrentHang = false
             while true {
                 Thread.sleep(forTimeInterval: 1.0)
+                activityLock.lock()
                 let timeSinceActivity = Date().timeIntervalSince(lastMainThreadActivity)
+                activityLock.unlock()
                 
                 if timeSinceActivity > 5.0 {
-                    logAppHang("Main thread blocked", duration: timeSinceActivity)
+                    // Report each hang once - re-logging every second buries the real event and
+                    // the immediate log persist adds I/O while the main thread is already stuck.
+                    if !reportedCurrentHang {
+                        reportedCurrentHang = true
+                        logAppHang("Main thread blocked", duration: timeSinceActivity)
+                    }
+                } else {
+                    reportedCurrentHang = false
                 }
             }
         }

@@ -34,19 +34,25 @@ extension FeedModel {
 
 extension PodcastModel {
     func update(from episode: PodcastEpisode) {
+           self.isPlayed = episode.state.isPlayed
+           self.isFavorite = episode.state.isFavorite
+           self.progress = episode.state.progress
+           self.isDownloaded = episode.state.isDownloaded
+           self.localFilePath = episode.localFilePath
+           self.fileSize = episode.fileSize ?? 0
+           updateMetadata(from: episode)
+       }
+    
+    /// Writes only the fields the RSS feed owns, never the user's playback state.
+    /// Refreshing a feed must not touch progress/isFavorite/isPlayed/isDownloaded.
+    func updateMetadata(from episode: PodcastEpisode) {
            self.id = episode.id
            self.title = episode.title
            self.descriptionText = episode.descriptionText
            self.audioUrl = episode.audioUrl
            self.publicationDate = episode.publicationDate
            self.duration = episode.duration
-           self.isPlayed = episode.state.isPlayed
-           self.isFavorite = episode.state.isFavorite
-           self.progress = episode.state.progress
-           self.isDownloaded = episode.state.isDownloaded
            self.feedId = episode.feedId
-           self.localFilePath = episode.localFilePath
-           self.fileSize = episode.fileSize ?? 0
            
            // Store chapters and notes as JSON in Core Data
            if let chapters = episode.chapters {

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import FlagKit
+import StreamRadiosKit
 
 // MARK: - Conditional Liquid Glass Modifier
 struct CountryPickerLiquidGlass: ViewModifier {
@@ -143,6 +144,7 @@ struct CountryPicker: View {
     
     @State private var searchText = ""
     @State private var isSearchPresented = false
+    @FocusState private var isSearchFieldFocused: Bool
     @State private var recentCountries: [String] = []
     @State private var showingDeleteAlert = false
     @State private var countryToDelete: Country? = nil
@@ -172,107 +174,30 @@ struct CountryPicker: View {
     }
     
     var body: some View {
-        NavigationView {
+        Group {
             VStack(spacing: 0) {
-                // Search bar with liquid glass style (conditional)
-                if isSearchPresented {
-                    HStack(spacing: 12) {
-                        CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search countries...")
-                        
-                        // Cancel button
-                        Button("Cancel") {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                isSearchPresented = false
-                                searchText = ""
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            }
-                        }
-                        .font(.system(size: 16))
-                        .foregroundColor(.primary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            Capsule()
-                                .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-                    .background(Color.adaptiveBackground)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
+                pickerHeader
                 
                 List {
                     // Recent selections section
                     if !filteredRecentCountries.isEmpty && searchText.isEmpty {
                         Section {
-                            ForEach(filteredRecentCountries.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }, id: \.id) { country in
-                                CountryRow(
-                                    country: country,
-                                    isSelected: selectedCountry == country.name,
-                                    showRegion: false,
-                                    stationCount: stationCount?(country.name)
-                                ) {
-                                    selectCountry(country.name)
-                                }
-                                .listRowBackground(Color.adaptiveCardBackground)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    if let count = stationCount?(country.name), count > 0 {
-                                        Button(role: .destructive) {
-                                            countryToDelete = country
-                                            showingDeleteAlert = true
-                                        } label: {
-                                            Label("Delete Stations", systemImage: "trash")
-                                        }
-                                    }
-                                }
+                            ForEach(sortedByName(filteredRecentCountries), id: \.id) { country in
+                                countryRow(country, showRegion: false)
                             }
                         } header: {
-                            HStack {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .foregroundColor(.cyan)
-                                    .font(.subheadline)
-                                Text("Recent")
-                                    .font(.subheadline)
-                                    .foregroundColor(.cyan)
-                            }
+                            sectionHeader("Recent", systemImage: "clock.arrow.circlepath", tint: .cyan)
                         }
                     }
                     
                     // Popular countries section (if no search)
                     if searchText.isEmpty {
                         Section {
-                            ForEach(popularCountries.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }, id: \.id) { country in
-                                CountryRow(
-                                    country: country,
-                                    isSelected: selectedCountry == country.name,
-                                    showRegion: false,
-                                    stationCount: stationCount?(country.name)
-                                ) {
-                                    selectCountry(country.name)
-                                }
-                                .listRowBackground(Color.adaptiveCardBackground)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    if let count = stationCount?(country.name), count > 0 {
-                                        Button(role: .destructive) {
-                                            countryToDelete = country
-                                            showingDeleteAlert = true
-                                        } label: {
-                                            Label("Delete Stations", systemImage: "trash")
-                                        }
-                                    }
-                                }
+                            ForEach(sortedByName(popularCountries), id: \.id) { country in
+                                countryRow(country, showRegion: false)
                             }
                         } header: {
-                            HStack {
-                                Image(systemName: "star.fill")
-                                    .foregroundColor(.yellow)
-                                    .font(.subheadline)
-                                Text("Popular")
-                                    .font(.subheadline)
-                                    .foregroundColor(.yellow)
-                            }
+                            sectionHeader("Popular", systemImage: "star.fill", tint: .yellow)
                         }
                     }
                     
@@ -280,43 +205,18 @@ struct CountryPicker: View {
                     ForEach(Array(groupedCountries.keys).sorted { $0.sortOrder < $1.sortOrder }, id: \.self) { region in
                         if let regionCountries = groupedCountries[region], !regionCountries.isEmpty {
                             Section {
-                                ForEach(regionCountries.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }, id: \.id) { country in
-                                    CountryRow(
-                                        country: country,
-                                        isSelected: selectedCountry == country.name,
-                                        showRegion: searchText.isEmpty ? false : true,
-                                        stationCount: stationCount?(country.name)
-                                    ) {
-                                        selectCountry(country.name)
-                                    }
-                                    .listRowBackground(Color.adaptiveCardBackground)
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        if let count = stationCount?(country.name), count > 0 {
-                                            Button(role: .destructive) {
-                                                countryToDelete = country
-                                                showingDeleteAlert = true
-                                            } label: {
-                                                Label("Delete Stations", systemImage: "trash")
-                                            }
-                                        }
-                                    }
+                                ForEach(sortedByName(regionCountries), id: \.id) { country in
+                                    countryRow(country, showRegion: !searchText.isEmpty)
                                 }
                             } header: {
                                 if searchText.isEmpty {
-                                    HStack {
-                                        Image(systemName: region.icon)
-                                            .foregroundColor(.adaptiveSecondaryText)
-                                            .font(.subheadline)
-                                        Text(region.displayName)
-                                            .font(.subheadline)
-                                            .foregroundColor(.adaptiveSecondaryText)
-                                    }
+                                    sectionHeader(region.displayName, systemImage: region.icon, tint: .adaptiveSecondaryText)
                                 }
                             }
                         }
                     }
                 }
-                .listStyle(InsetGroupedListStyle())
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(Color.adaptiveBackground)
             }
@@ -328,50 +228,6 @@ struct CountryPicker: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             )
-            .navigationTitle("Select Country")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 8) {
-                        // Sort button
-                        Button(action: {
-                            // Toggle sort direction for countries
-                            isAscendingSort.toggle()
-                        }) {
-                            Image(systemName: isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                .foregroundColor(.adaptivePrimaryText)
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        
-                        
-                        // Search button
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                isSearchPresented.toggle()
-                                if !isSearchPresented {
-                                    searchText = ""
-                                }
-                            }
-                        }) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundColor(.adaptivePrimaryText)
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
         }
         .background(Color.adaptiveBackground)
         .onAppear {
@@ -397,6 +253,152 @@ struct CountryPicker: View {
         )
     }
     
+    // MARK: - Rows
+
+    private func sortedByName(_ list: [Country]) -> [Country] {
+        list.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }
+    }
+
+    private func countryRow(_ country: Country, showRegion: Bool) -> some View {
+        CountryRow(
+            country: country,
+            isSelected: selectedCountry == country.name,
+            showRegion: showRegion,
+            stationCount: stationCount?(country.name)
+        ) {
+            selectCountry(country.name)
+        }
+        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if let count = stationCount?(country.name), count > 0 {
+                Button(role: .destructive) {
+                    countryToDelete = country
+                    showingDeleteAlert = true
+                } label: {
+                    // Icon-only: a title widens the button and iOS draws it as an ellipse.
+                    Label("Delete Stations", systemImage: "trash").labelStyle(.iconOnly)
+                }
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String, systemImage: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+            Text(title)
+        }
+        .font(.caption.weight(.semibold))
+        .textCase(.uppercase)
+        .foregroundColor(tint)
+        .padding(.leading, 4)
+        .padding(.top, 6)
+    }
+
+    // MARK: - Header
+
+    /// Mirrors the radio home header: a leading capsule plus a trailing action capsule.
+    private var pickerHeader: some View {
+        HStack(spacing: 10) {
+            if isSearchPresented {
+                searchBar
+            } else {
+                headerActionButton("chevron.left") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .frame(height: 40)
+                .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+                .modifier(ConditionalLiquidGlass(cornerRadius: 20))
+
+                Text("Select Country")
+                    .font(.headline)
+                    .foregroundColor(.adaptivePrimaryText)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            headerActions
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(Color.adaptiveBackground)
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline)
+                .foregroundColor(.adaptiveSecondaryText)
+
+            TextField("Search countries...", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.subheadline)
+                .foregroundColor(.adaptivePrimaryText)
+                .focused($isSearchFieldFocused)
+                .submitLabel(.search)
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveFieldBackground))
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isSearchFieldFocused = true
+            }
+        }
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 0) {
+            if isSearchPresented {
+                Button("Cancel") {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isSearchPresented = false
+                        searchText = ""
+                        isSearchFieldFocused = false
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.adaptivePrimaryText)
+                .padding(.horizontal, 14)
+            } else {
+                headerActionButton("magnifyingglass") {
+                    withAnimation(.easeInOut(duration: 0.25)) { isSearchPresented = true }
+                }
+
+                headerActionButton(isAscendingSort ? "arrow.up.circle" : "arrow.down.circle") {
+                    isAscendingSort.toggle()
+                }
+            }
+        }
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+        .modifier(ConditionalLiquidGlass(cornerRadius: 20))
+    }
+
+    private func headerActionButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(.adaptivePrimaryText)
+                .frame(width: 38, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
     private var popularCountries: [Country] {
         let popularNames = ["United States", "Canada", "United Kingdom", "Germany", "France", "Australia", "Japan", "Brazil"]
         return popularNames.compactMap { name in
@@ -457,73 +459,87 @@ struct CountryRow: View {
     let stationCount: Int?
     let onTap: () -> Void
     
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
+
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Flag
-                Group {
-                    if country.flag.isEmpty {
-                        Image(systemName: "flag.slash")
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .font(.body)
-                            .frame(width: 40, height: 30)
-                    } else {
-                        if let flag = Flag(countryCode: country.flag) {
-                            Image(uiImage: flag.image(style: .roundedRect))
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 40, height: 30)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(Color.adaptiveBorder, lineWidth: 0.5)
-                                )
-                        } else {
-                            Image(systemName: "flag.slash")
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .font(.body)
-                                .frame(width: 40, height: 30)
-                        }
-                    }
-                }
-                
+            HStack(spacing: 14) {
+                flagView
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(country.name)
-                        .font(.body)
-                        .foregroundColor(.adaptivePrimaryText)
+                        .font(.body.weight(isSelected ? .semibold : .regular))
+                        .foregroundColor(isSelected ? SRColor.accent : .adaptivePrimaryText)
                         .multilineTextAlignment(.leading)
-                    
+                        .lineLimit(1)
+
                     if showRegion {
                         Text(CountryRegion.region(for: country.name).displayName)
                             .font(.caption)
                             .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
-                
-                Spacer()
-                
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 // Station count badge
                 if let count = stationCount, count > 0 {
                     Text("\(count)")
-                        .font(.caption)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(SRColor.accent)
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(Color.blue.opacity(0.8))
-                        .cornerRadius(10)
+                        .background(Capsule().fill(SRColor.accent.opacity(0.15)))
                 }
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        
-                        .font(.body)
-                }
+
+                // Kept in the layout so selecting a country doesn't shift the row's contents.
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.body)
+                    .foregroundColor(SRColor.accent)
+                    .opacity(isSelected ? 1 : 0)
+                    .scaleEffect(isSelected ? 1 : 0.5)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 16)
-            .contentShape(Rectangle())
+            // The swipe button has a fixed minimum width, so a short row makes it a wide ellipse.
+            .frame(minHeight: 44)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(shape.fill(isSelected ? SRColor.accent.opacity(0.12) : Color.adaptiveCardBackground))
+            .overlay(shape.stroke(isSelected ? SRColor.accent.opacity(0.35) : Color.clear, lineWidth: 1))
+            .contentShape(shape)
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(CountryRowButtonStyle())
+        .animation(.snappy(duration: 0.25), value: isSelected)
+    }
+
+    @ViewBuilder
+    private var flagView: some View {
+        if !country.flag.isEmpty, let flag = Flag(countryCode: country.flag) {
+            Image(uiImage: flag.image(style: .roundedRect))
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 46, height: 34)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.adaptiveBorder, lineWidth: 0.5)
+                )
+        } else {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.adaptiveSectionBackground)
+                .frame(width: 46, height: 34)
+                .overlay(
+                    Image(systemName: "globe")
+                        .font(.footnote)
+                        .foregroundColor(.adaptiveSecondaryText)
+                )
+        }
+    }
+}
+
+private struct CountryRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -704,6 +720,8 @@ struct CountryPickerButton: View {
     var stationCount: ((String) -> Int)?
     var onSelect: ((String) -> Void)? = nil
     var isDisabled: Bool = false
+    /// Single-line capsule for the radio list header; forms keep the taller two-line layout.
+    var compact: Bool = false
     @State private var showingPicker = false
     
     var body: some View {
@@ -712,62 +730,14 @@ struct CountryPickerButton: View {
                 showingPicker = true
             }
         }) {
-            HStack(spacing: 8) {
-                // Flag
-                Group {
-                    if isDisabled {
-                        Image(systemName: "wifi.slash")
-                            .foregroundColor(.gray)
-                            .font(.body)
-                            .frame(width: 30, height: 20)
-                    } else if let selectedCountryData = countries.first(where: { $0.name == selectedCountry }),
-                       !selectedCountryData.flag.isEmpty,
-                       let flag = Flag(countryCode: selectedCountryData.flag) {
-                        Image(uiImage: flag.image(style: .roundedRect))
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 30, height: 20)
-                            .clipShape(RoundedRectangle(cornerRadius: 2))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 2)
-                                    .stroke(Color.adaptiveBorder, lineWidth: 0.5)
-                            )
-                    } else {
-                        Image(systemName: "flag.slash")
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .font(.body)
-                            .frame(width: 30, height: 20)
-                    }
-                }
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isDisabled ? "Offline - Country Browser Disabled" : (selectedCountry.isEmpty || selectedCountry == "Select Country" ? "Select Country" : selectedCountry))
-                        .font(.body)
-                        .foregroundColor(isDisabled ? .gray : .adaptivePrimaryText)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    
-                    // Show station count for selected country
-                    if !isDisabled, let count = stationCount?(selectedCountry), count > 0, selectedCountry != "Select Country" && !selectedCountry.isEmpty {
-                        Text("\(count) stations")
-                            .font(.caption)
-                            .foregroundColor(.adaptiveSecondaryText)
-                    }
-                }
-                
-                Spacer()
-                
-                Image(systemName: "chevron.down")
-                    .font(.body)
-                    .foregroundColor(isDisabled ? .gray : .adaptiveSecondaryText)
+            if compact {
+                compactLabel
+            } else {
+                standardLabel
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(isDisabled ? Color.gray.opacity(0.2) : Color.adaptiveFieldBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .disabled(isDisabled)
-        .sheet(isPresented: $showingPicker) {
+        .fullScreenCover(isPresented: $showingPicker) {
             CountryPicker(selectedCountry: $selectedCountry, countries: countries, stationCount: stationCount, onSelect: { country in
                 onSelect?(country)
                 // FIXED: Use countryChanged notification instead of stationsUpdated to prevent contamination of currently playing station
@@ -775,6 +745,107 @@ struct CountryPickerButton: View {
                 NotificationCenter.default.post(name: .countryChanged, object: nil)
             })
         }
+    }
+
+    private var hasSelection: Bool {
+        !selectedCountry.isEmpty && selectedCountry != "Select Country"
+    }
+
+    private var resolvedCount: Int? {
+        guard !isDisabled, hasSelection, let count = stationCount?(selectedCountry), count > 0 else { return nil }
+        return count
+    }
+
+    @ViewBuilder
+    private var flagView: some View {
+        if isDisabled {
+            Image(systemName: "wifi.slash")
+                .foregroundColor(.gray)
+                .font(.body)
+                .frame(width: 30, height: 20)
+        } else if let selectedCountryData = countries.first(where: { $0.name == selectedCountry }),
+                  !selectedCountryData.flag.isEmpty,
+                  let flag = Flag(countryCode: selectedCountryData.flag) {
+            Image(uiImage: flag.image(style: .roundedRect))
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 30, height: 20)
+                .clipShape(RoundedRectangle(cornerRadius: 2))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(Color.adaptiveBorder, lineWidth: 0.5)
+                )
+        } else {
+            Image(systemName: "globe")
+                .foregroundColor(.adaptiveSecondaryText)
+                .font(.body)
+                .frame(width: 30, height: 20)
+        }
+    }
+
+    private var compactLabel: some View {
+        HStack(spacing: 8) {
+            flagView
+                .scaleEffect(0.8)
+                .frame(width: 24, height: 16)
+
+            Text(isDisabled ? "Offline" : (hasSelection ? selectedCountry : "Select Country"))
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(isDisabled ? .gray : .adaptivePrimaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if let count = resolvedCount {
+                Text(count.formatted(.number))
+                    .font(.caption2.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.adaptiveSecondaryText.opacity(0.15)))
+            }
+
+            Spacer(minLength: 4)
+
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(isDisabled ? .gray : .adaptiveSecondaryText)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveFieldBackground))
+        .contentShape(Capsule())
+    }
+
+    private var standardLabel: some View {
+        HStack(spacing: 8) {
+            flagView
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isDisabled ? "Offline - Country Browser Disabled" : (hasSelection ? selectedCountry : "Select Country"))
+                    .font(.body)
+                    .foregroundColor(isDisabled ? .gray : .adaptivePrimaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                
+                // Show station count for selected country
+                if let count = resolvedCount {
+                    Text("\(count) stations")
+                        .font(.caption)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+            }
+            
+            Spacer()
+            
+            Image(systemName: "chevron.down")
+                .font(.body)
+                .foregroundColor(isDisabled ? .gray : .adaptiveSecondaryText)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(isDisabled ? Color.gray.opacity(0.2) : Color.adaptiveFieldBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

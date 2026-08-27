@@ -703,7 +703,7 @@ class RadioPlayer: NSObject, ObservableObject {
                 // Set category and activate in one go for auto-play
                 try audioSession.setCategory(.playback, 
                                            mode: .default, 
-                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                           options: PlaybackManager.playbackCategoryOptions)
                 
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
                 
@@ -886,10 +886,21 @@ class RadioPlayer: NSObject, ObservableObject {
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let audioSession = AVAudioSession.sharedInstance()
+                    
+                    // The session is active and routed at this point. Changing the category options
+                    // on it - .allowAirPlay in particular needs a route change - is what returns -50,
+                    // and it buys nothing since playback is already running. Only an outright wrong
+                    // category is worth correcting, and Shazam legitimately owns .playAndRecord.
+                    guard audioSession.category != .playback,
+                          audioSession.category != .playAndRecord else {
+                        print("✅ RadioPlayer: Audio session category is fine for background (\(audioSession.category.rawValue)) - leaving it alone")
+                        return
+                    }
+                    
                     // MAIN THREAD FIX: Configure audio session on background queue to avoid IPC delays
                     try audioSession.setCategory(.playback, 
                                                mode: .default, 
-                                               options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                               options: PlaybackManager.playbackCategoryOptions)
                     
                     DispatchQueue.main.async {
                         print("✅ RadioPlayer: Background transition handled - audio session category set")
@@ -1169,7 +1180,7 @@ class RadioPlayer: NSObject, ObservableObject {
                 // First, ensure the category is correct and take control of audio
                 try audioSession.setCategory(.playback, 
                                            mode: .default, 
-                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                           options: PlaybackManager.playbackCategoryOptions)
                 
                 // Aggressively activate audio session to reclaim audio from other apps
                 try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
@@ -1458,6 +1469,21 @@ class RadioPlayer: NSObject, ObservableObject {
         print("Metadata observation configured for player item")
     }
     
+    /// Entitlement is normally enforced by covering the UI with the paywall, which never reaches
+    /// CarPlay, alarms or remote-command play requests — so the player itself has to refuse.
+    /// When StoreKit hasn't answered yet this resolves the status and re-runs `retry` if entitled.
+    func isPlaybackEntitled(retry: (() -> Void)? = nil) -> Bool {
+        let snapshot = SubscriptionManager.entitlementSnapshot
+        if snapshot.isEntitled { return true }
+        guard !snapshot.isResolved else { return false }
+        
+        Task { @MainActor in
+            await SubscriptionManager.shared.updateSubscriptionStatus()
+            if SubscriptionManager.shared.isSubscribedOrInTrial { retry?() }
+        }
+        return false
+    }
+    
     func playPause() {
         guard let player = player else { return }
         if player.timeControlStatus == .playing {
@@ -1473,6 +1499,11 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func play() {
+        guard isPlaybackEntitled(retry: { [weak self] in self?.play() }) else {
+            print("🔒 Radio playback blocked - no active subscription")
+            return
+        }
+        
         // CRITICAL FIX: Clear manual pause flag when user explicitly plays
         wasManuallyPaused = false
         
@@ -1814,6 +1845,13 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
+        // This path starts the AVPlayer directly rather than going through play(), so it needs its own gate.
+        guard isPlaybackEntitled(retry: { [weak self] in self?.playStation(at: index, from: stations) }) else {
+            print("🔒 Radio playback blocked - no active subscription")
+            connectionState = .paused
+            return
+        }
+        
         // CRITICAL: This is an explicit user action to play radio - stop podcast if active
         stopPodcastPlayback()
         
@@ -1994,6 +2032,15 @@ class RadioPlayer: NSObject, ObservableObject {
         print("Playing station for alarm: \(station.name)")
         guard let url = URL(string: station.url) else {
             print("Invalid URL for station: \(station.name)")
+            return
+        }
+        
+        // Alarms fire outside the app's UI, so the paywall never covers them — enforce here too,
+        // and clear the alarm state so the alarm UI doesn't sit waiting for audio that won't start.
+        guard isPlaybackEntitled(retry: { [weak self] in self?.playStationForAlarm(station: station) }) else {
+            print("🔒 Alarm playback blocked - no active subscription")
+            isHandlingAlarm = false
+            alarmStation = nil
             return
         }
 

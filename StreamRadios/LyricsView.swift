@@ -28,8 +28,8 @@ struct LyricsView: View {
             Divider().background(Color.gray.opacity(0.5))
             contentView
         }
-        .background(Color.black)
-        .foregroundColor(.white)
+        .background(Color.adaptiveBackground)
+        .foregroundColor(.adaptivePrimaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -39,20 +39,20 @@ struct LyricsView: View {
                 Text(title)
                     .font(.title)
                     .bold()
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                 Text(artistName)
                     .font(.title2)
-                    .foregroundColor(.gray)
+                    .foregroundColor(.adaptiveSecondaryText)
             }
             Spacer()
             Button(action: onClose) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title)
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptiveSecondaryText)
             }
         }
         .padding()
-        .background(Color.black)
+        .background(Color.adaptiveBackground)
     }
 
     @ViewBuilder
@@ -73,7 +73,7 @@ struct LyricsView: View {
                             Text(lyricsArray[index].text)
                                 .font(.title2)
                                 .bold()
-                                .foregroundColor(Color.white.opacity(0.7))
+                                .foregroundColor(Color.adaptivePrimaryText.opacity(0.7))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 3)
                                 .id(index)
@@ -105,7 +105,7 @@ struct LyricsView: View {
             Spacer()
             Text("No song is currently playing or recognized.")
                 .font(.title)
-                .foregroundColor(.gray)
+                .foregroundColor(.adaptiveSecondaryText)
                 .multilineTextAlignment(.center)
                 .padding()
             Spacer()

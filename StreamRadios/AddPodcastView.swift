@@ -107,12 +107,18 @@ class PodcastSearchService: ObservableObject {
     
     private let podcastIndexAPIKey = "CCWZDUP9ANLKNFNCJTNC"
     let podcastIndexAPISecret = "Fz3pSCAcLdJpGF$JUEdvxLHc#Z^UT96FEgHcB9Wg" // Get from https://api.podcastindex.org/signup
+
+    /// Bumped by every new or cleared search so a slow, superseded request can't publish.
+    private var searchGeneration = 0
     
     func searchPodcasts(query: String) async {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             self.searchResults = []
             return
         }
+        
+        searchGeneration += 1
+        let generation = searchGeneration
         
         self.isSearching = true
         self.searchError = nil
@@ -160,6 +166,9 @@ class PodcastSearchService: ObservableObject {
                 seenUrls.insert(result.feedUrl)
             }
         }
+        
+        // A cancelled or superseded request must not clobber the results of the newer one.
+        guard generation == searchGeneration, !Task.isCancelled else { return }
         
         self.searchResults = combinedResults
         
@@ -428,8 +437,10 @@ class PodcastSearchService: ObservableObject {
     }
     
     func clearResults() {
+        searchGeneration += 1
         searchResults = []
         searchError = nil
+        isSearching = false
     }
 }
 
@@ -505,12 +516,16 @@ struct AddPodcastView: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button {
                         if !isAddingPodcast {
                             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                             isPresented = false
                         }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
                     }
+                    .accessibilityLabel("Back")
                     .disabled(isAddingPodcast)
                 }
                 

@@ -18,6 +18,10 @@ enum ActivePlayer: String {
 class PlaybackManager: ObservableObject {
     static let shared = PlaybackManager()
     
+    /// `.allowBluetooth` is the HFP (call) profile and is rejected with OSStatus -50 on the
+    /// `.playback` category. A2DP is what Bluetooth audio streaming actually uses.
+    static let playbackCategoryOptions: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothA2DP]
+    
     @Published var activePlayer: ActivePlayer = .none
     private var audioSessionConfigured = false
     private var backgroundInterruptionTimer: Timer?
@@ -101,7 +105,7 @@ class PlaybackManager: ObservableObject {
         }
         
         // Check if already configured with .playback category
-        let desiredOptions: AVAudioSession.CategoryOptions = [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP]
+        let desiredOptions = PlaybackManager.playbackCategoryOptions
         let isAlreadyPlayback = audioSession.category == .playback
         let hasCorrectOptions = audioSession.categoryOptions.contains(desiredOptions)
         
@@ -197,7 +201,7 @@ class PlaybackManager: ObservableObject {
             }
             
             // Ensure audio session has correct configuration before activating
-            let desiredOptions: AVAudioSession.CategoryOptions = [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP]
+            let desiredOptions = PlaybackManager.playbackCategoryOptions
             if audioSession.category != .playback || !audioSession.categoryOptions.contains(desiredOptions) {
                 // Need to reconfigure before activating
                 try audioSession.setCategory(.playback, 
@@ -443,7 +447,7 @@ class PlaybackManager: ObservableObject {
                     // PHONE CALL FIX: Ensure proper category and options for resume
                     try audioSession.setCategory(.playback, 
                                                mode: .default, 
-                                               options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                               options: PlaybackManager.playbackCategoryOptions)
                     try audioSession.setActive(true, options: [])
                     print("✅ PlaybackManager: Audio session reactivated for foreground resume")
                 } catch {
@@ -530,7 +534,7 @@ class PlaybackManager: ObservableObject {
                     // PHONE CALL FIX: Ensure proper category for background resume after phone calls
                     try audioSession.setCategory(.playback, 
                                                mode: .default, 
-                                               options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                               options: PlaybackManager.playbackCategoryOptions)
                     try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
                     print("✅ PlaybackManager: Background audio session reactivated after phone call")
                 } catch {
@@ -594,7 +598,7 @@ class PlaybackManager: ObservableObject {
                 // PHONE CALL FIX: Ensure proper category for app active resume after phone calls
                 try audioSession.setCategory(.playback, 
                                            mode: .default, 
-                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                           options: PlaybackManager.playbackCategoryOptions)
                 try audioSession.setActive(true, options: [])
             } catch {
                 print("❌ PlaybackManager: Failed to reactivate audio session: \(error)")
@@ -739,7 +743,7 @@ class PlaybackManager: ObservableObject {
                 // GPS FIX: Simplified approach to prevent GPS interference
                 // Only attempt gentle activation to avoid system resource conflicts
                 do {
-                    try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                    try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
                     try audioSession.setActive(true, options: [])
                     print("⏰ PlaybackManager: Timer - GPS-safe audio session activation succeeded")
                     sessionActivated = true
@@ -816,7 +820,7 @@ class PlaybackManager: ObservableObject {
             // Checking audioSession.category on main thread causes non-deterministic delays
             try audioSession.setCategory(.playback, 
                                        mode: .default, 
-                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                       options: PlaybackManager.playbackCategoryOptions)
             
             // Reactivate without clearing Now Playing info during CarPlay transitions
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
@@ -891,7 +895,7 @@ class PlaybackManager: ObservableObject {
         if !otherAudioPlaying {
             // Try immediate session activation
             do {
-                try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
                 try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
                 
                 print("⚡ PlaybackManager: Immediate session activation successful - resuming playback")
@@ -981,7 +985,7 @@ class PlaybackManager: ObservableObject {
         
         // Try a single gentle activation attempt
         do {
-            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+            try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
             try audioSession.setActive(true, options: [])
             
             print("✅ PlaybackManager: Delayed resume successful - Apple Music released session")
@@ -1115,7 +1119,7 @@ class PlaybackManager: ObservableObject {
         
         // Single gentle attempt without retries
         do {
-            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+            try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
             try audioSession.setActive(true, options: [])
             
             print("🛰️ PlaybackManager: Single gentle resume - audio session activated")
@@ -1168,7 +1172,7 @@ class PlaybackManager: ObservableObject {
             // Test if we can configure the audio session
             try audioSession.setCategory(.playback, 
                                        mode: .default, 
-                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                       options: PlaybackManager.playbackCategoryOptions)
             
             print("🚗 PlaybackManager: CarPlay audio session category configured successfully")
             

@@ -11,7 +11,25 @@
         <attribute name="lastPlayed" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="name" optional="YES" attributeType="String"/>
         <attribute name="order" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="searchText" optional="YES" attributeType="String"/>
         <attribute name="url" optional="YES" attributeType="String"/>
+        <fetchIndex name="byId">
+            <fetchIndexElement property="id" type="Binary" order="ascending"/>
+        </fetchIndex>
+        <fetchIndex name="byCountryAndName">
+            <fetchIndexElement property="country" type="Binary" order="ascending"/>
+            <fetchIndexElement property="name" type="Binary" order="ascending"/>
+        </fetchIndex>
+        <fetchIndex name="byFavorite">
+            <fetchIndexElement property="isFavorite" type="Binary" order="ascending"/>
+            <fetchIndexElement property="favoriteOrder" type="Binary" order="ascending"/>
+        </fetchIndex>
+        <fetchIndex name="byLastPlayed">
+            <fetchIndexElement property="lastPlayed" type="Binary" order="descending"/>
+        </fetchIndex>
+        <fetchIndex name="bySearchText">
+            <fetchIndexElement property="searchText" type="Binary" order="ascending"/>
+        </fetchIndex>
     </entity>
     <entity name="FeedModel" representedClassName="FeedModel" syncable="YES" codeGenerationType="class">
         <attribute name="artworkUrl" optional="YES" attributeType="String"/>

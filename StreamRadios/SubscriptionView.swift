@@ -18,7 +18,7 @@ struct SubscriptionView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 // Improved gradient background that works in both light and dark themes
                 LinearGradient(
@@ -63,14 +63,31 @@ struct SubscriptionView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // Only show close button if user is already subscribed
-                if subscriptionManager.isSubscribedOrInTrial {
+                // Full screen cover has no swipe-to-dismiss, so the close button is the only way out.
+                // It stays hidden for the launch paywall (showManagementScreen == false) of an
+                // unsubscribed user, which is a hard gate by design.
+                if subscriptionManager.isSubscribedOrInTrial || showManagementScreen {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Close") {
+                        Button {
                             dismiss()
+                        } label: {
+                            // The gradient background suppresses the automatic toolbar glass, so the
+                            // circle is drawn explicitly to match the rest of the app's back buttons.
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.2, green: 0.2, blue: 0.2))
+                                .frame(width: 32, height: 32)
+                                .background(
+                                    Circle()
+                                        .fill(.ultraThinMaterial)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.35), lineWidth: 0.5)
+                                        )
+                                )
                         }
-                        .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.2, green: 0.2, blue: 0.2))
-                        .fontWeight(.semibold)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Back")
                     }
                 }
             }

@@ -29,10 +29,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     // Initialize enhanced crash logging first
         initializeEnhancedCrashLogging()
             
-            if isFirstLaunch() {
-                deleteLocalCoreDataStore()
-            }
-            
             UNUserNotificationCenter.current().delegate = self
             requestNotificationAuthorization()
             registerBackgroundTasks()
@@ -510,28 +506,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Removed to fix Swift Concurrency warning
     }
     
-    lazy var persistentContainer: NSPersistentContainer = {
-            let container = NSPersistentContainer(name: "PodcastModel")
-            container.loadPersistentStores { (storeDescription, error) in
-                if let error = error as NSError? {
-                    fatalError("Unresolved error \(error), \(error.userInfo)")
-                }
-            }
-            return container
-        }()
-    
-    func saveContext() {
-            let context = persistentContainer.viewContext
-            if context.hasChanges {
-                do {
-                    try context.save()
-                } catch {
-                    let nserror = error as NSError
-                    fatalError("Unresolved error \(nserror), \(nserror.userInfo)")
-                }
-            }
-        }
-    
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         print("📡 🔔 REMOTE NOTIFICATION: Received remote notification")
         print("📡 📝 UserInfo: \(userInfo)")
@@ -579,6 +553,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // Register BackgroundTaskManager tasks
         BackgroundTaskManager.shared.registerBackgroundTasks()
+        
+        // Nothing else submits this request, so without it the podcast refresh never runs.
+        BackgroundTaskManager.shared.scheduleAppRefresh()
         
         print("✅ All background tasks registered during app launch")
     }
@@ -738,38 +715,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     .environmentObject(self.viewModel)
                 let hostingController = UIHostingController(rootView: alarmTriggeredView)
                 window.rootViewController?.present(hostingController, animated: true, completion: nil)
-            }
-        }
-    }
-    
-    private func isFirstLaunch() -> Bool {
-        let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-        // CRITICAL FIX: Do NOT set HasLaunchedBefore here!
-        // This flag should ONLY be set by DataSyncManager AFTER fresh install sync completes
-        // Setting it here breaks the entire fresh install sync logic
-        return !hasLaunchedBefore
-    }
-    
-    private func deleteLocalCoreDataStore() {
-        let coordinator = CoreDataStack.shared.persistentContainer.persistentStoreCoordinator
-        if let storeURL = CoreDataStack.shared.persistentContainer.persistentStoreDescriptions.first?.url,
-           let store = coordinator.persistentStore(for: storeURL) {
-            do {
-                try coordinator.remove(store)
-                try FileManager.default.removeItem(at: storeURL)
-                recreateCoreDataStack() // Re-initialize CoreData after cleanup
-                print("Successfully removed CoreData store and cleaned up local files.")
-            } catch {
-                print("Failed to delete CoreData store: \(error.localizedDescription)")
-            }
-        }
-    }
-    
-    private func recreateCoreDataStack() {
-        let container = NSPersistentContainer(name: "YourModel")
-        container.loadPersistentStores { storeDescription, error in
-            if let error = error as NSError? {
-                fatalError("Unresolved error \(error), \(error.userInfo)")
             }
         }
     }

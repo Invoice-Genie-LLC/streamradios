@@ -17,6 +17,8 @@ struct PodcastChaptersNotesView: View {
     
     @State private var selectedTab = 0
 	@State private var fallbackChapters: [PodcastChapter] = []
+    /// Chapter URLs recovered from the audio file's ID3 tag, keyed by start time and by title.
+    @State private var chapterLinkIndex: [String: String] = [:]
     @State private var hasScrolledToCurrentChapter = false
     @State private var scrollTrigger = false
     @Environment(\.colorScheme) var colorScheme
@@ -46,6 +48,39 @@ struct PodcastChaptersNotesView: View {
 		if let chapters = episode.chapters, !chapters.isEmpty { return true }
 		return !fallbackChapters.isEmpty
 	}
+    
+    private var displayChapters: [PodcastChapter] {
+        var chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+        guard !chapterLinkIndex.isEmpty else { return chaptersToShow }
+        
+        for index in chaptersToShow.indices where chaptersToShow[index].url == nil {
+            chaptersToShow[index].url = chapterLinkIndex["t:\(Int(chaptersToShow[index].startTime.rounded()))"]
+                ?? chapterLinkIndex["n:\(chaptersToShow[index].title.lowercased())"]
+        }
+        return chaptersToShow
+    }
+    
+    /// Chapter links live in the audio file's ID3 tag, which AVFoundation doesn't expose.
+    @MainActor
+    private func loadChapterLinks() async {
+        guard chapterLinkIndex.isEmpty else { return }
+        
+        let embedded = await ID3ChapterReader.loadChapters(
+            remoteURL: URL(string: episode.audioUrl),
+            localPath: episode.localFilePath
+        )
+        
+        var index: [String: String] = [:]
+        for chapter in embedded {
+            guard let url = chapter.url else { continue }
+            index["t:\(Int(chapter.startTime.rounded()))"] = url
+            index["n:\(chapter.title.lowercased())"] = url
+        }
+        
+        guard !index.isEmpty else { return }
+        chapterLinkIndex = index
+        persistFallbackChapters(displayChapters)
+    }
     
     private var hasNotes: Bool {
         episode.notes?.content.isEmpty == false
@@ -106,10 +141,15 @@ struct PodcastChaptersNotesView: View {
             }
             .navigationTitle("Episode Details")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
             .navigationBarItems(
-                trailing: Button("Done") {
+                leading: Button {
                     isPresented = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
                 }
+                .accessibilityLabel("Back")
             )
         }
 		.onAppear {
@@ -117,6 +157,8 @@ struct PodcastChaptersNotesView: View {
 			if (episode.chapters == nil || episode.chapters?.isEmpty == true) && self.fallbackChapters.isEmpty {
 				Task { await loadChaptersFromAsset() }
 			}
+			
+			Task { await loadChapterLinks() }
         }
     }
     
@@ -168,7 +210,7 @@ struct PodcastChaptersNotesView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+                        let chaptersToShow = displayChapters
                         if !chaptersToShow.isEmpty {
                             ForEach(chaptersToShow) { chapter in
                                 ChapterRowView(
@@ -231,29 +273,15 @@ struct PodcastChaptersNotesView: View {
     private var notesView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if let notes = episode.notes {
-                    // Show notes content with rich formatting
-                    if !notes.content.isEmpty {
-                        FormattedNotesView(content: notes.content)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                if let notes = episode.notes, !notes.content.isEmpty {
+                    NotesCardView(content: notes.content)
                 } else {
-                    // Fallback if no notes
-                    VStack(alignment: .leading, spacing: 8) {
-                        Image(systemName: "doc.text")
-                            .font(.largeTitle)
-                            .foregroundColor(.adaptiveSecondaryText)
-                        
-                        Text("No show notes available")
-                            .font(.body)
-                            .foregroundColor(.adaptiveSecondaryText)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 40)
+                    NotesEmptyStateView()
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            .padding(.bottom, 24)
         }
     }
     
@@ -512,7 +540,44 @@ struct PodcastChaptersNotesView: View {
 			}
 		}
 		chapters.sort { $0.startTime < $1.startTime }
+		attachInlineLinks(to: &chapters, from: content)
 		return chapters
+	}
+
+	/// The chapter regexes run on tag-stripped text, so any `<a href>` wrapping a chapter line is
+	/// lost by then — recover it by matching each chapter back to its original HTML line.
+	private func attachInlineLinks(to chapters: inout [PodcastChapter], from content: String) {
+		guard !chapters.isEmpty else { return }
+
+		var normalized = content
+		for tag in ["<br>", "<br/>", "<br />", "</p>", "</li>", "</div>"] {
+			normalized = normalized.replacingOccurrences(of: tag, with: "\n", options: [.caseInsensitive])
+		}
+
+		var linksByLine: [(text: String, url: String)] = []
+		for rawLine in normalized.components(separatedBy: "\n") {
+			guard rawLine.range(of: "<a", options: .caseInsensitive) != nil else { continue }
+			guard let hrefRange = rawLine.range(of: #"href\s*=\s*["']([^"']+)["']"#, options: [.regularExpression, .caseInsensitive]) else { continue }
+
+			let href = String(rawLine[hrefRange])
+				.replacingOccurrences(of: #"^href\s*=\s*["']"#, with: "", options: [.regularExpression, .caseInsensitive])
+				.replacingOccurrences(of: #"["']$"#, with: "", options: .regularExpression)
+			guard hasValidURL(href) else { continue }
+
+			let text = stripHTML(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !text.isEmpty else { continue }
+			linksByLine.append((text.lowercased(), href))
+		}
+
+		guard !linksByLine.isEmpty else { return }
+
+		for index in chapters.indices where chapters[index].url == nil {
+			let title = chapters[index].title.lowercased()
+			guard title.count > 2 else { continue }
+			if let match = linksByLine.first(where: { $0.text.contains(title) }) {
+				chapters[index].url = match.url
+			}
+		}
 	}
 
 	private func persistFallbackChapters(_ chapters: [PodcastChapter]) {
@@ -592,82 +657,124 @@ struct ChapterRowView: View {
         return isCurrentChapter
     }
     
+    private var chapterNumber: Int {
+        (allChapters.firstIndex(where: { $0.id == chapter.id }) ?? 0) + 1
+    }
+    
+    /// A chapter counts as played once the playhead has moved past its end.
+    private var isPlayed: Bool {
+        !isCurrentChapter && progress >= 0.999
+    }
+    
+    private var accent: Color { Color.accentColor }
+    
+    /// Time left in the chapter, shown only while it is the one playing.
+    private var remainingText: String? {
+        guard isCurrentChapter, progress > 0, progress < 1 else { return nil }
+        guard let index = allChapters.firstIndex(where: { $0.id == chapter.id }) else { return nil }
+        let end = index + 1 < allChapters.count ? allChapters[index + 1].startTime : episode.duration
+        let remaining = end - podcastPlayer.currentTime
+        guard remaining > 0 else { return nil }
+        let minutes = Int(remaining) / 60
+        let seconds = Int(remaining) % 60
+        return minutes > 0 ? "\(minutes)m \(seconds)s left" : "\(seconds)s left"
+    }
+    
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 6) {
-                HStack(spacing: 12) {
-                    // Chapter time
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(formatChapterTime(chapter.startTime))
-                            .font(.caption)
-                            .foregroundColor(isCurrentChapter ? .blue : .adaptiveSecondaryText)
-                            .monospacedDigit()
+            HStack(spacing: 12) {
+                // Doubles as the chapter number and the per-chapter transport control.
+                Button(action: handlePlayStop) {
+                    ZStack {
+                        Circle()
+                            .fill(isCurrentChapter ? accent : Color.adaptiveFieldBackground)
+                        
                         if isCurrentChapter {
-                            Text("Current")
-                                .font(.caption2)
-                                
+                            Image(systemName: isPlayingThisChapter ? "pause.fill" : "play.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                        } else if isPlayed {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.adaptiveSecondaryText)
+                        } else {
+                            Text("\(chapterNumber)")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.adaptiveSecondaryText)
+                                .monospacedDigit()
                         }
                     }
-                    .frame(width: 60, alignment: .leading)
-                    
-                    // Chapter title
+                    .frame(width: 36, height: 36)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel(isPlayingThisChapter ? "Pause chapter" : "Play from chapter \(chapterNumber)")
+                
+                VStack(alignment: .leading, spacing: 5) {
                     Text(chapter.title)
-                        .font(.body)
-                        .foregroundColor(isCurrentChapter ? .blue : .adaptivePrimaryText)
+                        .font(.subheadline.weight(isCurrentChapter ? .semibold : .regular))
+                        .foregroundColor(isPlayed ? .adaptiveSecondaryText : .adaptivePrimaryText)
                         .multilineTextAlignment(.leading)
+                        .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     
-                    // Trailing controls
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(durationText)
-                            .font(.caption)
-                            .foregroundColor(.adaptiveSecondaryText)
+                    HStack(spacing: 6) {
+                        Text(formatChapterTime(chapter.startTime))
                             .monospacedDigit()
-                        HStack(spacing: 8) {
-                            // Play/Stop button for this chapter
-                            Button(action: handlePlayStop) {
-                                Image(systemName: isPlayingThisChapter ? "stop.fill" : "play.fill")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.white)
-                                    .frame(width: 32, height: 32)
-                                    .background(isPlayingThisChapter ? Color.red : Color.blue)
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .accessibilityLabel(isPlayingThisChapter ? "Stop playing" : "Play from chapter")
-                            
-                            if hasLink {
-                                Button(action: onLinkTap) {
-                                    Image(systemName: "link")
-                                        .font(.caption)
-                                        
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .accessibilityLabel("Open chapter link")
-                            }
-                            if isCurrentChapter {
-                                Image(systemName: "waveform")
-                                    .font(.caption)
-                                    
-                            }
+                        
+                        Text("·")
+                        
+                        Text(durationText)
+                            .monospacedDigit()
+                        
+                        if let remainingText {
+                            Text("·")
+                            Text(remainingText)
+                                .foregroundColor(accent)
                         }
                     }
+                    .font(.caption2)
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .lineLimit(1)
+                    
+                    // Only the chapter in progress needs a bar; elsewhere it reads as clutter.
+                    if isCurrentChapter {
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color.adaptiveSeparator)
+                                Capsule()
+                                    .fill(accent)
+                                    .frame(width: max(3, geometry.size.width * progress))
+                            }
+                        }
+                        .frame(height: 3)
+                        .padding(.top, 1)
+                    }
                 }
-                // Progress bar
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(isCurrentChapter ? .blue : .adaptiveSecondaryText.opacity(0.5))
+                
+                if hasLink {
+                    Button(action: onLinkTap) {
+                        Image(systemName: "link")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .frame(width: 30, height: 30)
+                            .background(Circle().fill(Color.adaptiveFieldBackground))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .accessibilityLabel("Open chapter link")
+                }
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
             .padding(.horizontal, 12)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isCurrentChapter ? Color.blue.opacity(0.1) : Color.clear)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isCurrentChapter ? accent.opacity(0.12) : Color.adaptiveSecondaryBackground)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isCurrentChapter ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isCurrentChapter ? accent.opacity(0.45) : Color.clear, lineWidth: 1)
             )
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -905,20 +1012,26 @@ struct FormattedNoteItem: View {
     var body: some View {
         switch item.kind {
         case .header(let level):
-            FormattedTextView(htmlContent: item.textHTML)
-                .font(fontForHeader(level))
-                .foregroundColor(.adaptivePrimaryText)
-                .padding(.top, 10)
-                .padding(.bottom, 2)
+            HStack(alignment: .top, spacing: 10) {
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+                
+                FormattedTextView(htmlContent: item.textHTML, font: fontForHeader(level))
+                    .foregroundColor(.adaptivePrimaryText)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 12)
+            .padding(.bottom, 2)
         case .bullet:
             HStack(alignment: .top, spacing: 10) {
                 BulletView(level: item.level)
-                    .padding(.top, 6)
+                    .padding(.top, 7)
                 FormattedTextView(htmlContent: item.textHTML)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.leading, CGFloat(max(0, item.level - 1)) * 16)
-            .padding(.vertical, 2)
+            .padding(.leading, CGFloat(max(0, item.level - 1)) * 18)
+            .padding(.vertical, 3)
         case .paragraph:
             FormattedTextView(htmlContent: item.textHTML)
                 .foregroundColor(.adaptivePrimaryText)
@@ -928,25 +1041,16 @@ struct FormattedNoteItem: View {
     
     private func fontForHeader(_ level: Int) -> Font {
         switch level {
-        case 1: return .title3.weight(.semibold)
+        case 1: return .title3.weight(.bold)
         case 2: return .headline
         default: return .subheadline.weight(.semibold)
-        }
-    }
-    
-    private func bulletSymbol(for level: Int) -> String {
-        switch level {
-        case 1: return "•"
-        case 2: return "◦"
-        case 3: return "▪︎"
-        case 4: return "–"
-        default: return "·"
         }
     }
 }
 
 struct FormattedTextView: View {
     let htmlContent: String
+    var font: Font = .body
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -954,7 +1058,7 @@ struct FormattedTextView: View {
                 CodeBlockView(code: code)
             } else {
                 let components = parseHTMLLinks(htmlContent)
-                InlineAttributedTextView(components: components)
+                InlineAttributedTextView(components: components, font: font)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1006,8 +1110,8 @@ struct FormattedTextView: View {
     private func parseHTMLLinks(_ html: String) -> [TextComponent] {
         var components: [TextComponent] = []
         
-        // Regex to find <a href="url">text</a> patterns
-        let pattern = #"<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>"#
+        // Matches <a href="url">text</a> and inline <code>…</code> spans
+        let pattern = #"<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>|<code[^>]*>([\s\S]*?)</code>"#
         
         do {
             let regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
@@ -1026,16 +1130,15 @@ struct FormattedTextView: View {
                     }
                 }
                 
-                // Add the link
-                if result.numberOfRanges >= 3 {
-                    let urlRange = result.range(at: 1)
-                    let textRange = result.range(at: 2)
-                    
-                    if urlRange.location != NSNotFound && textRange.location != NSNotFound {
-                        let url = nsString.substring(with: urlRange)
-                        let rawLinkText = nsString.substring(with: textRange)
-                        let linkText = cleanHTMLText(rawLinkText)
-                        components.append(TextComponent(text: linkText, isLink: true, url: url))
+                if result.range(at: 1).location != NSNotFound, result.range(at: 2).location != NSNotFound {
+                    let url = nsString.substring(with: result.range(at: 1))
+                    let linkText = cleanHTMLText(nsString.substring(with: result.range(at: 2)))
+                    components.append(TextComponent(text: linkText, isLink: true, url: url))
+                } else if result.range(at: 3).location != NSNotFound {
+                    let codeText = cleanCodeHTML(nsString.substring(with: result.range(at: 3)))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !codeText.isEmpty {
+                        components.append(TextComponent(text: codeText, isLink: false, url: nil, isCode: true))
                     }
                 }
                 
@@ -1157,22 +1260,33 @@ struct BulletView: View {
     
     var body: some View {
         let clamped = max(1, min(5, level))
-        let size: CGFloat = [0,6,5,5,4,4][clamped]
-        let color: Color = clamped == 1 ? .blue : .adaptivePrimaryText.opacity(0.7)
-        Circle()
-            .fill(color)
-            .frame(width: size, height: size)
+        switch clamped {
+        case 1:
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 6, height: 6)
+        case 2:
+            Circle()
+                .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1.5)
+                .frame(width: 6, height: 6)
+        default:
+            Circle()
+                .fill(Color.adaptiveSecondaryText.opacity(0.55))
+                .frame(width: 4, height: 4)
+        }
     }
 }
 
 // MARK: - Inline Attributed Text View
 struct InlineAttributedTextView: View {
     let components: [TextComponent]
+    var font: Font = .body
     
     var body: some View {
         Text(makeAttributedString())
-            .font(.body)
+            .font(font)
             .foregroundColor(.adaptivePrimaryText)
+            .lineSpacing(3)
             .textSelection(.enabled)
     }
     
@@ -1220,9 +1334,9 @@ struct InlineAttributedTextView: View {
                 }
                 var seg = AttributedString(cleanText)
                 if component.isCode {
-                    seg.font = .system(.body, design: .monospaced)
-                    // Light background for inline code
-                    seg.backgroundColor = Color.adaptiveSecondaryBackground
+                    seg.font = .system(size: 14, design: .monospaced)
+                    seg.foregroundColor = .accentColor
+                    seg.backgroundColor = Color.adaptiveFieldBackground
                 }
                 out.append(seg)
             }
@@ -1237,33 +1351,83 @@ struct InlineAttributedTextView: View {
 struct CodeBlockView: View {
     let code: String
     @Environment(\.colorScheme) private var colorScheme
+    @State private var didCopy = false
+    
+    private var lines: [String] {
+        code.trimmingCharacters(in: .newlines).components(separatedBy: "\n")
+    }
     
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().overlay(Color.adaptiveBorder.opacity(0.6))
+            
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .textSelection(.enabled)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundColor(.adaptivePrimaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            }
-            Button(action: copy) {
-                Image(systemName: "doc.on.doc")
-                    .font(.caption)
+                HStack(alignment: .top, spacing: 12) {
+                    if lines.count > 1 {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            ForEach(Array(lines.indices), id: \.self) { index in
+                                Text("\(index + 1)")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.adaptiveSecondaryText.opacity(0.55))
+                            }
+                        }
+                    }
                     
-                    .padding(8)
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                            Text(CodeHighlighter.highlight(line))
+                                .font(.system(size: 13, design: .monospaced))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(codeBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.adaptiveBorder, lineWidth: 1)
-                )
         )
-        .padding(.vertical, 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.adaptiveBorder.opacity(0.7), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.vertical, 6)
+    }
+    
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.accentColor)
+            
+            Text(CodeHighlighter.languageLabel(for: code))
+                .font(.system(size: 11, weight: .semibold))
+                .kerning(0.6)
+                .foregroundColor(.adaptiveSecondaryText)
+            
+            Spacer(minLength: 8)
+            
+            Button(action: copy) {
+                HStack(spacing: 4) {
+                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(didCopy ? "Copied" : "Copy")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundColor(didCopy ? .green : .accentColor)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.adaptiveFieldBackground))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
     
     private var codeBackground: Color {
@@ -1272,6 +1436,160 @@ struct CodeBlockView: View {
     
     private func copy() {
         UIPasteboard.general.string = code
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.2)) { didCopy = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation(.easeInOut(duration: 0.2)) { didCopy = false }
+        }
+    }
+}
+
+// MARK: - Code Highlighting
+
+enum CodeHighlighter {
+    private static let keywords: Set<String> = [
+        "func", "let", "var", "class", "struct", "enum", "protocol", "extension", "import",
+        "return", "if", "else", "guard", "for", "while", "switch", "case", "default", "in",
+        "self", "init", "async", "await", "try", "throw", "throws", "static", "private", "public",
+        "true", "false", "nil", "null", "none", "def", "const", "function", "new", "export",
+        "sudo", "echo", "cd", "export", "then", "fi", "do", "done"
+    ]
+    
+    /// Line-scoped tokenizer — good enough for the short snippets that appear in show notes.
+    static func highlight(_ line: String) -> AttributedString {
+        var output = AttributedString()
+        var buffer = ""
+        var index = line.startIndex
+        
+        func flushBuffer() {
+            guard !buffer.isEmpty else { return }
+            output.append(styledWord(buffer))
+            buffer = ""
+        }
+        
+        while index < line.endIndex {
+            let character = line[index]
+            
+            // Comment runs to end of line
+            if character == "#" || (character == "/" && line[index...].hasPrefix("//")) {
+                flushBuffer()
+                var comment = AttributedString(String(line[index...]))
+                comment.foregroundColor = .adaptiveSecondaryText.opacity(0.75)
+                output.append(comment)
+                return output
+            }
+            
+            if character == "\"" || character == "'" {
+                flushBuffer()
+                var literal = String(character)
+                var cursor = line.index(after: index)
+                while cursor < line.endIndex {
+                    literal.append(line[cursor])
+                    if line[cursor] == character { cursor = line.index(after: cursor); break }
+                    cursor = line.index(after: cursor)
+                }
+                var segment = AttributedString(literal)
+                segment.foregroundColor = Color(red: 0.36, green: 0.72, blue: 0.45)
+                output.append(segment)
+                index = cursor
+                continue
+            }
+            
+            if character.isLetter || character.isNumber || character == "_" || character == "-" || character == "." {
+                buffer.append(character)
+            } else {
+                flushBuffer()
+                var punctuation = AttributedString(String(character))
+                punctuation.foregroundColor = .adaptiveSecondaryText
+                output.append(punctuation)
+            }
+            index = line.index(after: index)
+        }
+        
+        flushBuffer()
+        return output
+    }
+    
+    private static func styledWord(_ word: String) -> AttributedString {
+        var segment = AttributedString(word)
+        if keywords.contains(word.lowercased()) {
+            segment.foregroundColor = Color(red: 0.85, green: 0.42, blue: 0.66)
+        } else if word.hasPrefix("-") {
+            segment.foregroundColor = Color(red: 0.36, green: 0.66, blue: 0.92)
+        } else if Double(word) != nil {
+            segment.foregroundColor = Color(red: 0.92, green: 0.60, blue: 0.30)
+        } else {
+            segment.foregroundColor = .adaptivePrimaryText
+        }
+        return segment
+    }
+    
+    static func languageLabel(for code: String) -> String {
+        let lower = code.lowercased()
+        if lower.contains("func ") || lower.contains("@state") || lower.contains("swiftui") { return "SWIFT" }
+        if lower.contains("<html") || lower.contains("</div>") { return "HTML" }
+        if lower.contains("def ") || lower.contains("import numpy") { return "PYTHON" }
+        if lower.contains("const ") || lower.contains("=>") || lower.contains("function ") { return "JAVASCRIPT" }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") { return "JSON" }
+        if ["sudo ", "xattr ", "git ", "curl ", "brew ", "npm ", "defaults ", "plutil ", "xcodebuild "]
+            .contains(where: { lower.contains($0) }) { return "SHELL" }
+        return "CODE"
+    }
+}
+
+// MARK: - Notes Card
+
+/// Shared container so the player sheet and the details screen present notes identically.
+struct NotesCardView: View {
+    let content: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 7) {
+                Image(systemName: "text.alignleft")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Show Notes")
+                    .font(.system(size: 12, weight: .semibold))
+                    .kerning(0.8)
+                Spacer()
+            }
+            .foregroundColor(.adaptiveSecondaryText)
+            
+            FormattedNotesView(content: content)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.adaptiveSecondaryBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.adaptiveBorder.opacity(0.5), lineWidth: 1)
+        )
+    }
+}
+
+struct NotesEmptyStateView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 40, weight: .light))
+                .foregroundColor(.adaptiveSecondaryText)
+            
+            Text("No show notes available")
+                .font(.headline)
+                .foregroundColor(.adaptivePrimaryText)
+            
+            Text("This episode didn't include any description.")
+                .font(.footnote)
+                .foregroundColor(.adaptiveSecondaryText)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 40)
+        .padding(.top, 60)
     }
 }
 
@@ -1322,4 +1640,201 @@ struct CodeBlockView: View {
         podcastPlayer: PodcastPlayer.shared,
         isPresented: $isPresented
     )
+}
+
+// MARK: - ID3 Chapter Reader
+
+/// AVFoundation surfaces chapter titles but not the `WXXX` link nested inside an ID3 `CHAP` frame,
+/// so the tag is parsed directly to recover per-chapter URLs.
+enum ID3ChapterReader {
+    struct Chapter {
+        let startTime: TimeInterval
+        let title: String
+        let url: String?
+    }
+    
+    static func loadChapters(remoteURL: URL?, localPath: String?) async -> [Chapter] {
+        guard let tag = await loadTag(remoteURL: remoteURL, localPath: localPath) else { return [] }
+        return parse(frames: tag.frames, version: tag.version)
+    }
+    
+    // MARK: Tag loading
+    
+    private struct Tag {
+        let version: UInt8
+        let frames: Data
+    }
+    
+    private static func loadTag(remoteURL: URL?, localPath: String?) async -> Tag? {
+        if let localPath, FileManager.default.fileExists(atPath: localPath),
+           let handle = try? FileHandle(forReadingAtPath: localPath) {
+            defer { try? handle.close() }
+            if let header = try? handle.read(upToCount: 10),
+               let info = tagInfo(header: header),
+               let frames = try? handle.read(upToCount: info.size), !frames.isEmpty {
+                return Tag(version: info.version, frames: frames)
+            }
+        }
+        
+        guard let remoteURL else { return nil }
+        guard let header = await fetchRange(remoteURL, from: 0, to: 9),
+              let info = tagInfo(header: header),
+              let frames = await fetchRange(remoteURL, from: 10, to: 9 + info.size) else { return nil }
+        return Tag(version: info.version, frames: frames)
+    }
+    
+    private static func tagInfo(header: Data?) -> (version: UInt8, size: Int)? {
+        guard let header, header.count == 10 else { return nil }
+        guard header[0] == 0x49, header[1] == 0x44, header[2] == 0x33 else { return nil } // "ID3"
+        let size = syncSafeInt(header, at: 6)
+        guard size > 0, size < 8_000_000 else { return nil }
+        return (header[3], size)
+    }
+    
+    private static func fetchRange(_ url: URL, from lower: Int, to upper: Int) async -> Data? {
+        var request = URLRequest(url: url)
+        request.setValue("bytes=\(lower)-\(upper)", forHTTPHeaderField: "Range")
+        request.timeoutInterval = 15
+        
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else { return nil }
+        
+        if http.statusCode == 206 { return data }
+        
+        // A server that ignores Range replies 200 with the whole file.
+        guard http.statusCode == 200, data.count > lower else { return nil }
+        return data.subdata(in: lower..<min(data.count, upper + 1))
+    }
+    
+    // MARK: Frame parsing
+    
+    private static func parse(frames: Data, version: UInt8) -> [Chapter] {
+        var chapters: [Chapter] = []
+        var index = 0
+        
+        while index + 10 <= frames.count {
+            let identifier = frames.subdata(in: index..<(index + 4))
+            guard isFrameIdentifier(identifier) else { break }
+            guard let size = frameSize(frames, at: index + 4, version: version),
+                  size > 0, index + 10 + size <= frames.count else { break }
+            
+            if identifier == Data("CHAP".utf8) {
+                let body = frames.subdata(in: (index + 10)..<(index + 10 + size))
+                if let chapter = parseCHAP(body, version: version) {
+                    chapters.append(chapter)
+                }
+            }
+            index += 10 + size
+        }
+        
+        return chapters.sorted { $0.startTime < $1.startTime }
+    }
+    
+    private static func parseCHAP(_ body: Data, version: UInt8) -> Chapter? {
+        guard let terminator = body.firstIndex(of: 0) else { return nil }
+        let timesStart = terminator + 1
+        guard timesStart + 16 <= body.count else { return nil }
+        
+        let startMilliseconds = bigEndianInt(body, at: timesStart)
+        var index = timesStart + 16
+        var title: String?
+        var url: String?
+        
+        while index + 10 <= body.count {
+            let identifier = body.subdata(in: index..<(index + 4))
+            guard isFrameIdentifier(identifier) else { break }
+            guard let size = frameSize(body, at: index + 4, version: version),
+                  size > 0, index + 10 + size <= body.count else { break }
+            
+            let frameBody = body.subdata(in: (index + 10)..<(index + 10 + size))
+            if identifier == Data("TIT2".utf8) {
+                title = decodeText(frameBody)
+            } else if identifier == Data("WXXX".utf8) {
+                url = decodeUserURL(frameBody)
+            }
+            index += 10 + size
+        }
+        
+        guard let title, !title.isEmpty else { return nil }
+        return Chapter(startTime: TimeInterval(startMilliseconds) / 1000.0, title: title, url: url)
+    }
+    
+    /// Taggers disagree about syncsafe sizes in 2.4 tags, so the reading that lands on a valid next
+    /// frame wins.
+    private static func frameSize(_ data: Data, at offset: Int, version: UInt8) -> Int? {
+        guard offset + 4 <= data.count else { return nil }
+        let plain = bigEndianInt(data, at: offset)
+        let syncSafe = syncSafeInt(data, at: offset)
+        let candidates = version >= 4 ? [syncSafe, plain] : [plain, syncSafe]
+        
+        for candidate in candidates where candidate > 0 {
+            let next = offset + 6 + candidate
+            if next == data.count { return candidate }
+            if next + 4 <= data.count, isFrameIdentifier(data.subdata(in: next..<(next + 4))) {
+                return candidate
+            }
+        }
+        return candidates.first { $0 > 0 }
+    }
+    
+    private static func isFrameIdentifier(_ data: Data) -> Bool {
+        guard data.count == 4 else { return false }
+        return data.allSatisfy { byte in
+            (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x30 && byte <= 0x39)
+        }
+    }
+    
+    private static func bigEndianInt(_ data: Data, at offset: Int) -> Int {
+        guard offset + 4 <= data.count else { return 0 }
+        return (Int(data[offset]) << 24) | (Int(data[offset + 1]) << 16)
+            | (Int(data[offset + 2]) << 8) | Int(data[offset + 3])
+    }
+    
+    private static func syncSafeInt(_ data: Data, at offset: Int) -> Int {
+        guard offset + 4 <= data.count else { return 0 }
+        return (Int(data[offset] & 0x7F) << 21) | (Int(data[offset + 1] & 0x7F) << 14)
+            | (Int(data[offset + 2] & 0x7F) << 7) | Int(data[offset + 3] & 0x7F)
+    }
+    
+    // MARK: Text decoding
+    
+    private static func decodeText(_ data: Data) -> String? {
+        guard let encoding = data.first, data.count > 1 else { return nil }
+        let decoded = decode(data.subdata(in: 1..<data.count), encoding: encoding)
+        return decoded?.trimmingCharacters(in: CharacterSet(charactersIn: "\u{0}").union(.whitespacesAndNewlines))
+    }
+    
+    /// `WXXX` is an encoded description followed by a Latin-1 URL.
+    private static func decodeUserURL(_ data: Data) -> String? {
+        guard let encoding = data.first, data.count > 1 else { return nil }
+        var index = 1
+        
+        if encoding == 1 || encoding == 2 {
+            while index + 1 < data.count {
+                if data[index] == 0 && data[index + 1] == 0 {
+                    index += 2
+                    break
+                }
+                index += 2
+            }
+        } else {
+            while index < data.count && data[index] != 0 { index += 1 }
+            index += 1
+        }
+        
+        guard index < data.count else { return nil }
+        let raw = String(data: data.subdata(in: index..<data.count), encoding: .isoLatin1)?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\u{0}").union(.whitespacesAndNewlines))
+        guard let raw, raw.lowercased().hasPrefix("http") else { return nil }
+        return raw
+    }
+    
+    private static func decode(_ data: Data, encoding: UInt8) -> String? {
+        switch encoding {
+        case 0: return String(data: data, encoding: .isoLatin1)
+        case 1: return String(data: data, encoding: .utf16)
+        case 2: return String(data: data, encoding: .utf16BigEndian)
+        default: return String(data: data, encoding: .utf8)
+        }
+    }
 }

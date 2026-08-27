@@ -7,6 +7,7 @@ import SwiftUI
 import Combine
 import FlagKit
 import Darwin
+import StreamRadiosKit
 
 // MARK: - CPU Monitor
 class CPUMonitor {
@@ -108,6 +109,7 @@ struct ContentView: View {
     @EnvironmentObject var podcastPlayer: PodcastPlayer
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @EnvironmentObject var permissionManager: PermissionManager
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var alertManager = AlertManager()
     
     @State private var selectedStationForEdit: RadioStation?
@@ -139,6 +141,8 @@ struct ContentView: View {
     // State for home button and footer menu visibility
     @State private var isFooterMenuHidden = false // Start with menu visible
     @State private var isScrolling = false
+    /// Clears `isScrolling` if the matching stop notification never arrives.
+    @State private var scrollingWatchdog: DispatchWorkItem?
     @State private var homeButtonExplicitlyShowingTabView = false // Track when home button forces TabView visible
     
     // Network status for disabling country picker when offline
@@ -177,9 +181,9 @@ struct ContentView: View {
         ]
         
         // Configure selected state
-        appearance.stackedLayoutAppearance.selected.iconColor = UIColor.secondaryLabel
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor.label
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
-            .foregroundColor: UIColor.secondaryLabel,
+            .foregroundColor: UIColor.label,
             .font: UIFont.preferredFont(forTextStyle: .caption2)
         ]
         
@@ -197,6 +201,7 @@ struct ContentView: View {
     }
     
     @Environment(\.horizontalSizeClass) var sizeClass
+    @StateObject private var tabBarClearance = TabBarClearance.shared
     
     // MARK: - Device Detection
     
@@ -333,9 +338,6 @@ struct ContentView: View {
         }
         .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
         .environment(\.horizontalSizeClass, .compact)
-        // CONSISTENT SPACING FIX: Adjust TabView position to maintain visual consistency
-        // When footer menu is hidden (scrolling), move TabView up to compensate for fixed player spacing
-        .offset(y: shouldHideFooterMenu ? -10 : 0)
         .onChange(of: selectedTab) { newTab in
             // Tab switching should NOT stop playback - players should continue playing
             // State clearing only happens when user actually starts playing a different service
@@ -372,9 +374,22 @@ struct ContentView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 isScrolling = true
             }
+            
+            // A cancelled drag never posts .userStoppedScrolling, which would otherwise leave the
+            // global player hit-testing disabled forever.
+            scrollingWatchdog?.cancel()
+            let watchdog = DispatchWorkItem {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isScrolling = false
+                }
+            }
+            scrollingWatchdog = watchdog
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: watchdog)
         }
         .onReceive(NotificationCenter.default.publisher(for: .userStoppedScrolling)) { _ in
             print("🏠 SCROLL: User stopped scrolling - showing TabView")
+            scrollingWatchdog?.cancel()
+            scrollingWatchdog = nil
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 isScrolling = false
             }
@@ -458,10 +473,14 @@ struct ContentView: View {
                 .environmentObject(podcastPlayer)
                 .environmentObject(podcastViewModel)
                 .padding(.bottom, {
-                    let baseOffset: CGFloat = isFooterMenuHidden ? 15 : 55
-                    let iPadOffset: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 10 : 0
-                    return baseOffset + iPadOffset
+                    // Sit a fixed gap above whatever the tab bar actually measures, rather than a
+                    // per-idiom constant: iPads with a home button have no bottom safe area to
+                    // absorb the difference, so a constant tuned on iPhone lands on the bar.
+                    // With the bar hidden there is nothing to clear, so cancel the safe-area inset
+                    // out and let the player sit near the physical screen edge.
+                    isFooterMenuHidden ? 15 - tabBarClearance.bottomInset : tabBarClearance.height + 6
                 }())
+                .background(TabBarClearanceProbe(isActive: !isFooterMenuHidden))
                 // Add smooth sliding animation when TabView shows/hides
                 .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
                 // Add subtle scale and opacity animation for enhanced visual feedback
@@ -642,192 +661,79 @@ struct ContentView: View {
     // MARK: - Radio Tab Content with Full Original Functionality
     
     private var radioTabContent: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.adaptiveBackground
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack(spacing: 0) {
-                    // Top navigation area - Browse by Country section prominently at top
-                    VStack(spacing: 8) {
-                        // Browse by Country section - now prominently at the top
-                        VStack(spacing: 12) {
-                            // Section header
-                            HStack(spacing: 6) {
-                                Image(systemName: "globe")
-                                    .font(.headline)
-                                    .foregroundColor(Color(red: 45/255, green: 59/255, blue: 70/255))
-                                    .dynamicTypeSize(...DynamicTypeSize.large)
-                                
-                                Text("Browse by Country")
-                                    .font(.headline)
-                                    .foregroundColor(.adaptivePrimaryText)
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
-                                    .dynamicTypeSize(...DynamicTypeSize.large)
-                                
-                                Spacer(minLength: 0)
-                                
-                                // Button Container with rounded background - Adapts to content
-                                Group {
-                                    if isSearchPresented {
-                                        // Cancel button when search is active
-                                        Button("Cancel") {
-                                            withAnimation(.easeInOut(duration: 0.3)) {
-                                                isSearchPresented = false
-                                                searchText = ""
-                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    VStack(spacing: 10) {
+                        HStack(spacing: 10) {
+                            if isSearchPresented {
+                                searchBar
+                            } else {
+                                CountryPickerButton(
+                                    selectedCountry: $viewModel.selectedCountry,
+                                    countries: viewModel.countries,
+                                    stationCount: { country in
+                                        let stationCount = viewModel.stations.filter { $0.country == country }.count
+                                        
+                                        // Don't show count for countries with manual stations on fresh installs
+                                        // Only show count when both manual and API stations are combined
+                                        let hasManualStations = ManualStationManager.shared.hasManualStations(for: country)
+                                        let hasAPIStations = stationCount > ManualStationManager.shared.getManualStationCount(for: country)
+                                        
+                                        // Show count only if:
+                                        // 1. Country has no manual stations, OR
+                                        // 2. Country has both manual and API stations
+                                        if !hasManualStations || (hasManualStations && hasAPIStations) {
+                                            return stationCount
+                                        } else {
+                                            return 0 // Hide count for manual-only stations
+                                        }
+                                    },
+                                    onSelect: { [weak viewModel] country in
+                                        // Load stations for selected country (use cache if available)
+                                        Task {
+                                            UIDevice.playHapticFeedback()
+                                            await viewModel?.fetchStationsForSelectedCountry(forceRefresh: false)
+                                            await MainActor.run {
+                                                viewModel?.syncStationsWithCloudKit()
                                             }
                                         }
-                                        .foregroundColor(.primary)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            Capsule()
-                                                .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
-                                        )
-                                    } else {
-                                        // Toolbar buttons when search is not active
-                                        HStack(spacing: 8) {
-                                            // Search toggle button - Shows in all tabs
-                                            Button(action: {
-                                                withAnimation(.easeInOut(duration: 0.3)) {
-                                                    isSearchPresented = true
-                                                }
-                                            }) {
-                                                Image(systemName: "magnifyingglass")
-                                                    .foregroundColor(.adaptivePrimaryText)
-                                                    .font(.system(size: 20, weight: .medium))
-                                                    .frame(width: 32, height: 32)
-                                            }
-                                            
-                                            // Sort button - Shows in all tabs (Recent, Favorites, and All)
-                                            Button(action: {
-                                                switch viewModel.selectedSubTab {
-                                                case .recent:
-                                                    // Recent tab - sort alphabetically
-                                                    viewModel.sortRecentStationsAlphabetically()
-                                                case .favorites:
-                                                    // Favorites tab - show alert to warn about modifying order
-                                                    alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
-                                                        viewModel.sortFavoritesAlphabetically()
-                                                    }
-                                                case .all:
-                                                    // All tab - sort immediately without alert
-                                                    viewModel.sortStationsAlphabetically()
-                                                }
-                                            }) {
-                                                Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                                    .foregroundColor(.adaptivePrimaryText)
-                                                    .font(.system(size: 20, weight: .medium))
-                                                    .frame(width: 32, height: 32)
-                                            }
-                                            
-                                            // Add station button - Shows in all tabs
-                                            Button(action: {
-                                                if viewModel.selectedCountry == "Select Country" {
-                                                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                                                } else {
-                                                    activeSheet = .addStation
-                                                }
-                                            }) {
-                                                Image(systemName: "plus")
-                                                    .foregroundColor(.adaptivePrimaryText)
-                                                    .font(.system(size: 20, weight: .medium))
-                                                    .frame(width: 32, height: 32)
-                                            }
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                    }
-                                }
-                                .background(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .fill(Color.adaptiveSecondaryBackground)
+                                    },
+                                    isDisabled: isOffline,
+                                    compact: true
                                 )
-                                .modifier(ConditionalLiquidGlass(cornerRadius: 20))
-                                .padding(.top, 1)
                             }
-                            .padding(.horizontal, 16)
-                            
-                            // Search box for filtering stations - positioned above country picker
-                            searchBar
-                            
-                            // Country picker - hide when search is active to give more room for results
-                            if !isSearchPresented {
-                                HStack {
-                                    CountryPickerButton(
-                                        selectedCountry: $viewModel.selectedCountry,
-                                        countries: viewModel.countries,
-                                        stationCount: { country in
-                                            let stationCount = viewModel.stations.filter { $0.country == country }.count
-                                            
-                                            // Don't show count for countries with manual stations on fresh installs
-                                            // Only show count when both manual and API stations are combined
-                                            let hasManualStations = ManualStationManager.shared.hasManualStations(for: country)
-                                            let hasAPIStations = viewModel.stations.filter { $0.country == country }.count > ManualStationManager.shared.getManualStationCount(for: country)
-                                            
-                                            // Show count only if:
-                                            // 1. Country has no manual stations, OR
-                                            // 2. Country has both manual and API stations
-                                            if !hasManualStations || (hasManualStations && hasAPIStations) {
-                                                return stationCount
-                                            } else {
-                                                return 0 // Hide count for manual-only stations
-                                            }
-                                        },
-                                        onSelect: { [weak viewModel] country in
-                                            // Load stations for selected country (use cache if available)
-                                            Task {
-                                                UIDevice.playHapticFeedback()
-                                                await viewModel?.fetchStationsForSelectedCountry(forceRefresh: false)
-                                                await MainActor.run {
-                                                    viewModel?.syncStationsWithCloudKit()
-                                                }
-                                            }
-                                        },
-                                        isDisabled: isOffline
-                                    )
-                                }
-                            }
-                        }
-                        .padding(16)
-                        .background(Color.adaptiveSectionBackground)
-                        .cornerRadius(12)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 4)
-                        
-                        // Radio syncing indicator - hide when search is active
-                        if selectedTab == .radio && !isSearchPresented {
-                            HStack {
-                                RadioSyncIndicator()
-                                Spacer()
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.top, -4)
-                        }
-                        
-                        // Sub-tabs: Recent, Favorites, All - hide when search is active
-                        if !isSearchPresented {
-                            elegantTabBar
-                        }
 
+                            headerActions
+                        }
+                        .padding(.horizontal, 16)
+
+                        if !isSearchPresented {
+                            subTabBar
+                        }
                     }
                     .padding(.top, topPadding)
-                    .padding(.bottom, isSearchPresented ? 4 : 10)
+                    .padding(.bottom, isSearchPresented ? 6 : 10)
                     .background(Color.adaptiveBackground)
+                    .overlay(alignment: .top) {
+                        RadioSyncIndicator()
+                            .padding(.top, topPadding + 48)
+                    }
                     
-                    // RadioStationListView now handles its own sub-tabs internally
-                                        RadioStationListView(isEditing: $isEditingMode,
-                                         selectedStationForEdit: $selectedStationForEdit,
-                                         selectedTab: $viewModel.selectedTab, 
-                                         selectedSubTab: $viewModel.selectedSubTab,
-                                         activeSheet: $activeSheet,
-                                         isPlayerSheetPresented: $isPlayerSheetPresented,
-                                         searchText: $searchText,
-                                         isScrolling: $isScrolling,
-                                         isFooterMenuHidden: $isFooterMenuHidden,
-                                         isSearchPresented: $isSearchPresented)
+                    // SRRadioListView handles its own sub-tabs internally
+                    SRRadioListView(isEditing: $isEditingMode,
+                                    selectedStationForEdit: $selectedStationForEdit,
+                                    selectedTab: $viewModel.selectedTab,
+                                    selectedSubTab: $viewModel.selectedSubTab,
+                                    activeSheet: $activeSheet,
+                                    isPlayerSheetPresented: $isPlayerSheetPresented,
+                                    searchText: $searchText,
+                                    isScrolling: $isScrolling,
+                                    isFooterMenuHidden: $isFooterMenuHidden,
+                                    isSearchPresented: $isSearchPresented)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
                     
@@ -835,7 +741,9 @@ struct ContentView: View {
                     // This ensures consistent player display across all tabs
                     // No individual player needed here as GlobalPlayerView handles all cases
                 }
-                .padding(.bottom, 0)
+                // The list runs to the screen edge so station rows, not empty background,
+                // sit under the floating tab bar.
+                .ignoresSafeArea(.container, edges: .bottom)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
                     TapGesture().onEnded { _ in
@@ -871,63 +779,19 @@ struct ContentView: View {
                         .environmentObject(alertManager)
                 }
             }
-            .sheet(item: $activeSheet) { item in
+            // Add/Edit Station are pushed onto the radio tab's navigation stack. They must not
+            // reach this binding at all, or `item:` presents an empty sheet over the push.
+            .sheet(item: Binding(
+                get: { activeSheet == .playerSheet ? activeSheet : nil },
+                set: { newValue in
+                    if newValue == nil && activeSheet == .playerSheet {
+                        activeSheet = nil
+                    }
+                }
+            )) { item in
                 switch item {
-                case .addStation:
-                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
-                        viewModel.selectedCountry = savedCountry
-                        viewModel.selectedSubTab = .all
-                        // Ensure fresh data is visible after adding a station
-                        viewModel.loadStationsFromCoreData()
-                    }
-                    .environmentObject(viewModel)
-                case .editStation:
-                    if let station = selectedStationForEdit {
-                        EditStationView(station: station, activeSheet: $activeSheet)
-                            .environmentObject(viewModel)
-                            .environmentObject(permissionManager)
-                    } else {
-                        // Enhanced fallback view with better error handling
-                        VStack(spacing: 24) {
-                            ProgressView()
-                                .scaleEffect(1.5)
-                                .tint(.blue)
-                            
-                            VStack(spacing: 8) {
-                                Text("Loading Station...")
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                
-                                Text("Please wait while we prepare the edit screen")
-                                    .font(.subheadline)
-                                    .foregroundColor(.gray)
-                                    .multilineTextAlignment(.center)
-                            }
-                            
-                            Button("Cancel") {
-                                activeSheet = nil
-                            }
-                            .font(.body)
-                            
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 12)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                        .onAppear {
-                            print("⚠️ ContentView: EditStation sheet opened with nil selectedStationForEdit")
-                            
-                            // Auto-dismiss if station is still nil after timeout
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                                if selectedStationForEdit == nil {
-                                    print("❌ ContentView: Auto-dismissing edit sheet due to timeout")
-                                    activeSheet = nil
-                                }
-                            }
-                        }
-                    }
+                case .addStation, .editStation:
+                    EmptyView()
                 case .playerSheet:
                     RadioPlayerSheetView()
                         .environmentObject(radioPlayer)
@@ -935,25 +799,14 @@ struct ContentView: View {
                 }
             }
 
-            .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $isPlayerSheetPresented : .constant(false)) {
+            .fullScreenCover(isPresented: $isPlayerSheetPresented) {
                 RadioPlayerSheetView()
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
-            .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $isPlayerSheetPresented : .constant(false)) {
-                RadioPlayerSheetView()
-                    .environmentObject(radioPlayer)
-                    .environmentObject(viewModel)
-            }
-            .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $showingSubscriptionView : .constant(false)) {
+            .fullScreenCover(isPresented: $showingSubscriptionView) {
                 SubscriptionView()
                     .environmentObject(subscriptionManager)
-                    .interactiveDismissDisabled(!subscriptionManager.isSubscribedOrInTrial)
-            }
-            .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $showingSubscriptionView : .constant(false)) {
-                SubscriptionView()
-                    .environmentObject(subscriptionManager)
-                    .interactiveDismissDisabled(!subscriptionManager.isSubscribedOrInTrial)
             }
 
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
@@ -967,10 +820,9 @@ struct ContentView: View {
                 }
             }
             .onChange(of: activeSheet) { oldValue, newValue in
-                // Clear selectedStationForEdit when activeSheet becomes nil
-                if newValue == nil {
-                    selectedStationForEdit = nil
-                }
+                // Nothing to clear here anymore; Edit Station owns `selectedStationForEdit`
+                // as its navigation path.
+                _ = (oldValue, newValue)
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToAlarmStation"))) { notification in
                 handleAlarmStationNavigation(notification)
@@ -997,97 +849,176 @@ struct ContentView: View {
                 handleSwitchToAllStations()
             }
             .navigationBarHidden(true)
-        }
-        .navigationViewStyle(StackNavigationViewStyle())
-    }
-    
-    // MARK: - Simple Stylish Tab Bar
-    
-    @ViewBuilder
-    private var elegantTabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(RadioSubTab.allCases, id: \.self) { subTab in
-                simpleTabButton(for: subTab)
+            .navigationDestination(item: $selectedStationForEdit) { station in
+                EditStationView(station: station)
+                    .environmentObject(viewModel)
+                    .environmentObject(permissionManager)
+            }
+            .navigationDestination(isPresented: Binding(
+                get: { activeSheet == .addStation },
+                set: { isPresented in
+                    if !isPresented && activeSheet == .addStation {
+                        activeSheet = nil
+                    }
+                }
+            )) {
+                AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
+                    viewModel.selectedCountry = savedCountry
+                    viewModel.selectedSubTab = .all
+                    // Ensure fresh data is visible after adding a station
+                    viewModel.loadStationsFromCoreData()
+                }
+                .environmentObject(viewModel)
+                .environmentObject(permissionManager)
             }
         }
-        .background(Color.adaptiveSectionBackground)
-        .cornerRadius(10)
-        .padding(.horizontal, 16)
     }
     
-    @ViewBuilder
-    private var searchBar: some View {
-        if isSearchPresented {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.adaptiveSecondaryText)
-                    .font(.body)
-                
-                TextField("Search stations...", text: $searchText)
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .font(.body)
-                    .foregroundColor(.adaptivePrimaryText)
-                    .focused($isSearchFieldFocused)
-                
-                if !searchText.isEmpty {
-                    Button(action: {
+    // MARK: - Radio List Header
+    
+    @Namespace private var subTabNamespace
+    
+    private var headerActions: some View {
+        HStack(spacing: 0) {
+            if isSearchPresented {
+                Button("Cancel") {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isSearchPresented = false
                         searchText = ""
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .font(.body)
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.adaptivePrimaryText)
+                .padding(.horizontal, 14)
+            } else {
+                headerActionButton("magnifyingglass") {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isSearchPresented = true
+                    }
+                }
+                
+                headerActionButton(viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle") {
+                    switch viewModel.selectedSubTab {
+                    case .recent:
+                        viewModel.sortRecentStationsAlphabetically()
+                    case .favorites:
+                        // Favorites tab - show alert to warn about modifying order
+                        alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                            viewModel.sortFavoritesAlphabetically()
+                        }
+                    case .all:
+                        viewModel.sortStationsAlphabetically()
+                    }
+                }
+                
+                headerActionButton("plus") {
+                    if viewModel.selectedCountry == "Select Country" {
+                        alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                    } else {
+                        activeSheet = .addStation
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.adaptiveSectionBackground)
-            .cornerRadius(10)
-            .padding(.vertical, 8)
-            .onAppear {
-                // Automatically focus the search field when it appears
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isSearchFieldFocused = true
-                }
-            }
         }
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+        .modifier(ConditionalLiquidGlass(cornerRadius: 20))
     }
     
-    @ViewBuilder
-    private func simpleTabButton(for subTab: RadioSubTab) -> some View {
-        let isSelected = viewModel.selectedSubTab == subTab
-        let buttonCornerRadius = cornerRadiusForTab(subTab)
-        
-        Button(action: {
-            withAnimation(.easeOut(duration: 0.2)) {
-                viewModel.selectedSubTab = subTab
-            }
-        }) {
-            VStack(spacing: 6) {
-                Image(systemName: subTab.iconName)
-                    .font(.body)
-                    .foregroundColor(isSelected ? .blue : .adaptiveSecondaryText)
-                
-                Text(subTab.title)
-                    .font(.subheadline)
-                    .foregroundColor(isSelected ? .blue : .adaptiveSecondaryText)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(
-                RoundedRectangle(cornerRadius: buttonCornerRadius)
-                    .fill(isSelected ? Color.blue.opacity(0.1) : Color.clear)
-            )
-            .contentShape(Rectangle())
+    private func headerActionButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.adaptivePrimaryText)
+                .frame(width: 34, height: 40)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
     }
     
-    private func cornerRadiusForTab(_ subTab: RadioSubTab) -> CGFloat {
-        switch subTab {
-        case .recent: return 8    // Left button - rounded
-        case .favorites: return 0  // Middle button - square
-        case .all: return 8       // Right button - rounded
+    private var subTabBar: some View {
+        HStack(spacing: 4) {
+            ForEach(RadioSubTab.allCases, id: \.self) { subTab in
+                let isSelected = viewModel.selectedSubTab == subTab
+                
+                Button {
+                    UIDevice.playHapticFeedback()
+                    withAnimation(.snappy(duration: 0.28)) {
+                        viewModel.selectedSubTab = subTab
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: subTab.iconName)
+                            .font(.caption.weight(.semibold))
+                        Text(subTab.title)
+                            .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(isSelected ? selectedSubTabForeground : Color.adaptiveSecondaryText)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 34)
+                    .background {
+                        if isSelected {
+                            Capsule()
+                                .fill(selectedSubTabFill)
+                                .shadow(color: colorScheme == .dark ? .clear : SRColor.accent.opacity(0.35),
+                                        radius: 4, y: 2)
+                                .matchedGeometryEffect(id: "selectedSubTab", in: subTabNamespace)
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.adaptiveSectionBackground))
+        .padding(.horizontal, 16)
+    }
+
+    /// A solid pill is what makes the selection readable on white; on black the subtle tint already
+    /// reads as active and a solid one is too heavy.
+    private var selectedSubTabFill: Color {
+        colorScheme == .dark ? Color.blue.opacity(0.15) : SRColor.accent
+    }
+
+    private var selectedSubTabForeground: Color {
+        colorScheme == .dark ? .blue : .white
+    }
+    
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline)
+                .foregroundColor(.adaptiveSecondaryText)
+            
+            TextField("Search stations...", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.subheadline)
+                .foregroundColor(.adaptivePrimaryText)
+                .focused($isSearchFieldFocused)
+                .submitLabel(.search)
+            
+            if !searchText.isEmpty {
+                Button(action: {
+                    searchText = ""
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveFieldBackground))
+        .onAppear {
+            // Automatically focus the search field when it appears
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isSearchFieldFocused = true
+            }
         }
     }
     
@@ -1214,6 +1145,11 @@ struct CompactPlayerView: View {
         colorScheme == .dark ? .white : .black
     }
     
+    // Secondary grey is too low-contrast against the glass background at caption size.
+    private var metadataTextColor: Color {
+        colorScheme == .dark ? .white : .adaptiveSecondaryText
+    }
+    
     private var buttonGradientColors: [Color] {
         if colorScheme == .dark {
             return [
@@ -1283,22 +1219,14 @@ struct CompactPlayerView: View {
                         // Metadata with connection status
                         HStack(spacing: 4) {
                             if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
-                                Text("\(shazamTitle) — \(shazamArtist)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                                ScrollOnceText(text: "\(shazamTitle) — \(shazamArtist)", color: metadataTextColor)
                             } else if let meta = metadata, !meta.isEmpty {
                                 let split = radioPlayer.splitArtistTitle(from: meta, fallbackArtist: currentStation.name, fallbackTitle: meta)
-                                Text("\(split.title) — \(split.artist)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                                ScrollOnceText(text: "\(split.title) — \(split.artist)", color: metadataTextColor)
                             } else {
                                 Text("Live Radio")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(metadataTextColor)
                                     .lineLimit(1)
                             }
                             
@@ -1410,22 +1338,14 @@ struct CompactPlayerView: View {
                         // Metadata with connection status
                         HStack(spacing: 4) {
                             if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
-                                Text("\(shazamTitle) — \(shazamArtist)")
-                                    .font(.caption)
-                                    .foregroundColor(.adaptiveSecondaryText)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                                ScrollOnceText(text: "\(shazamTitle) — \(shazamArtist)", color: metadataTextColor)
                             } else if let meta = metadata, !meta.isEmpty {
                                 let split = radioPlayer.splitArtistTitle(from: meta, fallbackArtist: currentStation.name, fallbackTitle: meta)
-                                Text("\(split.title) — \(split.artist)")
-                                    .font(.caption)
-                                    .foregroundColor(.adaptiveSecondaryText)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                                ScrollOnceText(text: "\(split.title) — \(split.artist)", color: metadataTextColor)
                             } else {
                                 Text("Live Radio")
                                     .font(.caption)
-                                    .foregroundColor(.adaptiveSecondaryText)
+                                    .foregroundColor(metadataTextColor)
                                     .lineLimit(1)
                             }
                             
@@ -1826,7 +1746,7 @@ struct UnifiedPodcastPlayerView: View {
                         .contentShape(Rectangle())
                 )
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
-            .sheet(isPresented: $showChaptersNotes) {
+            .fullScreenCover(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
                     episode: currentEpisode,
                     feed: currentFeed,
@@ -1839,7 +1759,7 @@ struct UnifiedPodcastPlayerView: View {
                     .presentationDetents([.fraction(0.5), .large])
                     .presentationDragIndicator(.visible)
             }
-            .sheet(isPresented: $showDetailedPlayer) {
+            .fullScreenCover(isPresented: $showDetailedPlayer) {
                 PodcastPlayerSheetView(
                     episode: currentEpisode,
                     feed: currentFeed,
@@ -1947,7 +1867,7 @@ struct UnifiedPodcastPlayerView: View {
                     .contentShape(Rectangle())
             )
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
-            .sheet(isPresented: $showChaptersNotes) {
+            .fullScreenCover(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
                     episode: currentEpisode,
                     feed: currentFeed,
@@ -1960,7 +1880,7 @@ struct UnifiedPodcastPlayerView: View {
                     .presentationDetents([.fraction(0.5), .large])
                     .presentationDragIndicator(.visible)
             }
-            .sheet(isPresented: $showDetailedPlayer) {
+            .fullScreenCover(isPresented: $showDetailedPlayer) {
                 PodcastPlayerSheetView(
                     episode: currentEpisode,
                     feed: currentFeed,
@@ -3568,6 +3488,82 @@ struct EpisodeInfoView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Single-Pass Scrolling Text
+
+/// Scrolls overflowing single-line text to its end once, then settles back at the start.
+struct ScrollOnceText: View {
+    let text: String
+    var font: Font = .caption
+    var color: Color = .primary
+    var height: CGFloat = 16
+
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var offset: CGFloat = 0
+    @State private var scrollTask: Task<Void, Never>?
+
+    private let startDelay: TimeInterval = 2.0
+    private let holdAtEnd: TimeInterval = 1.5
+    private let pointsPerSecond: CGFloat = 30
+
+    var body: some View {
+        GeometryReader { geometry in
+            Text(text)
+                .font(font)
+                .foregroundColor(color)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .background(
+                    GeometryReader { textGeometry in
+                        Color.clear
+                            .onAppear { textWidth = textGeometry.size.width }
+                            .onChange(of: textGeometry.size.width) { _, newWidth in
+                                textWidth = newWidth
+                            }
+                    }
+                )
+                .offset(x: offset)
+                .frame(width: geometry.size.width, alignment: .leading)
+                .clipped()
+                .onAppear {
+                    containerWidth = geometry.size.width
+                    scheduleScroll()
+                }
+                .onChange(of: geometry.size.width) { _, newWidth in
+                    containerWidth = newWidth
+                }
+                .onChange(of: text) { _, _ in
+                    scheduleScroll()
+                }
+                .onDisappear {
+                    scrollTask?.cancel()
+                }
+        }
+        .frame(height: height)
+    }
+
+    private func scheduleScroll() {
+        scrollTask?.cancel()
+        offset = 0
+        scrollTask = Task { @MainActor in
+            // The text width lands a frame after the view does, so wait before measuring.
+            try? await Task.sleep(nanoseconds: UInt64(startDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+
+            let overflow = textWidth - containerWidth
+            guard overflow > 1 else { return }
+
+            let duration = Double(overflow / pointsPerSecond)
+            withAnimation(.linear(duration: duration)) { offset = -overflow }
+
+            try? await Task.sleep(nanoseconds: UInt64((duration + holdAtEnd) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeInOut(duration: 0.6)) { offset = 0 }
+        }
     }
 }
 

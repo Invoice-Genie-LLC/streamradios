@@ -11,6 +11,7 @@ import os.log
 import CoreData
 import MediaPlayer
 import AVFoundation
+import Combine
 
 class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
@@ -25,6 +26,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     // UserDefaults sync monitoring timer
     private var syncMonitoringTimer: Timer?
+    
+    /// Station the user last tapped in CarPlay, used to drive the now-playing indicator until
+    /// RadioPlayer finishes starting the stream and reports it as the current station.
+    private var pendingHighlightStationId: String?
+    /// Same idea as `pendingHighlightStationId`, for podcast episodes.
+    private var pendingHighlightEpisodeId: String?
+    
+    private var subscriptionObserver: AnyCancellable?
     
     // MARK: - Scene Delegate Methods
     
@@ -224,6 +233,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         syncMonitoringTimer = nil
         os_log("🚗 CarPlay: Sync monitoring timer cleaned up", log: log, type: .info)
         
+        subscriptionObserver?.cancel()
+        subscriptionObserver = nil
+        
         // Clear CarPlay connection status for performance optimizations
         CarPlayManager.shared.isCarPlayConnected = false
         
@@ -250,25 +262,20 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Store the interface controller
         self.interfaceController = interfaceController
         
-        // CRITICAL: Enhanced artwork fetching is now handled directly by CarPlay without background tasks
-        // This approach uses CarPlay's active audio session privileges for immediate network access
-        os_log("🚗 CarPlay: Direct iTunes artwork fetching enabled for independent operation", log: log, type: .info)
+        observeSubscriptionStatus()
         
-        // CRITICAL: Check if app was force closed and restore independently
-        // This enables CarPlay to work without requiring phone app to be opened
-        checkAppTerminationAndRestoreIndependently()
-        
-        // CRITICAL: Restore playback state when CarPlay reconnects after app force close
-        // This ensures Now Playing info and UI state are properly restored
-        restorePlaybackStateAfterReconnection()
+        // The templates below are always built; only playback and restoration are gated, so an
+        // unsubscribed user can still browse and see why nothing plays.
+        withEntitlement {
+            self.restorePlaybackAfterConnect()
+        } otherwise: {
+            self.handleBlockedPlayback(reason: "CarPlay connected without an active subscription")
+        }
         
         // Setup the root template with a small delay to allow state restoration to complete
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.setupRootTemplate()
         }
-        
-        // Instant CarPlay restoration with no delays
-        performIndependentCarPlayRestoration()
         
         // Validate CarPlay implementation compliance
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -279,6 +286,102 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         setupEnhancedArtworkMonitoring()
         
         os_log("🚗 CarPlay: Initial template setup complete with independent restoration", log: log, type: .info)
+    }
+    
+    private func restorePlaybackAfterConnect() {
+        // CRITICAL: Check if app was force closed and restore independently
+        // This enables CarPlay to work without requiring phone app to be opened
+        checkAppTerminationAndRestoreIndependently()
+        
+        // CRITICAL: Restore playback state when CarPlay reconnects after app force close
+        // This ensures Now Playing info and UI state are properly restored
+        restorePlaybackStateAfterReconnection()
+        
+        // Instant CarPlay restoration with no delays
+        performIndependentCarPlayRestoration()
+    }
+    
+    // MARK: - Subscription Entitlement
+    
+    /// CarPlay is its own scene, so the in-app paywall never covers it. Without this gate an expired
+    /// subscription keeps playing from the car indefinitely.
+    private var isEntitled: Bool {
+        SubscriptionManager.entitlementSnapshot.isEntitled
+    }
+    
+    /// Runs `onAllowed` only when the user is entitled, refreshing the status first if it hasn't
+    /// resolved yet — CarPlay can connect before StoreKit has answered.
+    private func withEntitlement(_ onAllowed: @escaping () -> Void, otherwise onBlocked: @escaping () -> Void) {
+        let snapshot = SubscriptionManager.entitlementSnapshot
+        if snapshot.isEntitled {
+            onAllowed()
+            return
+        }
+        
+        guard !snapshot.isResolved else {
+            onBlocked()
+            return
+        }
+        
+        Task { @MainActor in
+            await SubscriptionManager.shared.updateSubscriptionStatus()
+            if self.isEntitled { onAllowed() } else { onBlocked() }
+        }
+    }
+    
+    private func handleBlockedPlayback(reason: String) {
+        os_log("🚗 CarPlay: Playback blocked - %@", log: log, type: .info, reason)
+        
+        stopAllPlaybackForExpiredSubscription()
+        presentSubscriptionRequiredAlert()
+    }
+    
+    private func stopAllPlaybackForExpiredSubscription() {
+        DispatchQueue.main.async {
+            RadioPlayer.shared.stop()
+            PodcastPlayer.shared.pause()
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            
+            // Restoration reads these on the next connect; leaving them set would resume playback.
+            let userDefaults = UserDefaults.standard
+            userDefaults.set(false, forKey: "CarPlayRadioWasPlaying")
+            userDefaults.set(false, forKey: "CarPlayPodcastWasPlaying")
+        }
+    }
+    
+    private func presentSubscriptionRequiredAlert() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let interfaceController = self.interfaceController else { return }
+            
+            let dismiss = CPAlertAction(title: "OK", style: .default) { [weak self] _ in
+                self?.interfaceController?.dismissTemplate(animated: true, completion: nil)
+            }
+            
+            let alert = CPAlertTemplate(
+                titleVariants: [
+                    "Your StreamRadios subscription has ended. Open the app on your iPhone to renew.",
+                    "Subscription ended. Open StreamRadios on your iPhone.",
+                    "Subscription required"
+                ],
+                actions: [dismiss]
+            )
+            
+            interfaceController.presentTemplate(alert, animated: true, completion: nil)
+        }
+    }
+    
+    /// Cuts playback the moment entitlement lapses mid-drive.
+    private func observeSubscriptionStatus() {
+        subscriptionObserver = SubscriptionManager.shared.$subscriptionStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard let self else { return }
+                guard status != .unknown, !status.isSubscribed else { return }
+                
+                if RadioPlayer.shared.isPlaying || PodcastPlayer.shared.isPlaying {
+                    self.handleBlockedPlayback(reason: "subscription lapsed during CarPlay session")
+                }
+            }
     }
     
     // MARK: - State Restoration
@@ -938,6 +1041,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
 
     private func attemptPlaybackStateRecovery() {
+        guard isEntitled else {
+            handleBlockedPlayback(reason: "state recovery attempted without an active subscription")
+            return
+        }
+        
         os_log("🚗 CarPlay: Attempting playback state recovery after force close", log: log, type: .info)
         
         // Check if we can determine what was playing from saved state
@@ -1052,9 +1160,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let favoriteStations = carPlayManager.getFavoriteStations()
         
         var favoriteStationItems: [CPListItem] = []
+        var favoriteRows: [(stationId: String, item: CPListItem)] = []
         // Show ALL favorite stations - no artificial limits
         for station in favoriteStations {
-            let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+            let isCurrentlyPlaying = shouldShowPlayingIndicator(for: station)
             
             let item = CPListItem(text: station.name,
                                  detailText: station.country,
@@ -1069,7 +1178,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.playStation(station, completion: completion)
             }
             favoriteStationItems.append(item)
+            favoriteRows.append((station.id, item))
         }
+        registerStationRows(favoriteRows, key: "favorites")
         
         if favoriteStationItems.isEmpty {
             let emptyItem = CPListItem(text: "No Favorite Stations", detailText: "Add stations to favorites to see them here")
@@ -1144,6 +1255,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             let emptySection = CPListSection(items: [emptyItem], header: "Downloads", sectionIndexTitle: nil)
             sections.append(emptySection)
         } else {
+            var downloadRows: [(episodeId: String, item: CPListItem)] = []
             // Create a section for each podcast with downloads
             for podcastWithDownloads in podcastsWithDownloads {
                 let feed = podcastWithDownloads.feed
@@ -1186,6 +1298,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     }
                     
                     episodeItems.append(item)
+                    downloadRows.append((episode.id, item))
                 }
                 
                 // Create section for this podcast
@@ -1193,6 +1306,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 let podcastSection = CPListSection(items: episodeItems, header: sectionHeader, sectionIndexTitle: nil)
                 sections.append(podcastSection)
             }
+            registerEpisodeRows(downloadRows, key: "downloads")
         }
         
         let listTemplate = CPListTemplate(title: "Downloads", sections: sections)
@@ -1240,9 +1354,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let recentStations = carPlayManager.getRecentStations()
         
         var recentStationItems: [CPListItem] = []
+        var recentRows: [(stationId: String, item: CPListItem)] = []
         for station in recentStations {
             let timeAgo = formatTimeAgo(station.lastPlayed)
-            let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+            let isCurrentlyPlaying = shouldShowPlayingIndicator(for: station)
             
             let item = CPListItem(text: station.name,
                                  detailText: "Played \(timeAgo) • \(station.country)",
@@ -1257,7 +1372,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.playStation(station, completion: completion)
             }
             recentStationItems.append(item)
+            recentRows.append((station.id, item))
         }
+        registerStationRows(recentRows, key: "recents")
         
         if recentStationItems.isEmpty {
             let emptyItem = CPListItem(text: "No Recent Stations", detailText: "Recently played stations will appear here")
@@ -1271,6 +1388,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
         
         var recentEpisodeItems: [CPListItem] = []
+        var recentEpisodeRows: [(episodeId: String, item: CPListItem)] = []
         for episode in recentEpisodes {
             let duration = formatDuration(episode.duration)
             var statusText = ""
@@ -1335,7 +1453,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.playEpisode(episode, completion: completion)
             }
             recentEpisodeItems.append(item)
+            recentEpisodeRows.append((episode.id, item))
         }
+        registerEpisodeRows(recentEpisodeRows, key: "recents")
         
         if recentEpisodeItems.isEmpty {
             let emptyItem = CPListItem(text: "No Recent Episodes", detailText: "Recently played podcast episodes will appear here")
@@ -1436,8 +1556,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         var stationItems: [CPListItem] = []
         
         // Show ALL stations for the country - no artificial limits
+        var countryRows: [(stationId: String, item: CPListItem)] = []
         for station in stations {
-            let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+            let isCurrentlyPlaying = shouldShowPlayingIndicator(for: station)
             
             let item = CPListItem(text: station.name,
                                  detailText: station.country,
@@ -1452,7 +1573,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.playStation(station, completion: completion)
             }
             stationItems.append(item)
+            countryRows.append((station.id, item))
         }
+        registerStationRows(countryRows, key: "country")
         
         let section = CPListSection(items: stationItems, header: "\(country) Stations (\(stations.count))", sectionIndexTitle: nil)
         let listTemplate = CPListTemplate(title: country, sections: [section])
@@ -1546,9 +1669,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         // Add "Latest Episode" section first if we have episodes
+        var allEpisodeRows: [(episodeId: String, item: CPListItem)] = []
         if !podcast.episodes.isEmpty {
             let latestEpisode = podcast.episodes.first!
             let latestEpisodeItem = self.createEpisodeListItem(episode: latestEpisode, podcast: podcast, carPlayManager: carPlayManager)
+            allEpisodeRows.append((latestEpisode.id, latestEpisodeItem))
             let latestEpisodeSection = CPListSection(items: [latestEpisodeItem], header: "Latest Episode", sectionIndexTitle: nil)
             sections.append(latestEpisodeSection)
         }
@@ -1560,7 +1685,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         for episode in remainingEpisodes {
             let item = self.createEpisodeListItem(episode: episode, podcast: podcast, carPlayManager: carPlayManager)
             episodeItems.append(item)
+            allEpisodeRows.append((episode.id, item))
         }
+        registerEpisodeRows(allEpisodeRows, key: "episodes")
         
         // Only add Episodes section if we have remaining episodes
         if !episodeItems.isEmpty {
@@ -1618,9 +1745,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         // Add "Latest Episode" section first if we have episodes
+        var allEpisodeRows: [(episodeId: String, item: CPListItem)] = []
         if !podcast.episodes.isEmpty {
             let latestEpisode = podcast.episodes.first!
             let latestEpisodeItem = self.createEpisodeListItem(episode: latestEpisode, podcast: podcast, carPlayManager: carPlayManager)
+            allEpisodeRows.append((latestEpisode.id, latestEpisodeItem))
             let latestEpisodeSection = CPListSection(items: [latestEpisodeItem], header: "Latest Episode", sectionIndexTitle: nil)
             sections.append(latestEpisodeSection)
         }
@@ -1632,7 +1761,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         for episode in remainingEpisodes {
             let item = self.createEpisodeListItem(episode: episode, podcast: podcast, carPlayManager: carPlayManager)
             episodeItems.append(item)
+            allEpisodeRows.append((episode.id, item))
         }
+        registerEpisodeRows(allEpisodeRows, key: "episodes")
         
         // CRITICAL FIX: Calculate effective maximum episodes respecting maxEpisodes limit
         let effectiveMaximum: Int
@@ -1805,6 +1936,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func showDownloadedEpisodesFromList(_ downloadedEpisodes: [PodcastEpisode], podcastTitle: String, completion: @escaping () -> Void) {
         let carPlayManager = CarPlayManager.shared
         var episodeItems: [CPListItem] = []
+        var filteredRows: [(episodeId: String, item: CPListItem)] = []
         
         for episode in downloadedEpisodes {
             let duration = formatDuration(episode.duration)
@@ -1847,7 +1979,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.playEpisode(episode, completion: completion)
             }
             episodeItems.append(item)
+            filteredRows.append((episode.id, item))
         }
+        registerEpisodeRows(filteredRows, key: "filtered")
         
         if episodeItems.isEmpty {
             let emptyItem = CPListItem(text: "No Downloaded Episodes", detailText: "Download episodes to listen offline")
@@ -1865,6 +1999,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func showBookmarkedEpisodesFromList(_ bookmarkedEpisodes: [PodcastEpisode], podcastTitle: String, completion: @escaping () -> Void) {
         let carPlayManager = CarPlayManager.shared
         var episodeItems: [CPListItem] = []
+        var filteredRows: [(episodeId: String, item: CPListItem)] = []
         
         for episode in bookmarkedEpisodes {
             let duration = formatDuration(episode.duration)
@@ -1913,7 +2048,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.playEpisode(episode, completion: completion)
             }
             episodeItems.append(item)
+            filteredRows.append((episode.id, item))
         }
+        registerEpisodeRows(filteredRows, key: "filtered")
         
         if episodeItems.isEmpty {
             let emptyItem = CPListItem(text: "No Bookmarked Episodes", detailText: "Bookmark episodes to see them here")
@@ -1928,8 +2065,111 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         })
     }
     
+    /// Station whose row should show the now-playing indicator, or nil when radio isn't playing.
+    private var highlightedStationId: String? {
+        guard PlaybackManager.shared.activePlayer != .podcast else { return nil }
+        // `pendingHighlightStationId` is whatever CarPlay last saw start - either a tap here or a
+        // station-change notification. RadioPlayer's own `currentlyPlayingStation` lags behind and
+        // can stay on the previously restored station, which is what kept row 1 highlighted.
+        return pendingHighlightStationId ?? RadioPlayer.shared.currentlyPlayingStation?.id
+    }    
+    private func shouldShowPlayingIndicator(for station: RadioStation) -> Bool {
+        station.id == highlightedStationId
+    }
+    
+    private var appliedSectionSignatures: [String: String] = [:]
+    
+    /// Rebuilding a list resets its scroll and selection, and `updateSections()` does not reliably
+    /// repaint an item's `isPlaying` flag - which leaves two rows highlighted. So rebuild only when
+    /// the list contents actually change; the indicator is moved separately by `applyStationHighlight`.
+    private func shouldUpdateSections(key: String, data: String) -> Bool {
+        guard appliedSectionSignatures[key] != data else { return false }
+        appliedSectionSignatures[key] = data
+        return true
+    }
+    
+    private var stationRows: [String: [(stationId: String, item: CPListItem)]] = [:]
+    
+    private static let playingSuffix = " • Playing"
+    
+    private func registerStationRows(_ rows: [(stationId: String, item: CPListItem)], key: String) {
+        stationRows[key] = rows
+        applyStationHighlight()
+    }
+    
+    /// Episode whose row should show the now-playing indicator, or nil when nothing is playing.
+    private var highlightedEpisodeId: String? {
+        guard PlaybackManager.shared.activePlayer != .radio else { return nil }
+        return pendingHighlightEpisodeId ?? PodcastPlayer.shared.currentEpisode?.id
+    }
+    
+    private var episodeRows: [String: [(episodeId: String, item: CPListItem)]] = [:]
+    
+    private func registerEpisodeRows(_ rows: [(episodeId: String, item: CPListItem)], key: String) {
+        episodeRows[key] = rows
+        applyEpisodeHighlight()
+    }
+    
+    /// Same live-mutation approach as `applyStationHighlight`, for podcast episode rows.
+    private func applyEpisodeHighlight() {
+        let highlighted = highlightedEpisodeId
+        let playingSuffix = Self.playingSuffix
+        for rows in episodeRows.values {
+            for row in rows {
+                let shouldPlay = row.episodeId == highlighted
+                // Trailing keeps the equalizer off the artwork, where it reads as part of the logo.
+                row.item.playingIndicatorLocation = .trailing
+                if row.item.isPlaying != shouldPlay {
+                    row.item.isPlaying = shouldPlay
+                }
+                // Keep the detail text in step with the indicator - a stale " • Playing" on the
+                // previously played row is exactly what made the list look doubly highlighted.
+                let base = (row.item.detailText ?? "").replacingOccurrences(of: playingSuffix, with: "")
+                let wanted = shouldPlay ? base + playingSuffix : base
+                if row.item.detailText != wanted {
+                    row.item.setDetailText(wanted)
+                }
+            }
+        }
+    }
+    
+    /// Moves the now-playing indicator by mutating the live rows, so exactly one is ever highlighted.
+    /// The white row background is CarPlay's focus ring and is not ours to place.
+    private func applyStationHighlight() {
+        let highlighted = highlightedStationId
+        for rows in stationRows.values {
+            for row in rows {
+                let shouldPlay = row.stationId == highlighted
+                row.item.playingIndicatorLocation = .trailing
+                if row.item.isPlaying != shouldPlay {
+                    row.item.isPlaying = shouldPlay
+                }
+                let base = (row.item.detailText ?? "").replacingOccurrences(of: Self.playingSuffix, with: "")
+                let wanted = shouldPlay ? base + Self.playingSuffix : base
+                if row.item.detailText != wanted {
+                    row.item.setDetailText(wanted)
+                }
+            }
+        }
+    }
+    
     private func playStation(_ station: RadioStation, completion: @escaping () -> Void) {
+        withEntitlement {
+            self.performPlayStation(station, completion: completion)
+        } otherwise: {
+            self.handleBlockedPlayback(reason: "station tapped without an active subscription")
+            completion()
+        }
+    }
+    
+    private func performPlayStation(_ station: RadioStation, completion: @escaping () -> Void) {
         os_log("CarPlay: Playing station %@", log: log, type: .info, station.name)
+        
+        // Move the indicator to the tapped row now; RadioPlayer won't reflect it for another 0.8s.
+        pendingHighlightEpisodeId = nil
+        pendingHighlightStationId = station.id
+        applyStationHighlight()
+        applyEpisodeHighlight()
         
         // CRITICAL: Save station state immediately for independent CarPlay operation
         let userDefaults = UserDefaults.standard
@@ -1956,10 +2196,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // CRITICAL: Create immediate Now Playing info for independent operation
             self.createImmediateRadioNowPlayingInfo(for: station)
             
-            if let stationIndex = RadioStationViewModel.shared.stations.firstIndex(where: { $0.id == station.id }) {
+            if RadioStationViewModel.shared.stations.contains(where: { $0.id == station.id }) {
                 // Add longer delay to allow CarPlay to fully hand over audio session control
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    radioPlayer.playStation(at: stationIndex, from: RadioStationViewModel.shared.stations)
+                    // Re-resolve the index here: the list can change during the delay.
+                    let stations = RadioStationViewModel.shared.stations
+                    guard let stationIndex = stations.firstIndex(where: { $0.id == station.id }) else { return }
+                    radioPlayer.playStation(at: stationIndex, from: stations)
+                    // Mirrors the phone app so the station lands in Recents and the indicator refreshes.
+                    RadioStationViewModel.shared.updateLastPlayed(for: station)
                 }
                 
                 // Gentle fallback attempts that don't trigger concurrent audio session activation
@@ -2018,7 +2263,22 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func playEpisode(_ episode: PodcastEpisode, completion: @escaping () -> Void) {
+        withEntitlement {
+            self.performPlayEpisode(episode, completion: completion)
+        } otherwise: {
+            self.handleBlockedPlayback(reason: "episode tapped without an active subscription")
+            completion()
+        }
+    }
+    
+    private func performPlayEpisode(_ episode: PodcastEpisode, completion: @escaping () -> Void) {
         os_log("🚗 CarPlay: Playing episode '%@' with progress: %.2f%%", log: log, type: .info, episode.title, episode.state.progress * 100)
+        
+        // Move the indicator to the tapped row now; the player won't reflect it for a moment.
+        pendingHighlightStationId = nil
+        pendingHighlightEpisodeId = episode.id
+        applyStationHighlight()
+        applyEpisodeHighlight()
         
         // Use the existing PodcastPlayer to play the episode
         DispatchQueue.main.async { [self] in
@@ -2146,7 +2406,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             sections.append(emptySection)
         } else {
             let stationItems = stations.map { station in
-                let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                let isCurrentlyPlaying = shouldShowPlayingIndicator(for: station)
                 
                 let item = CPListItem(text: station.name, 
                                      detailText: station.country, // Use country instead of genre
@@ -2164,6 +2424,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 
                 return item
             }
+            registerStationRows(zip(stations.map(\.id), stationItems).map { ($0, $1) }, key: "country")
             
             let stationSection = CPListSection(items: stationItems, header: "\\(country) Stations", sectionIndexTitle: nil)
             sections.append(stationSection)
@@ -2277,6 +2538,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             if let userInfo = notification.userInfo,
                let nowPlayingStationId = userInfo["stationId"] as? String {
                 os_log("🚗 CarPlay: Radio playback changed to station ID: %@ - refreshing for equalizer update", log: self.log, type: .info, nowPlayingStationId)
+                
+                self.pendingHighlightStationId = nowPlayingStationId
+                self.applyStationHighlight()
                 
                 // CRITICAL FIX: Pass the station ID from notification to avoid timing issues
                 // The notification contains the NEW station being played, while RadioPlayer might still have old station
@@ -2453,6 +2717,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func performDelayedPlaybackUIUpdates(episodeId: String) {
         os_log("🚗 CarPlay: Performing delayed UI updates for episode ID: %@", log: log, type: .info, episodeId)
         
+        applyEpisodeHighlight()
+        applyStationHighlight()
+        
         // Use the same efficient section update approach that works perfectly for Recents tab
         // This provides immediate visual highlighting changes just like Recents does
         forceImmediateSectionUpdate(episodeId: episodeId)
@@ -2465,6 +2732,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     private func performImmediatePlaybackUIUpdates(episodeId: String) {
         os_log("🚗 CarPlay: Performing immediate UI updates for episode ID: %@", log: log, type: .info, episodeId)
+        
+        applyEpisodeHighlight()
+        applyStationHighlight()
         
         // Use the same efficient section update approach that works perfectly for Recents tab
         // This provides immediate visual highlighting changes just like Recents does
@@ -2485,6 +2755,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         os_log("🚗 CarPlay: Station played for recents update - ID: %@", log: log, type: .info, stationId)
         
+        pendingHighlightStationId = stationId
+        applyStationHighlight()
+        
         // CRITICAL: Force Now Playing info update for radio stations after force close
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             RadioPlayer.shared.updateNowPlayingInfo()
@@ -2496,8 +2769,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         carPlayManager.updateContent() // This will refresh the recent stations list
         
         // Force refresh the recents tab, stations tab, and downloads tab to show/hide highlighting
-        refreshRecentsTabTemplate()
-        refreshStationsTabTemplate()
+        refreshRecentsTabTemplate(nowPlayingStationId: stationId)
+        refreshStationsTabTemplate(nowPlayingStationId: stationId)
         refreshDownloadsTabTemplate()
         
         // Additional Now Playing update with UI updates
@@ -2688,11 +2961,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
             
             os_log("🚗 CarPlay Recents: Found %d recent stations", log: self.log, type: .info, recentStations.count)
-            if let nowPlayingStationId = nowPlayingStationId {
-                // Log all station IDs to help debug
-                for station in recentStations {
-                    os_log("🚗 CarPlay Recents: Station '%@' has ID: %@", log: self.log, type: .debug, station.name, station.id)
-                }
+            
+            guard shouldUpdateSections(key: "recents",
+                                       data: (recentStations.map(\.id) + recentEpisodes.map(\.id)).joined(separator: ",")) else {
+                applyStationHighlight()
+                return
             }
             
             // Create new sections with updated data
@@ -2700,25 +2973,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             // Recent stations section FIRST (as requested)
             var recentStationItems: [CPListItem] = []
+            var recentRows: [(stationId: String, item: CPListItem)] = []
             var equalizerSetCount = 0
             for station in recentStations {
                 let timeAgo = formatTimeAgo(station.lastPlayed)
                 
-                // CRITICAL FIX: Use nowPlayingStationId from notification if available (avoids timing issues)
-                let isCurrentlyPlaying: Bool
-                if let nowPlayingStationId = nowPlayingStationId {
-                    // Use the station ID from the notification (most up-to-date)
-                    isCurrentlyPlaying = station.id == nowPlayingStationId
-                    if isCurrentlyPlaying {
-                        equalizerSetCount += 1
-                        os_log("🚗 CarPlay Recents: ✅ Setting equalizer ON for '%@' (ID matches nowPlayingStationId: %@)", log: self.log, type: .info, station.name, nowPlayingStationId)
-                    }
-                } else {
-                    // Fallback to RadioPlayer state
-                    isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
-                    if isCurrentlyPlaying {
-                        equalizerSetCount += 1
-                    }
+                let isCurrentlyPlaying = shouldShowPlayingIndicator(for: station)
+                if isCurrentlyPlaying {
+                    equalizerSetCount += 1
                 }
                 
                 let item = CPListItem(text: station.name,
@@ -2734,7 +2996,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     self?.playStation(station, completion: completion)
                 }
                 recentStationItems.append(item)
+                recentRows.append((station.id, item))
             }
+            registerStationRows(recentRows, key: "recents")
             
             if recentStationItems.isEmpty {
                 let emptyItem = CPListItem(text: "No Recent Stations", detailText: "Recently played stations will appear here")
@@ -2746,6 +3010,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             // Recent episodes section SECOND (after stations)
             var recentEpisodeItems: [CPListItem] = []
+            var recentEpisodeRows: [(episodeId: String, item: CPListItem)] = []
             for episode in recentEpisodes {
                 let duration = formatDuration(episode.duration)
                 var statusText = ""
@@ -2810,7 +3075,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     self?.playEpisode(episode, completion: completion)
                 }
                 recentEpisodeItems.append(item)
+                recentEpisodeRows.append((episode.id, item))
             }
+            registerEpisodeRows(recentEpisodeRows, key: "recents")
             
             if recentEpisodeItems.isEmpty {
                 let emptyItem = CPListItem(text: "No Recent Episodes", detailText: "Recently played episodes will appear here")
@@ -2870,6 +3137,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Create new sections with updated data
             var newSections: [CPListSection] = []
             
+            guard shouldUpdateSections(key: "downloads",
+                                       data: podcastsWithDownloads.flatMap { $0.episodes.map(\.id) }.joined(separator: ",")) else {
+                applyEpisodeHighlight()
+                return
+            }
+            
             if podcastsWithDownloads.isEmpty {
                 // No downloads found
                 let emptyItem = CPListItem(text: "No Downloaded Episodes", 
@@ -2877,6 +3150,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 let emptySection = CPListSection(items: [emptyItem], header: "Downloads", sectionIndexTitle: nil)
                 newSections.append(emptySection)
             } else {
+                var downloadRows: [(episodeId: String, item: CPListItem)] = []
                 // Create a section for each podcast with downloads
                 for podcastWithDownloads in podcastsWithDownloads {
                     let feed = podcastWithDownloads.feed
@@ -2919,6 +3193,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                         }
                         
                         episodeItems.append(item)
+                        downloadRows.append((episode.id, item))
                     }
                     
                     // Create section for this podcast
@@ -2926,6 +3201,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     let podcastSection = CPListSection(items: episodeItems, header: sectionHeader, sectionIndexTitle: nil)
                     newSections.append(podcastSection)
                 }
+                registerEpisodeRows(downloadRows, key: "downloads")
             }
             
             // Update the sections directly on the existing template - this preserves navigation
@@ -3041,6 +3317,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
+    /// Refresh a pushed country station list, if one is on screen, so its indicator stays in sync.
+    private func refreshVisibleCountryStationListIfNeeded(nowPlayingStationId: String? = nil) {
+        guard let interfaceController = self.interfaceController,
+              let topTemplate = interfaceController.topTemplate as? CPListTemplate,
+              let templateTitle = topTemplate.title,
+              templateTitle != "Recent", templateTitle != "Radio",
+              templateTitle != "Podcast", templateTitle != "Downloads" else {
+            return
+        }
+        refreshCurrentCountryStationList(country: templateTitle, nowPlayingStationId: nowPlayingStationId)
+    }
+    
     /// Refresh the currently visible country station list to update equalizer indicators
     /// - Parameter nowPlayingStationId: Optional station ID from notification (preferred over RadioPlayer state)
     private func refreshCurrentCountryStationList(country: String, nowPlayingStationId: String? = nil) {
@@ -3054,18 +3342,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         let stations = carPlayManager.getStations(for: country)
         
+        guard shouldUpdateSections(key: "country:\(country)",
+                                   data: stations.map(\.id).joined(separator: ",")) else {
+            applyStationHighlight()
+            return
+        }
+        
         var stationItems: [CPListItem] = []
+        var rows: [(stationId: String, item: CPListItem)] = []
         
         for station in stations {
-            // CRITICAL FIX: Use nowPlayingStationId from notification if available (avoids timing issues)
-            let isCurrentlyPlaying: Bool
-            if let nowPlayingStationId = nowPlayingStationId {
-                // Use the station ID from the notification (most up-to-date)
-                isCurrentlyPlaying = station.id == nowPlayingStationId
-            } else {
-                // Fallback to RadioPlayer state
-                isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
-            }
+            let isCurrentlyPlaying = shouldShowPlayingIndicator(for: station)
             
             let item = CPListItem(text: station.name,
                                  detailText: station.country,
@@ -3080,7 +3367,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 self?.playStation(station, completion: completion)
             }
             stationItems.append(item)
+            rows.append((station.id, item))
         }
+        registerStationRows(rows, key: "country")
         
         let section = CPListSection(items: stationItems, header: "\(country) Stations (\(stations.count))", sectionIndexTitle: nil)
         
@@ -3114,6 +3403,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Get fresh stations data - use the same structure as createStationsTab()
             let carPlayManager = CarPlayManager.shared
             let favoriteStations = carPlayManager.getFavoriteStations()
+            let availableCountries = carPlayManager.getAvailableCountries()
+            
+            guard shouldUpdateSections(key: "stations",
+                                       data: (favoriteStations.map(\.id) + availableCountries).joined(separator: ",")) else {
+                applyStationHighlight()
+                return
+            }
             
             // Create new sections with updated data
             var newSections: [CPListSection] = []
@@ -3121,16 +3417,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Favorite stations section
             if !favoriteStations.isEmpty {
                 var favoriteStationItems: [CPListItem] = []
+                var favoriteRows: [(stationId: String, item: CPListItem)] = []
                 for station in favoriteStations {
-                    // CRITICAL FIX: Use nowPlayingStationId from notification if available (avoids timing issues)
-                    let isCurrentlyPlaying: Bool
-                    if let nowPlayingStationId = nowPlayingStationId {
-                        // Use the station ID from the notification (most up-to-date)
-                        isCurrentlyPlaying = station.id == nowPlayingStationId
-                    } else {
-                        // Fallback to RadioPlayer state
-                        isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
-                    }
+                    let isCurrentlyPlaying = shouldShowPlayingIndicator(for: station)
                     
                     let item = CPListItem(text: station.name,
                                          detailText: station.country,
@@ -3145,7 +3434,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                         self?.playStation(station, completion: completion)
                     }
                     favoriteStationItems.append(item)
+                    favoriteRows.append((station.id, item))
                 }
+                registerStationRows(favoriteRows, key: "favorites")
                 
                 let favoriteSection = CPListSection(items: favoriteStationItems, header: "Favorites", sectionIndexTitle: nil)
                 newSections.append(favoriteSection)
@@ -3153,8 +3444,6 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             // CRITICAL FIX: Add Browse by Country section (same as createStationsTab)
             // This was missing and causing the country list to disappear when refreshing
-            let availableCountries = carPlayManager.getAvailableCountries()
-            
             if !availableCountries.isEmpty {
                 var countryItems: [CPListItem] = []
                 for country in availableCountries {
@@ -3479,10 +3768,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Update all episodes with current state and highlighting
         var episodeItems: [CPListItem] = []
+        var allEpisodeRows: [(episodeId: String, item: CPListItem)] = []
         
         // Get current playing state directly from PodcastPlayer for real-time accuracy
         let currentPlayingEpisodeId = PodcastPlayer.shared.currentEpisode?.id
         let isPlayerPlaying = PodcastPlayer.shared.isPlaying
+        
+        guard shouldUpdateSections(key: "episodes:\(podcast.id)",
+                                   data: podcast.episodes.map { "\($0.id):\(EpisodeStateManager.shared.getState(for: $0.id))" }.joined(separator: ",")) else {
+            applyEpisodeHighlight()
+            return
+        }
         
         os_log("🚗 CarPlay: Current playing episode ID: %@, player is playing: %@", log: log, type: .info, currentPlayingEpisodeId ?? "none", isPlayerPlaying ? "YES" : "NO")
         
@@ -3535,7 +3831,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
             
             episodeItems.append(item)
+            allEpisodeRows.append((episode.id, item))
         }
+        registerEpisodeRows(allEpisodeRows, key: "episodes")
         
         let episodesSection = CPListSection(items: episodeItems, header: "All Episodes (\(podcast.episodes.count))", sectionIndexTitle: nil)
         newSections.append(episodesSection)

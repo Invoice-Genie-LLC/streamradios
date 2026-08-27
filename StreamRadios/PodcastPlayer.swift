@@ -153,7 +153,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     // MAIN THREAD FIX: Configure audio session on background queue to avoid IPC delays
                     try audioSession.setCategory(.playback, 
                                                mode: .default, 
-                                               options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                               options: PlaybackManager.playbackCategoryOptions)
                     
                     DispatchQueue.main.async {
                         print("✅ PodcastPlayer: Background transition handled - audio session category set")
@@ -1762,8 +1762,29 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
+    /// Entitlement is normally enforced by covering the UI with the paywall, which never reaches
+    /// CarPlay or remote-command play requests — so the player itself has to refuse.
+    /// When StoreKit hasn't answered yet this resolves the status and re-runs `retry` if entitled.
+    func isPlaybackEntitled(retry: (() -> Void)? = nil) -> Bool {
+        let snapshot = SubscriptionManager.entitlementSnapshot
+        if snapshot.isEntitled { return true }
+        guard !snapshot.isResolved else { return false }
+        
+        Task { @MainActor in
+            await SubscriptionManager.shared.updateSubscriptionStatus()
+            if SubscriptionManager.shared.isSubscribedOrInTrial { retry?() }
+        }
+        return false
+    }
+    
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         os_log("Starting playback for episode: %@ (ID: %@)", log: log, type: .info, episode.title, episode.id)
+        
+        guard isPlaybackEntitled(retry: { [weak self] in self?.playEpisode(episode, feed: feed) }) else {
+            os_log("🔒 Podcast playback blocked - no active subscription", log: log, type: .info)
+            loadingEpisodeId = nil
+            return
+        }
         
         // CARPLAY PROTECTION: Don't reload the same episode that's already playing during CarPlay sessions
         // This prevents progress reset when phone app starts during CarPlay playback
@@ -2337,6 +2358,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func play() {
+        guard isPlaybackEntitled(retry: { [weak self] in self?.play() }) else {
+            os_log("🔒 Podcast playback blocked - no active subscription", log: log, type: .info)
+            return
+        }
+        
         // CRITICAL: Set user intent when resuming playback
         userWantsToPlay = true
         
@@ -2755,7 +2781,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 // First, ensure the category is correct and take control of audio
                 try audioSession.setCategory(.playback, 
                                            mode: .default, 
-                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                                           options: PlaybackManager.playbackCategoryOptions)
                 
                 // Aggressively activate audio session to reclaim audio from other apps
                 try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])

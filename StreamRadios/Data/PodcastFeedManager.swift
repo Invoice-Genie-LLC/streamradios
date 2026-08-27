@@ -2,6 +2,39 @@ import Foundation
 import CoreData
 import os.log
 
+/// Thrown when a feed answers a conditional GET with 304, meaning nothing changed since last fetch.
+struct FeedNotModifiedError: Error {}
+
+/// Persisted HTTP validators per feed, so an unchanged feed costs a 304 instead of a full download.
+enum FeedHTTPCache {
+    private static let etagPrefix = "FeedETag_"
+    private static let lastModifiedPrefix = "FeedLastModified_"
+
+    /// Only call when episodes are already cached locally - a 304 against an empty store strands the feed.
+    static func applyValidators(to request: inout URLRequest, feedKey: String) {
+        if let etag = UserDefaults.standard.string(forKey: etagPrefix + feedKey) {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        if let lastModified = UserDefaults.standard.string(forKey: lastModifiedPrefix + feedKey) {
+            request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+        }
+    }
+
+    static func storeValidators(from response: HTTPURLResponse, feedKey: String) {
+        if let etag = response.value(forHTTPHeaderField: "ETag") {
+            UserDefaults.standard.set(etag, forKey: etagPrefix + feedKey)
+        }
+        if let lastModified = response.value(forHTTPHeaderField: "Last-Modified") {
+            UserDefaults.standard.set(lastModified, forKey: lastModifiedPrefix + feedKey)
+        }
+    }
+
+    static func clearValidators(feedKey: String) {
+        UserDefaults.standard.removeObject(forKey: etagPrefix + feedKey)
+        UserDefaults.standard.removeObject(forKey: lastModifiedPrefix + feedKey)
+    }
+}
+
 /// High-performance podcast feed manager with efficient background processing
 class PodcastFeedManager {
     private let log = OSLog(subsystem: "StreamRadios", category: "FeedManager")
@@ -674,18 +707,9 @@ class PodcastFeedManager {
                 continue // Skip this corrupted episode update
             }
             
-            // Preserve download data
-            let preservedLocalFilePath = managedEpisode.localFilePath
-            let preservedFileSize = managedEpisode.fileSize
-            
-            // Update episode data
             var episodeWithFeedId = episode
             episodeWithFeedId.feedId = feedId
-            managedEpisode.update(from: episodeWithFeedId)
-            
-            // Restore preserved download data
-            managedEpisode.localFilePath = preservedLocalFilePath
-            managedEpisode.fileSize = preservedFileSize
+            managedEpisode.updateMetadata(from: episodeWithFeedId)
         }
         
         os_log("🔄 Updated %d existing episodes", log: log, type: .info, episodes.count)
@@ -759,10 +783,7 @@ class PodcastFeedManager {
                     
                     let managedEpisode: PodcastModel
                     if let existingEpisode = try? context.fetch(existingRequest).first {
-                        // Update existing episode but preserve download data
                         managedEpisode = existingEpisode
-                        let preservedLocalFilePath = existingEpisode.localFilePath
-                        let preservedFileSize = existingEpisode.fileSize
                         
                         // 🚨 VALIDATION: Don't update to an empty title
                         let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -785,15 +806,7 @@ class PodcastFeedManager {
                         
                         var episodeWithFeedId = episode
                         episodeWithFeedId.feedId = feedId  // CRITICAL: Always use the correct feedId
-                        managedEpisode.update(from: episodeWithFeedId)
-                        
-                        // Restore preserved download data
-                        managedEpisode.localFilePath = preservedLocalFilePath
-                        managedEpisode.fileSize = preservedFileSize
-                        
-                        if let localPath = preservedLocalFilePath, !localPath.isEmpty {
-                            print("📁 DEBUG: Preserved localFilePath for existing episode: \(episode.title) -> \(localPath)")
-                        }
+                        managedEpisode.updateMetadata(from: episodeWithFeedId)
                     } else {
                         // Create new episode
                         managedEpisode = PodcastModel(context: context)
@@ -868,7 +881,7 @@ enum FeedError: Error, LocalizedError {
 
 extension PodcastFeedManager {
     /// Fetch RSS data with retry mechanism and robust error handling for decode issues
-    private func fetchRSSDataWithRetry(url: URL, feedTitle: String, maxRetries: Int = 3) async throws -> Data {
+    private func fetchRSSDataWithRetry(url: URL, feedTitle: String, maxRetries: Int = 3, conditionalKey: String? = nil) async throws -> Data {
         var lastError: Error?
         
         for attempt in 1...maxRetries {
@@ -883,6 +896,11 @@ extension PodcastFeedManager {
                 request.setValue("StreamRadios/1.0", forHTTPHeaderField: "User-Agent")
                 request.setValue("application/rss+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
                 request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                if let conditionalKey {
+                    // Our own validators, so the 304 reaches us instead of being absorbed by URLCache.
+                    request.cachePolicy = .reloadIgnoringLocalCacheData
+                    FeedHTTPCache.applyValidators(to: &request, feedKey: conditionalKey)
+                }
                 
                 // CRITICAL: Another yield point before network operation
                 await Task.yield()
@@ -898,9 +916,17 @@ extension PodcastFeedManager {
                 if let httpResponse = response as? HTTPURLResponse {
                     os_log("📡 HTTP Response: %d for feed: %@", log: log, type: .info, httpResponse.statusCode, feedTitle)
                     
+                    if httpResponse.statusCode == 304 {
+                        throw FeedNotModifiedError()
+                    }
+                    
                     // Check for server errors
                     guard 200...299 ~= httpResponse.statusCode else {
                         throw FeedError.networkError
+                    }
+                    
+                    if let conditionalKey {
+                        FeedHTTPCache.storeValidators(from: httpResponse, feedKey: conditionalKey)
                     }
                     
                     // Log content type for debugging
@@ -944,6 +970,9 @@ extension PodcastFeedManager {
                 
                 return data
                 
+            } catch is FeedNotModifiedError {
+                os_log("✅ 304 Not Modified for feed: %@ - no new episodes", log: log, type: .info, feedTitle)
+                throw FeedNotModifiedError()
             } catch {
                 lastError = error
                 let isDecodeError = (error as NSError).code == -1015
@@ -998,6 +1027,10 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     private var isParsingItem = false
     private var characterBuffer = ""
     
+    /// When set, parsing is aborted as soon as this many episodes are built.
+    private var episodeLimit: Int?
+    private var didStopAtLimit = false
+    
     // Progress tracking
     private var bytesProcessed: Int = 0
     private var progressCallback: ((Double, String) -> Void)?
@@ -1051,18 +1084,16 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     }
     
     /// PERFORMANCE: Parse with early episode limit for immediate display
-    /// Returns first N episodes quickly, allowing UI to show new content immediately
+    /// Aborts the XML parse once the limit is hit, so huge feeds cost only their first items
     func parseWithLimit(episodeLimit: Int = 50) async throws -> (PodcastFeed, [PodcastEpisode]) {
-        // Store original episode limit
-        let originalEpisodes = episodes
-        var limitReached = false
+        self.episodeLimit = episodeLimit
         
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 self.progressCallback?(0.1, "Parsing first \(episodeLimit) episodes...")
                 
                 // Parse RSS but stop after limit
-                guard self.parser.parse() else {
+                guard self.parser.parse() || self.didStopAtLimit else {
                     if let parserError = self.parser.parserError {
                         os_log("❌ Limited RSS Parser failed: %@", log: OSLog.default, type: .error, parserError.localizedDescription)
                         continuation.resume(throwing: FeedError.parsingFailed)
@@ -1114,8 +1145,7 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     private func generateFeedIdFromUrl(_ feedUrl: String) -> String {
         // Create a deterministic hash of the feed URL for consistent feed IDs
         let content = feedUrl.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let hash = abs(content.hashValue)
-        return "feed_\(hash)"
+        return "feed_\(StableHash.of(content))"
     }
     
     // MARK: - XMLParserDelegate
@@ -1219,6 +1249,10 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
                 }
                 isParsingItem = false
                 currentEpisode = nil
+                if let limit = episodeLimit, episodes.count >= limit {
+                    didStopAtLimit = true
+                    parser.abortParsing()
+                }
             default:
                 break
             }
@@ -1374,8 +1408,7 @@ private class EpisodeBuilder {
     private func generateFeedIdFromUrl(_ feedUrl: String) -> String {
         // Create a deterministic hash of the feed URL for consistent feed IDs
         let content = feedUrl.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let hash = abs(content.hashValue)
-        return "feed_\(hash)"
+        return "feed_\(StableHash.of(content))"
     }
     
     // MARK: - Show Notes Creation

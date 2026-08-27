@@ -128,17 +128,12 @@ struct PodcastListView: View {
     @State private var isEditDataReady = false
     @State private var isPreparingEditData = false
     
-    // PERFORMANCE: Memoized filtered podcasts to avoid expensive recomputation
-    @State private var cachedFilteredPodcasts: [PodcastFeed] = []
-    
     // Animation state for deletion progress overlay
     @State private var animationScale: CGFloat = 1.0
     @State private var currentDeletingFeedTitle: String = ""
-    @State private var lastPodcastFeedsCount: Int = 0
     
     // PERFORMANCE: Fast feed lookup cache
     @State private var feedLookupCache: [String: PodcastFeed] = [:]
-    @State private var filteredFeedOrderCache: [String] = []
     
 
     
@@ -341,7 +336,7 @@ struct PodcastListView: View {
                        onUpdate: nil
                    )
                }
-               .sheet(isPresented: Binding(
+               .fullScreenCover(isPresented: Binding(
                    get: { showingEditPodcast && isEditDataReady },
                    set: { newValue in
                        showingEditPodcast = newValue
@@ -383,10 +378,7 @@ struct PodcastListView: View {
                        }
                    )
                }
-                               .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $showingSearchPodcasts : .constant(false)) {
-                    SearchPodcastsView(isPresented: $showingSearchPodcasts)
-                }
-                .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $showingSearchPodcasts : .constant(false)) {
+                               .fullScreenCover(isPresented: $showingSearchPodcasts) {
                     SearchPodcastsView(isPresented: $showingSearchPodcasts)
                 }
                 .onChange(of: showingSearchPodcasts) { _, isPresented in
@@ -1124,11 +1116,6 @@ struct PodcastListView: View {
     private func initializeCaches() {
         // Initialize feed lookup cache
         feedLookupCache = Dictionary(uniqueKeysWithValues: viewModel.podcastFeeds.map { ($0.id, $0) })
-        
-        // Initialize filtered caches
-        cachedFilteredPodcasts = viewModel.podcastFeeds
-        lastPodcastFeedsCount = viewModel.podcastFeeds.count
-        filteredFeedOrderCache = viewModel.podcastFeedOrder
     }
     
     // PERFORMANCE: Fast feed lookup by ID
@@ -1142,39 +1129,12 @@ struct PodcastListView: View {
     
     // PERFORMANCE: Get filtered feed order without expensive nested lookups
     private func getFilteredFeedOrder() -> [String] {
-        // SORTING FIX: Invalidate cache when podcastFeedOrder changes to ensure sorting updates are visible
-        if viewModel.podcastFeeds.count == lastPodcastFeedsCount &&
-           filteredFeedOrderCache.count == viewModel.podcastFeedOrder.count {
-            
-            // Additional check: verify the order hasn't changed by checking first few items
-            let currentOrder = viewModel.podcastFeedOrder.prefix(min(3, viewModel.podcastFeedOrder.count))
-            let cachedOrder = filteredFeedOrderCache.prefix(min(3, filteredFeedOrderCache.count))
-            
-            // Use cached result only if order is exactly the same
-            if Array(currentOrder) == Array(cachedOrder) {
-                return filteredFeedOrderCache
-            }
-        }
-        
-        let filteredIds = Set(filteredPodcasts.map { $0.id })
-        let result = viewModel.podcastFeedOrder.filter { filteredIds.contains($0) }
-        
-        // Cache the result
-        DispatchQueue.main.async {
-            self.filteredFeedOrderCache = result
-            self.lastPodcastFeedsCount = self.viewModel.podcastFeeds.count
-        }
-        
-        return result
+        let feedIds = Set(viewModel.podcastFeeds.map { $0.id })
+        return viewModel.podcastFeedOrder.filter { feedIds.contains($0) }
     }
     
     // PERFORMANCE: Optimized memoized filtered podcasts
     private var filteredPodcasts: [PodcastFeed] {
-        // Use cached result if podcast count hasn't changed
-        if viewModel.podcastFeeds.count == lastPodcastFeedsCount {
-            return cachedFilteredPodcasts
-        }
-        
         // Return all feeds (no global search anymore)
         return viewModel.podcastFeeds
     }
@@ -1286,6 +1246,46 @@ class ShareContent: NSObject, UIActivityItemSource {
             return subject
         }
         return ""
+    }
+}
+
+/// Compact swipe action used by the episode rows.
+private struct EpisodeSwipeAction: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var isEnabled: Bool = true
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 42, height: 42)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(LinearGradient(colors: [tint, tint.opacity(0.75)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(.white.opacity(0.18), lineWidth: 1)
+                    )
+                    .shadow(color: tint.opacity(0.3), radius: 5, y: 3)
+                
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(width: 54)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .opacity(isEnabled ? 1 : 0.5)
+        .disabled(!isEnabled)
     }
 }
 
@@ -1649,7 +1649,7 @@ struct EpisodeRowView: View {
     @StateObject private var exportURLHolder = ExportURLHolder()
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
-    private let swipeActionWidth: CGFloat = 180 // Width for action buttons area (circular design)
+    private let swipeActionWidth: CGFloat = 138 // Width for action buttons area
     
     // FORCE UI REFRESH: Get real-time episode state from viewModel
     private var currentEpisode: PodcastEpisode {
@@ -2115,81 +2115,39 @@ struct EpisodeRowView: View {
     
     // Swipe action buttons that appear behind the row
     private var swipeActionButtons: some View {
-        HStack(spacing: 16) {
-            // Favorite button
-            Button {
+        HStack(spacing: 10) {
+            EpisodeSwipeAction(
+                title: currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite",
+                systemImage: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill",
+                tint: currentEpisode.state.isFavorite ? .orange : .purple
+            ) {
                 viewModel.toggleFavorite(for: episode)
                 withAnimation {
                     swipeOffset = 0
                     viewModel.swipedEpisodeId = nil
                 }
-            } label: {
-                VStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(currentEpisode.state.isFavorite ? Color.orange : Color.purple)
-                            .frame(width: 56, height: 56)
-                        
-                        Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                    }
-                    
-                    Text(currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite")
-                        .font(.caption2)
-                        .foregroundColor(.primary)
-                }
             }
             
-            // Download/Delete button
             if isDownloaded {
-                Button {
+                EpisodeSwipeAction(title: "Delete", systemImage: "trash.fill", tint: .red) {
                     showingDeleteConfirmation = true
-                } label: {
-                    VStack(spacing: 6) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 56, height: 56)
-                            
-                            Image(systemName: "trash.fill")
-                                .font(.title2)
-                                .foregroundColor(.white)
-                        }
-                        
-                        Text("Delete")
-                            .font(.caption2)
-                            .foregroundColor(.primary)
-                    }
                 }
             } else {
-                Button {
+                EpisodeSwipeAction(
+                    title: "Download",
+                    systemImage: "arrow.down.circle.fill",
+                    tint: isDownloading ? .gray : .blue,
+                    isEnabled: !isDownloading
+                ) {
                     handleDownloadAction()
                     withAnimation {
                         swipeOffset = 0
                         viewModel.swipedEpisodeId = nil
                     }
-                } label: {
-                    VStack(spacing: 6) {
-                        ZStack {
-                            Circle()
-                                .fill(isDownloading ? Color.gray : Color.blue)
-                                .frame(width: 56, height: 56)
-                            
-                            Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.white)
-                        }
-                        
-                        Text("Download")
-                            .font(.caption2)
-                            .foregroundColor(.primary)
-                    }
                 }
-                .disabled(isDownloading)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
     }
     
     
@@ -2526,8 +2484,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     
     // Cache expensive computations to avoid recalculation during scrolling
     private let cachedProgress: Double
-    private let cachedStatusText: String
-    private let cachedStatusColor: Color
+    private let cachedState: EpisodePlaybackState
     private let cachedTimeInfo: String?
     private let cachedDateString: String
     private let cachedPlayButtonIcon: String
@@ -2567,7 +2524,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }()
     
     private let buttonSize: CGFloat = 22
-    private let swipeActionWidth: CGFloat = 180 // Width for action buttons area (circular design)
+    private let swipeActionWidth: CGFloat = 138 // Width for action buttons area
     
     // Computed property for checking download state
     private var isDownloading: Bool {
@@ -2586,7 +2543,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
         if isPlaying {
             return "PLAYING"
         } else {
-            return cachedStatusText
+            // Live, so the badge can never disagree with the play button beside it.
+            return EpisodeStateManager.shared.getState(for: episode.id).statusText.uppercased()
         }
     }
     
@@ -2594,7 +2552,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         if isPlaying {
             return .blue
         } else {
-            return cachedStatusColor
+            return EpisodeStateManager.shared.getState(for: episode.id).statusColor
         }
     }
     
@@ -2658,16 +2616,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
         // For playing episodes, we'll use real-time progress; for others, use EpisodeStateManager
         self.cachedProgress = isPlaying ? podcastPlayer.currentProgress : EpisodeStateManager.shared.getProgress(for: episode.id)
         let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+        self.cachedState = episodeState
         self.cachedIsCompleted = episodeState == .played || self.cachedProgress >= 0.99
-        
-        // Pre-compute status text and color using EpisodeStateManager
-        if isPlaying {
-            self.cachedStatusText = "PLAYING"
-            self.cachedStatusColor = .blue
-        } else {
-            self.cachedStatusText = episodeState.statusText.uppercased()
-            self.cachedStatusColor = episodeState.statusColor
-        }
         
         // Pre-compute play button icon using EpisodeStateManager
         if isPlaying {
@@ -2712,6 +2662,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         return lhs.episode.id == rhs.episode.id &&
         lhs.isPlaying == rhs.isPlaying &&
         progressEqual &&
+        lhs.cachedState == rhs.cachedState &&
         lhs.episode.state.isFavorite == rhs.episode.state.isFavorite &&
         lhs.episode.state.isDownloaded == rhs.episode.state.isDownloaded
     }
@@ -2910,81 +2861,39 @@ struct OptimizedEpisodeRowView: View, Equatable {
     
     // Swipe action buttons that appear behind the row
     private var swipeActionButtons: some View {
-        HStack(spacing: 16) {
-            // Favorite button
-            Button {
+        HStack(spacing: 10) {
+            EpisodeSwipeAction(
+                title: currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite",
+                systemImage: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill",
+                tint: currentEpisode.state.isFavorite ? .orange : .purple
+            ) {
                 viewModel.toggleFavorite(for: episode)
                 withAnimation {
                     swipeOffset = 0
                     viewModel.swipedEpisodeId = nil
                 }
-            } label: {
-                VStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(currentEpisode.state.isFavorite ? Color.orange : Color.purple)
-                            .frame(width: 56, height: 56)
-                        
-                        Image(systemName: currentEpisode.state.isFavorite ? "bookmark.slash.fill" : "bookmark.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                    }
-                    
-                    Text(currentEpisode.state.isFavorite ? "Unfavorite" : "Favorite")
-                        .font(.caption2)
-                        .foregroundColor(.primary)
-                }
             }
             
-            // Download/Delete button
             if isDownloaded {
-                Button {
+                EpisodeSwipeAction(title: "Delete", systemImage: "trash.fill", tint: .red) {
                     showingDeleteConfirmation = true
-                } label: {
-                    VStack(spacing: 6) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 56, height: 56)
-                            
-                            Image(systemName: "trash.fill")
-                                .font(.title2)
-                                .foregroundColor(.white)
-                        }
-                        
-                        Text("Delete")
-                            .font(.caption2)
-                            .foregroundColor(.primary)
-                    }
                 }
             } else {
-                Button {
+                EpisodeSwipeAction(
+                    title: "Download",
+                    systemImage: "arrow.down.circle.fill",
+                    tint: isDownloading ? .gray : .blue,
+                    isEnabled: !isDownloading
+                ) {
                     handleDownloadAction()
                     withAnimation {
                         swipeOffset = 0
                         viewModel.swipedEpisodeId = nil
                     }
-                } label: {
-                    VStack(spacing: 6) {
-                        ZStack {
-                            Circle()
-                                .fill(isDownloading ? Color.gray : Color.blue)
-                                .frame(width: 56, height: 56)
-                            
-                            Image(systemName: isDownloading ? "arrow.down.circle.fill" : "arrow.down.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.white)
-                        }
-                        
-                        Text("Download")
-                            .font(.caption2)
-                            .foregroundColor(.primary)
-                    }
                 }
-                .disabled(isDownloading)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
     }
     
     private var episodeContent: some View {
@@ -3425,6 +3334,9 @@ struct PodcastPlayerView: View {
     // Search state
     @State private var searchText = ""
     @State private var isSearchPresented = false
+    @FocusState private var isSearchFieldFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var episodeTabNamespace
     
     // Cached artwork to prevent flickering during scrolls
     @State private var cachedArtworkImage: UIImage?
@@ -3450,7 +3362,7 @@ struct PodcastPlayerView: View {
             VStack(spacing: 0) {
                 // Search Bar (when presented)
                 if isSearchPresented {
-                    CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search episodes in \(feed.title)")
+                    searchBar
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .padding(.bottom, 12)
@@ -3483,6 +3395,12 @@ struct PodcastPlayerView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: {
+                    // While searching the back button leaves search mode instead of the screen.
+                    if isSearchPresented {
+                        exitSearch()
+                        return
+                    }
+                    
                     // CRITICAL: Execute navigation IMMEDIATELY on main thread with highest priority
                     // This ensures nothing can block or delay the back navigation
                     Task { @MainActor in
@@ -3500,13 +3418,12 @@ struct PodcastPlayerView: View {
                     }
                 }) {
                     Image(systemName: "chevron.left")
-                        .font(.title2)
-                        
-                        .padding(8) // Increase tappable area
+                        .font(.system(size: 17, weight: .semibold))
                 }
                 .buttonStyle(PlainButtonStyle())
                 .simultaneousGesture(TapGesture().onEnded { _ in
                     // EMERGENCY FALLBACK: If button action doesn't fire, this gesture will
+                    guard !isSearchPresented else { return }
                     Task { @MainActor in
                         selectedPodcast = nil
                     }
@@ -3516,25 +3433,14 @@ struct PodcastPlayerView: View {
             }
             
             ToolbarItem(placement: .navigationBarTrailing) {
-                if isSearchPresented {
-                    Button("Cancel") {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isSearchPresented = false
-                            searchText = ""
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        }
-                    }
-                    
-                } else {
+                if !isSearchPresented {
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.3)) {
                             isSearchPresented = true
                         }
                     }) {
                         Image(systemName: "magnifyingglass")
-                            .foregroundColor(.adaptivePrimaryText)
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 32, height: 32)
+                            .font(.system(size: 17, weight: .semibold))
                     }
                 }
             }
@@ -3587,13 +3493,13 @@ struct PodcastPlayerView: View {
     // MARK: - View Components
     
     private var episodeFilterTabs: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 10) {
             // Section header
-            HStack {
+            HStack(spacing: 6) {
                 Text("EPISODES")
-                    .font(.caption)
-                    .foregroundColor(.primary)
-                    .tracking(1.0)
+                    .font(.caption2.weight(.semibold))
+                    .tracking(1.2)
+                    .foregroundColor(.adaptiveSecondaryText)
                 
                 // Minimal CloudKit sync indicator next to EPISODES header
                 MinimalCloudKitSyncIndicator()
@@ -3601,49 +3507,33 @@ struct PodcastPlayerView: View {
                 Spacer()
                 
                 HStack(spacing: 4) {
-                    Text("\(viewModel.currentEpisodes.count)")
-                        .font(.caption)
-                        .foregroundColor(.adaptiveSecondaryText)
-                    
-                    Text("episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
-                        .font(.caption)
+                    Text("\(viewModel.currentEpisodes.count) episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
+                        .font(.caption2.weight(.semibold))
                         .foregroundColor(.adaptiveSecondaryText)
                     
                     if viewModel.hasMoreEpisodes {
-                        Text("• More available")
-                            .font(.caption2)
+                        Text("• More")
+                            .font(.caption2.weight(.semibold))
                             .foregroundColor(.orange)
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.blue.opacity(0.1))
-                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.adaptiveFieldBackground))
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 8)
             
-            // Enhanced filter tabs
-            Picker("", selection: $selectedTab) {
-                Text("Current Episodes").tag(0)
-                Text("All Episodes").tag(1)
+            HStack(spacing: 4) {
+                episodeFilterTab(title: "Current Episodes", tag: 0)
+                episodeFilterTab(title: "All Episodes", tag: 1)
             }
-            .pickerStyle(SegmentedPickerStyle())
+            .padding(3)
+            .background(Capsule().fill(Color.adaptiveFieldBackground))
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
         }
-        .background(
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(UIColor.systemBackground),
-                    Color(UIColor.systemBackground).opacity(0.95)
-                ]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .padding(.top, 4)
+        .background(Color.adaptiveBackground)
         .overlay(
             Rectangle()
                 .fill(Color.adaptiveSeparator)
@@ -3661,6 +3551,36 @@ struct PodcastPlayerView: View {
             // Use the optimized updateFilter method instead of expensive loadEpisodesForFeed
             viewModel.updateFilter(tab: newValue)
         }
+    }
+    
+    private func episodeFilterTab(title: String, tag: Int) -> some View {
+        let isSelected = selectedTab == tag
+        return Button {
+            guard !isSelected else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                selectedTab = tag
+            }
+        } label: {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .foregroundColor(isSelected
+                                 ? (colorScheme == .dark ? .blue : .white)
+                                 : .adaptiveSecondaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    Group {
+                        if isSelected {
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.blue.opacity(0.18) : Color.accentColor)
+                                .matchedGeometryEffect(id: "episodeFilterTab", in: episodeTabNamespace)
+                        }
+                    }
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
     private var episodeListContent: some View {
@@ -3691,61 +3611,68 @@ struct PodcastPlayerView: View {
     
     // MARK: - About Section
     private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("ABOUT")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                    .tracking(1.0)
-                
-                Spacer()
-                
-                // Scroll indicators - show arrows to indicate scrollable content
-                VStack(spacing: 2) {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundColor(.secondary)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-                .opacity(0.6)
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ABOUT")
+                .font(.caption2.weight(.semibold))
+                .tracking(1.2)
+                .foregroundColor(.adaptiveSecondaryText)
             
-            HStack(alignment: .top, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
                 // Feed artwork on the left - using cached UIImage to prevent flickering
-                if let cachedImage = cachedArtworkImage {
-                    Image(uiImage: cachedImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 120, height: 120)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    // Placeholder while loading
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 120, height: 120)
-                        .overlay(
-                            Image(systemName: "music.note")
-                                .foregroundColor(.gray)
-                                .font(.largeTitle)
-                        )
+                Group {
+                    if let cachedImage = cachedArtworkImage {
+                        Image(uiImage: cachedImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color.adaptiveFieldBackground)
+                            .overlay(
+                                Image(systemName: "music.note")
+                                    .font(.title)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                            )
+                    }
                 }
+                .frame(width: 104, height: 104)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.adaptiveBorder, lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.12), radius: 8, y: 4)
                 
-                // Description text on the right
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView(.vertical, showsIndicators: false) {
                     Text(feed.descriptionText ?? "No description available")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .font(.footnote)
+                        .foregroundColor(.adaptiveSecondaryText)
+                        .lineSpacing(2)
                         .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
-                        .padding(.trailing, 8) // Add right padding to prevent text cutoff
-                        .padding(.bottom, 4) // Add some bottom padding for better scrolling
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 6)
                 }
-                .frame(maxHeight: 120) // Match artwork height for better alignment
+                .frame(height: 104)
+                // Fading the last few points hints that the description keeps scrolling.
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.85),
+                            .init(color: .black.opacity(0.05), location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
             }
         }
-        .padding(.horizontal, 20)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.adaptiveSecondaryBackground)
+        )
+        .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 12)
     }
@@ -4399,6 +4326,55 @@ struct PodcastPlayerView: View {
     }
     
     // MARK: - Search Results List
+    
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline)
+                .foregroundColor(.adaptiveSecondaryText)
+            
+            TextField("Search episodes in \(feed.title)", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.subheadline)
+                .foregroundColor(.adaptivePrimaryText)
+                .focused($isSearchFieldFocused)
+                .submitLabel(.search)
+                .onChange(of: searchText) { _, newValue in
+                    let limited = String(newValue.prefix(100))
+                    if limited != searchText {
+                        searchText = limited
+                    }
+                }
+            
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveFieldBackground))
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                isSearchFieldFocused = true
+            }
+        }
+    }
+    
+    private func exitSearch() {
+        isSearchFieldFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isSearchPresented = false
+            searchText = ""
+        }
+    }
     
     private var searchResultsList: some View {
         // Search across ALL episodes in the feed, not just current tab

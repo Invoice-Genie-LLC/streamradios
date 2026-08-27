@@ -29,9 +29,9 @@ struct EditStationView: View {
     @State private var iconImage: UIImage? = nil
     @State private var internalActiveSheet: EditStationSheetType?
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var viewModel: RadioStationViewModel
     @EnvironmentObject var permissionManager: PermissionManager
-    @Binding var activeSheet: ActiveSheet?
     var station: RadioStation
     @StateObject private var podcastViewModel = PodcastViewModel()
     @StateObject private var podcastPlayer = PodcastPlayer.shared
@@ -43,12 +43,11 @@ struct EditStationView: View {
     
     // Using adaptive color system
     
-    init(station: RadioStation, activeSheet: Binding<ActiveSheet?>) {
+    init(station: RadioStation) {
         _name = State(initialValue: station.name)
         _urlString = State(initialValue: station.url)
         _selectedCountry = State(initialValue: station.country ?? "Unknown Region")
         self.station = station
-        _activeSheet = activeSheet
         
         if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             _iconImage = State(initialValue: image)
@@ -56,43 +55,45 @@ struct EditStationView: View {
     }
     
     var body: some View {
-        NavigationView {
-            ZStack(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    ScrollView {
-                        VStack(spacing: 40) {
-                            stationIconSection
-                            formFieldsSection
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 20)
-                        .padding(.bottom, 40)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(spacing: 40) {
+                        stationIconSection
+                        formFieldsSection
                     }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+                    .padding(.bottom, 40)
                 }
-                .background(Color.adaptiveSheetBackground.ignoresSafeArea())
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Edit Station")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.adaptivePrimaryText)
+            .background(Color.adaptiveSheetBackground.ignoresSafeArea())
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Edit Station")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.adaptivePrimaryText)
+            }
+            
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+                .accessibilityLabel("Back")
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    saveStation()
                 }
                 
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        activeSheet = nil
-                    }
-                    
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        saveStation()
-                    }
-                    
-                }
             }
         }
         .overlay(
@@ -239,7 +240,10 @@ struct EditStationView: View {
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         viewModel.updateStation(station, name: name, url: urlString, iconData: iconData, country: selectedCountry)
         viewModel.saveStationsToCoreData()
-        activeSheet = nil
+        // The list snapshot caches artwork under a per-station key, so it has to be told the icon moved on.
+        SRStationSnapshots.shared.bumpIconRevision(for: station.id)
+        NotificationCenter.default.post(name: .stationDetailsUpdated, object: nil)
+        dismiss()
     }
 }
 
@@ -393,7 +397,7 @@ struct EditStationView_Previews: PreviewProvider {
     static var previews: some View {
         let station = RadioStation(id: "ABC", name: "Sample Station", url: "http://samplestation.com", iconData: nil, country: "Unknown Region", favoriteOrder: nil)
         
-        EditStationView(station: station, activeSheet: .constant(.editStation))
+        EditStationView(station: station)
             .environmentObject(RadioStationViewModel())
             .environmentObject(PermissionManager())
     }

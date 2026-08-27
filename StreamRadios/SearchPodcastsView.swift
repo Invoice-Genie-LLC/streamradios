@@ -102,36 +102,18 @@ struct SearchPodcastsView: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        searchText = ""
-                        isSearchPresented = false
-                        searchService.clearResults()
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        isPresented = false
+                    Button {
+                        goBack()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
                     }
-                    
+                    .accessibilityLabel("Back")
                 }
                 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Group {
-                        if isSearchPresented {
-                            // Cancel button when search is active
-                            Button("Cancel") {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    isSearchPresented = false
-                                    searchText = ""
-                                    searchService.clearResults()
-                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                }
-                            }
-                            
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule()
-                                    .fill(Color.clear)
-                            )
-                        } else {
+                        if !isSearchPresented {
                             HStack(spacing: 8) {
                                 // Search button
                                 Button(action: {
@@ -205,7 +187,7 @@ struct SearchPodcastsView: View {
                 }
             }
         )
-        .sheet(isPresented: $showingAddPodcast) {
+        .fullScreenCover(isPresented: $showingAddPodcast) {
             AddPodcastView(
                 isPresented: $showingAddPodcast,
                 title: $newPodcastTitle,
@@ -215,16 +197,7 @@ struct SearchPodcastsView: View {
                 onUpdate: nil
             )
         }
-        .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? showingPreview : .constant(false)) {
-            if let presentedPodcast = presentedPodcast {
-                PodcastPreviewView(
-                    isPresented: showingPreview,
-                    podcast: presentedPodcast,
-                    parentDismissal: $isPresented
-                )
-            }
-        }
-        .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? showingPreview : .constant(false)) {
+        .fullScreenCover(isPresented: showingPreview) {
             if let presentedPodcast = presentedPodcast {
                 PodcastPreviewView(
                     isPresented: showingPreview,
@@ -239,45 +212,39 @@ struct SearchPodcastsView: View {
     
     @ViewBuilder
     private var searchHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                TextField("Search for podcasts...", text: $searchText)
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .foregroundColor(.adaptivePrimaryText)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                    .focused($isSearchFieldFocused)
-                    .onChange(of: searchText) { _, newValue in
-                        performSearch(query: newValue)
-                    }
-                    .padding(.leading, 40) // Make space for search icon
-                
-                if !searchText.isEmpty {
-                    Button(action: {
-                        searchText = ""
-                        searchService.clearResults()
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.adaptiveSecondaryText)
-                    }
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline)
+                .foregroundColor(.adaptiveSecondaryText)
+
+            TextField("Search for podcasts...", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.subheadline)
+                .foregroundColor(.adaptivePrimaryText)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .focused($isSearchFieldFocused)
+                .submitLabel(.search)
+                .onChange(of: searchText) { _, newValue in
+                    performSearch(query: newValue)
                 }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.adaptiveFieldBackground)
-            .cornerRadius(8)
-            .overlay(
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .font(.body)
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    searchService.clearResults()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
                         .foregroundColor(.adaptiveSecondaryText)
-                        .padding(.leading, 16)
-                    Spacer()
-                },
-                alignment: .leading
-            )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveFieldBackground))
+        .padding(.horizontal, 16)
         .padding(.bottom, 16)
     }
     
@@ -497,12 +464,31 @@ struct SearchPodcastsView: View {
     
     // MARK: - Helper Methods
     
+    /// Backs out of search mode first, and only closes the screen once search is already dismissed.
+    private func goBack() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        
+        if isSearchPresented {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isSearchPresented = false
+                searchText = ""
+                searchService.clearResults()
+            }
+            return
+        }
+        
+        searchText = ""
+        searchService.clearResults()
+        isPresented = false
+    }
+    
     private func performSearch(query: String) {
         searchTask?.cancel()
         
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         
         guard !trimmedQuery.isEmpty else {
+            searchTask = nil
             searchService.clearResults()
             return
         }

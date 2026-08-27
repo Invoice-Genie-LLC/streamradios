@@ -13,6 +13,15 @@ import CoreData
 import AVKit
 import CloudKit
 import UserNotifications
+import CryptoKit
+
+/// Swift re-seeds `Hasher` on every process launch, so `String.hashValue` cannot be persisted.
+/// Anything that ends up in an episode or feed ID must go through here instead.
+enum StableHash {
+    static func of(_ input: String) -> String {
+        SHA256.hash(data: Data(input.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+}
 
 struct PodcastFeed: Identifiable, Codable, Equatable {
     var id: String
@@ -62,8 +71,8 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     /// Deterministic composite ID for duplicate detection and stable identification
     var compositeID: String {
         let dateString = String(publicationDate.timeIntervalSince1970)
-        let titleHash = String(abs(title.hashValue))
-        let audioUrlHash = String(abs(audioUrl.hashValue))
+        let titleHash = StableHash.of(title)
+        let audioUrlHash = StableHash.of(audioUrl)
         return "\(feedId)_\(dateString)_\(titleHash)_\(audioUrlHash)"
     }
     
@@ -77,10 +86,10 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
         
         // Create content hash that includes feed URL for proper isolation
         let content = "\(sanitizedFeedUrl)_\(sanitizedTitle)_\(sanitizedAudioUrl)_\(publicationDate.timeIntervalSince1970)"
-        let hash = abs(content.hashValue)
+        let hash = StableHash.of(content)
         
         // Include feed identifier in episode ID to prevent cross-feed contamination
-        let feedHash = abs(sanitizedFeedUrl.hashValue)
+        let feedHash = StableHash.of(sanitizedFeedUrl)
         return "det_f\(feedHash)_\(hash)"
     }
     
@@ -315,8 +324,8 @@ struct EpisodeContaminationGuard {
     /// Generate expected composite ID for validation
     private static func generateExpectedCompositeId(for episode: PodcastEpisode, feedId: String) -> String {
         let dateString = String(episode.publicationDate.timeIntervalSince1970)
-        let titleHash = String(abs(episode.title.hashValue))
-        let audioUrlHash = String(abs(episode.audioUrl.hashValue))
+        let titleHash = StableHash.of(episode.title)
+        let audioUrlHash = StableHash.of(episode.audioUrl)
         return "\(feedId)_\(dateString)_\(titleHash)_\(audioUrlHash)"
     }
     
@@ -843,14 +852,39 @@ class PodcastViewModel: ObservableObject {
     
     // MARK: - Helper Functions
     
-    /// Check if an episode was released in the last 2 weeks
+    private static let currentEpisodeWindow: TimeInterval = 14 * 24 * 60 * 60
+    /// How many recent episodes the window stretches to cover for a slow-publishing feed.
+    private static let minimumCurrentEpisodes = 5
+    
+    private var currentEpisodeCutoffCache: [String: (cutoff: Date, computedAt: Date)] = [:]
+    
+    /// Check if an episode counts as current
     private func isEpisodeFromLastTwoWeeks(_ episode: PodcastEpisode) -> Bool {
-        let calendar = Calendar.current
+        return episode.publicationDate >= currentEpisodeCutoff(forFeed: episode.feedId)
+    }
+    
+    /// Two weeks back, stretched to reach the newest few episodes when a feed publishes less
+    /// often than that - otherwise its Current Episodes tab is permanently empty.
+    private func currentEpisodeCutoff(forFeed feedId: String) -> Date {
         let now = Date()
-        guard let twoWeeksAgo = calendar.date(byAdding: .weekOfYear, value: -2, to: now) else {
-            return false
+        let twoWeeksAgo = now.addingTimeInterval(-Self.currentEpisodeWindow)
+        
+        if let cached = currentEpisodeCutoffCache[feedId],
+           now.timeIntervalSince(cached.computedAt) < 300 {
+            return cached.cutoff
         }
-        return episode.publicationDate >= twoWeeksAgo
+        
+        let dates = feedIsolationManager.getEpisodesForFeed(feedId)
+            .map { $0.publicationDate }
+            .sorted(by: >)
+        
+        var cutoff = twoWeeksAgo
+        if !dates.isEmpty && dates[0] < twoWeeksAgo {
+            cutoff = dates[min(Self.minimumCurrentEpisodes, dates.count) - 1]
+        }
+        
+        currentEpisodeCutoffCache[feedId] = (cutoff, now)
+        return cutoff
     }
     
     // CORE DATA + IN-MEMORY CACHE: Track when feeds were last loaded for cache management
@@ -897,10 +931,15 @@ class PodcastViewModel: ObservableObject {
     private var isInitializingEpisodeTracking = false
     private var hasInitializedEpisodeTracking = false
     private var isLoadingFromCoreData = false
+    private var lastCoreDataLoadStarted: Date?
     var pendingInitializationTasks = Set<String>()
     
     // IMMEDIATE NEW EPISODE CHECK: Track immediate check tasks
     private var immediateCheckTasks: [String: Task<Void, Never>] = [:]
+    
+    // LAUNCH/FOREGROUND PREFETCH: Last time every feed was warmed
+    private var lastPrefetchAllDate: Date?
+    private var prefetchAllInFlight = false
     
     // REFRESH REQUEST THROTTLING: Track recent refresh requests to prevent duplicate operations
     private var lastRefreshRequestTime: [String: Date] = [:]
@@ -963,7 +1002,7 @@ class PodcastViewModel: ObservableObject {
         // Load feeds from Core Data (radio station pattern)
         // Note: For fresh installs, this will initially find no feeds, but once RSS processing
         // completes and Core Data is properly synchronized, subsequent calls will work correctly
-        loadFeedsFromCoreData()
+        loadFeedsFromCoreData(coalesce: true)
         
         // Load last played episodes from UserDefaults
         loadLastPlayedEpisodes()
@@ -2338,100 +2377,49 @@ class PodcastViewModel: ObservableObject {
     /// LIGHTWEIGHT NEW EPISODE DETECTION: Ultra-fast check without expensive RSS parsing
     /// Uses HEAD requests and conditional logic to detect new episodes with minimal CPU impact
     private func lightweightNewEpisodeCheck(feedId: String) async {
-        defer {
-            // Clean up task when completed
-            Task { @MainActor in
-                self.immediateCheckTasks.removeValue(forKey: feedId)
-            }
-        }
-        
-        print("🪶 LIGHTWEIGHT: Starting ultra-fast new episode detection")
-        
-        guard let feedUrl = await MainActor.run(body: {
-            self.podcastFeeds.first(where: { $0.id == feedId })?.url
-        }) else {
-            print("🪶 LIGHTWEIGHT: No feed URL found for \(feedId)")
-            return
-        }
-        
-        guard let url = URL(string: feedUrl) else {
-            print("🪶 LIGHTWEIGHT: Invalid feed URL: \(feedUrl)")
-            return
-        }
-        
-        // CRITICAL FIX: Always perform sampling when user opens feed
-        // Even if HEAD request fails or feed appears unmodified, we need to check for new episodes
-        // The background refresh will handle the full sync to ensure latest episodes are fetched
-        print("🪶 LIGHTWEIGHT: Starting episode check (bypassing HEAD request for reliability)")
-        
-        // STEP 2: Do minimal RSS sampling which always triggers full background refresh
-        await performMinimalEpisodeSampling(url: url, feedId: feedId)
+        print("🪶 LIGHTWEIGHT: Delegating to the conditional-GET feed-open check")
+        // Same path as opening a feed: one conditional request, limited parse, no second fetch.
+        await checkForNewEpisodesImmediatelyOnFeedOpen(feedId: feedId)
     }
     
-    /// PERFORMANCE OPTIMIZATION: Check feed modification using HEAD request (ultra-fast)
-    private func checkFeedModificationWithHEAD(url: URL, feedId: String, isUserInitiated: Bool = false) async -> Bool {
-        do {
-            var request = URLRequest(url: url)
-            request.httpMethod = "HEAD"  // Only get headers, no body content
-            request.timeoutInterval = 5.0  // Quick timeout
-            request.cachePolicy = .reloadIgnoringLocalCacheData
-            
-            let (_, response) = try await URLSession.shared.data(for: request)
-            
-            if let httpResponse = response as? HTTPURLResponse {
-                print("🪶 HEAD: Response \(httpResponse.statusCode) for feed check")
-                
-                // Check Last-Modified header
-                if let lastModified = httpResponse.value(forHTTPHeaderField: "Last-Modified") {
-                    let lastModifiedKey = "LastModified_\(feedId)"
-                    let previousLastModified = UserDefaults.standard.string(forKey: lastModifiedKey)
-                    
-                    if previousLastModified != lastModified {
-                        UserDefaults.standard.set(lastModified, forKey: lastModifiedKey)
-                        print("🪶 HEAD: Feed modified since last check - \(lastModified)")
-                        return true
-                    } else {
-                        print("🪶 HEAD: Feed not modified since last check")
-                        return false
-                    }
+    /// Warms every subscribed feed so opening one already shows the newest episodes.
+    /// Conditional GETs make unchanged feeds cost a 304, so this is cheap to run on foreground.
+    func prefetchNewEpisodesForAllFeeds(minimumInterval: TimeInterval = 300) async {
+        let now = Date()
+        // Launch fires this from both onAppear and didBecomeActive, and the interval stamp alone
+        // does not stop the second one while the first is still awaiting its migration.
+        guard !prefetchAllInFlight else {
+            print("🛰️ PREFETCH: Skipping - a sweep is already running")
+            return
+        }
+        if let last = lastPrefetchAllDate, now.timeIntervalSince(last) < minimumInterval {
+            print("🛰️ PREFETCH: Skipping - last run \(Int(now.timeIntervalSince(last)))s ago")
+            return
+        }
+        lastPrefetchAllDate = now
+        prefetchAllInFlight = true
+        defer { prefetchAllInFlight = false }
+        
+        let feedIds = podcastFeeds.map { $0.id }
+        guard !feedIds.isEmpty else {
+            print("🛰️ PREFETCH: No feeds to check")
+            return
+        }
+        
+        print("🛰️ PREFETCH: Checking \(feedIds.count) feeds for new episodes")
+        // Each check ends in main-actor filtering and validation, so a wide fan-out stalls the UI.
+        let maxConcurrent = 2
+        await withTaskGroup(of: Void.self) { group in
+            for (index, feedId) in feedIds.enumerated() {
+                if index >= maxConcurrent {
+                    await group.next()
                 }
-                
-                // CRITICAL FIX: Always check for new episodes when user opens feed
-                print("🪶 HEAD: No Last-Modified header - checking for new episodes on feed open")
-                return true
+                group.addTask { [weak self] in
+                    await self?.checkForNewEpisodesImmediatelyOnFeedOpen(feedId: feedId)
+                }
             }
-            
-            return false
-        } catch {
-            print("🪶 HEAD: Failed to check feed modification: \(error.localizedDescription)")
-            // If HEAD request fails, don't do expensive operations
-            return false
         }
-    }
-    
-    /// MINIMAL SAMPLING: Get just the first few episodes to check for new content (lightweight)
-    private func performMinimalEpisodeSampling(url: URL, feedId: String) async {
-        do {
-            print("🪶 SAMPLING: Starting minimal episode sampling using optimized parser")
-            
-            // PERFORMANCE: Use the new checkForNewEpisodes method that parses only first 50 episodes
-            let newEpisodes = try await feedManager.checkForNewEpisodes(feedId, sampleSize: 50)
-            
-            if !newEpisodes.isEmpty {
-                print("🪶 SAMPLING: Found \(newEpisodes.count) new episodes - triggering full background sync")
-            } else {
-                print("🪶 SAMPLING: No new episodes found in sample - but still triggering full sync for large feeds")
-            }
-            
-            // CRITICAL FIX: Always trigger full background sync for large feeds
-            // Even if sample shows no new episodes, there might be newer episodes beyond the sample
-            // This ensures feeds with thousands of episodes always get fully synced
-            Task.detached(priority: .background) {
-                await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: false)
-            }
-        } catch {
-            print("🪶 SAMPLING: Failed to check for new episodes: \(error.localizedDescription)")
-        }
+        print("🛰️ PREFETCH: Finished checking \(feedIds.count) feeds")
     }
     
     /// Background refresh: Full feed sync to match RSS feed exactly
@@ -2551,7 +2539,9 @@ class PodcastViewModel: ObservableObject {
     
     /// FEED OPEN OPTIMIZATION: Check for new episodes immediately when feed is opened, bypassing all thresholds
     /// This ensures users always see the latest episodes without waiting, while maintaining performance
-    private func checkForNewEpisodesImmediatelyOnFeedOpen(feedId: String) async {
+    /// - Parameter allowConditionalGet: Background sweeps trade a stale 304 for bandwidth. An explicit
+    ///   feed open cannot - the user is looking at the list right now - so it fetches unconditionally.
+    private func checkForNewEpisodesImmediatelyOnFeedOpen(feedId: String, allowConditionalGet: Bool = true) async {
         defer {
             // Clean up task when completed
             Task { @MainActor in
@@ -2573,7 +2563,7 @@ class PodcastViewModel: ObservableObject {
             try Task.checkCancellation()
             
             // ULTRA-FAST NEW EPISODE DETECTION: Use optimized parsing that stops at first known episode
-            let newEpisodes = try await parseNewEpisodesOnlyOptimized(from: url, feedId: feedId)
+            let newEpisodes = try await parseNewEpisodesOnlyOptimized(from: url, feedId: feedId, allowConditionalGet: allowConditionalGet)
             
             // Check for cancellation after parsing
             try Task.checkCancellation()
@@ -2608,9 +2598,11 @@ class PodcastViewModel: ObservableObject {
                         }
                         print("🆕 FEED OPEN CHECK: Updated UI with \(newEpisodes.count) new episodes - total visible: \(filteredEpisodes.count)")
                     }
+                    
+                    // Invalidating for a feed the user is not looking at re-renders the whole
+                    // podcast UI for nothing - the background sweep does this for every feed.
+                    self.objectWillChange.send()
                 }
-                
-                self.objectWillChange.send()
             }
             
         } catch is CancellationError {
@@ -2754,19 +2746,13 @@ class PodcastViewModel: ObservableObject {
     
     /// OPTIMIZED VERSION: Ultra-fast parsing that stops immediately at first known episode
     /// This is specifically designed for feed open scenarios where we need immediate results
-    private func parseNewEpisodesOnlyOptimized(from url: URL, feedId: String) async throws -> [PodcastEpisode] {
-        
-        // CRITICAL: Check for user scrolling and abort parsing if detected
-        if isUserScrolling {
-            print("🚫 User is scrolling - aborting optimized new episode parsing to maintain UI responsiveness")
-            throw CancellationError()
-        }
+    private func parseNewEpisodesOnlyOptimized(from url: URL, feedId: String, allowConditionalGet: Bool = true) async throws -> [PodcastEpisode] {
         
         // ULTRA-FAST APPROACH: Get first few episode IDs from current cache for instant comparison
         let knownEpisodeIds = await getKnownEpisodeIdsFromCache(feedId: feedId, limit: 20)
         
         // Parse RSS with immediate stopping at first known episode
-        let newEpisodes = try await parseRSSEpisodesWithImmediateStop(from: url, knownIds: knownEpisodeIds)
+        let newEpisodes = try await parseRSSEpisodesWithImmediateStop(from: url, knownIds: knownEpisodeIds, allowConditionalGet: allowConditionalGet)
         
         return newEpisodes
     }
@@ -2821,19 +2807,18 @@ class PodcastViewModel: ObservableObject {
                 let finalCount = self.feedIsolationManager.getEpisodesForFeed(feedId).count
                 print("🆕 ISOLATION INTEGRATION: Created new cache with \(finalCount) episodes")
             }
+            
+            // The per-tab snapshots predate these episodes, so a tab switch would replay a list
+            // without them.
+            self.clearTabFilterCache(for: feedId)
+            self.currentEpisodeCutoffCache.removeValue(forKey: feedId)
         }
     }
     
     /// ULTRA-OPTIMIZED RSS parsing that stops immediately when it encounters a known episode
     /// This minimizes network and CPU usage for immediate feed open scenarios
-    private func parseRSSEpisodesWithImmediateStop(from url: URL, knownIds: Set<String>) async throws -> [PodcastEpisode] {
+    private func parseRSSEpisodesWithImmediateStop(from url: URL, knownIds: Set<String>, allowConditionalGet: Bool = true) async throws -> [PodcastEpisode] {
         print("🚀 OPTIMIZED PARSING: Starting immediate-stop RSS parsing with \(knownIds.count) known episode IDs")
-        
-        // CRITICAL: Check for user scrolling and abort parsing if detected
-        if isUserScrolling {
-            print("🚫 User is scrolling - aborting immediate-stop parsing to maintain UI responsiveness")
-            throw CancellationError()
-        }
         
         return try await withCheckedThrowingContinuation { continuation in
             Task.detached(priority: .userInitiated) {
@@ -2841,40 +2826,55 @@ class PodcastViewModel: ObservableObject {
                     // Check for cancellation before starting
                     try Task.checkCancellation()
                     
-                    // Fetch RSS data (this is unavoidable but fast for most feeds)
-                    let feedData = try await self.fetchRSSDataWithRetry(url: url, feedTitle: url.absoluteString)
+                    // Conditional GET only once we hold episodes locally: a 304 against an empty
+                    // store would leave the feed permanently empty. Podcast CDNs also serve stale
+                    // validators from edge nodes, so the caller can opt out entirely.
+                    let useConditional = allowConditionalGet && !knownIds.isEmpty
+                    let feedData = try await self.fetchRSSDataWithRetry(
+                        url: url,
+                        feedTitle: url.absoluteString,
+                        conditionalKey: useConditional ? url.absoluteString : nil
+                    )
                     
                     // Check for cancellation after fetch
                     try Task.checkCancellation()
-                    if await MainActor.run(body: { self.isUserScrolling }) {
-                        print("🚫 User scrolling detected after fetch - aborting")
-                        throw CancellationError()
-                    }
                     
-                    // OPTIMIZED PARSING: Parse complete RSS but filter out known episodes immediately
+                    let sampleSize = 50
                     let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: nil)
-                    let (_, allEpisodes) = try await parser.parseComplete()
+                    let (_, sampledEpisodes) = try await parser.parseWithLimit(episodeLimit: sampleSize)
                     
-                    // IMMEDIATE FILTERING: Stop at first known episode to minimize processing
-                    var newEpisodes: [PodcastEpisode] = []
-                    for episode in allEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }) {
-                        if knownIds.contains(episode.id) {
-                            // Found a known episode, stop processing
-                            print("🛑 OPTIMIZED PARSING: Stopped at known episode '\(episode.title)' - found \(newEpisodes.count) new episodes")
-                            break
-                        }
-                        newEpisodes.append(episode)
+                    var newEpisodes = Self.newestEpisodes(from: sampledEpisodes, stoppingAt: knownIds)
+                    
+                    // Every sampled episode was new, so the backlog may run past the sample - parse it all.
+                    if newEpisodes.count == sampleSize {
+                        print("🚀 OPTIMIZED PARSING: Sample was entirely new - falling back to full parse")
+                        let fullParser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: nil)
+                        let (_, allEpisodes) = try await fullParser.parseComplete()
+                        newEpisodes = Self.newestEpisodes(from: allEpisodes, stoppingAt: knownIds)
                     }
                     
                     print("🚀 OPTIMIZED PARSING: Found \(newEpisodes.count) new episodes (stopped at first known episode)")
                     
                     continuation.resume(returning: newEpisodes)
+                } catch is FeedNotModifiedError {
+                    print("✅ OPTIMIZED PARSING: Feed unchanged (304) - nothing to fetch")
+                    continuation.resume(returning: [])
                 } catch {
                     print("❌ Failed to parse RSS with immediate stop: \(error)")
                     continuation.resume(throwing: error)
                 }
             }
         }
+    }
+    
+    /// Takes episodes newest-first up to the first one we already have.
+    nonisolated private static func newestEpisodes(from episodes: [PodcastEpisode], stoppingAt knownIds: Set<String>) -> [PodcastEpisode] {
+        var result: [PodcastEpisode] = []
+        for episode in episodes.sorted(by: { $0.publicationDate > $1.publicationDate }) {
+            if knownIds.contains(episode.id) { break }
+            result.append(episode)
+        }
+        return result
     }
     
     /// Uses timestamp comparison to stop parsing once we reach episodes we already have
@@ -3032,7 +3032,7 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// Robust RSS data fetching with retry mechanism for decode errors  
-    private func fetchRSSDataWithRetry(url: URL, feedTitle: String, maxRetries: Int = 3) async throws -> Data {
+    private func fetchRSSDataWithRetry(url: URL, feedTitle: String, maxRetries: Int = 3, conditionalKey: String? = nil) async throws -> Data {
         var lastError: Error?
         
         for attempt in 1...maxRetries {
@@ -3047,6 +3047,11 @@ class PodcastViewModel: ObservableObject {
                 request.setValue("StreamRadios/1.0", forHTTPHeaderField: "User-Agent")
                 request.setValue("application/rss+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
                 request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                if let conditionalKey {
+                    // Our own validators, so the 304 reaches us instead of being absorbed by URLCache.
+                    request.cachePolicy = .reloadIgnoringLocalCacheData
+                    FeedHTTPCache.applyValidators(to: &request, feedKey: conditionalKey)
+                }
                 
                 // CRITICAL: Another yield point before network operation
                 await Task.yield()
@@ -3062,9 +3067,17 @@ class PodcastViewModel: ObservableObject {
                 if let httpResponse = response as? HTTPURLResponse {
                     print("📡 HTTP Response: \(httpResponse.statusCode) for: \(feedTitle)")
                     
+                    if httpResponse.statusCode == 304 {
+                        throw FeedNotModifiedError()
+                    }
+                    
                     // Check for server errors
                     guard 200...299 ~= httpResponse.statusCode else {
                         throw NSError(domain: "HTTPError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(httpResponse.statusCode)"])
+                    }
+                    
+                    if let conditionalKey {
+                        FeedHTTPCache.storeValidators(from: httpResponse, feedKey: conditionalKey)
                     }
                     
                     // Log content type for debugging
@@ -3106,6 +3119,9 @@ class PodcastViewModel: ObservableObject {
                 
                 return data
                 
+            } catch is FeedNotModifiedError {
+                print("✅ 304 Not Modified for: \(feedTitle) - no new episodes")
+                throw FeedNotModifiedError()
             } catch {
                 lastError = error
                 let isDecodeError = (error as NSError).code == -1015
@@ -4041,13 +4057,19 @@ class PodcastViewModel: ObservableObject {
                 return
             }
             
+            // This task started from a snapshot taken before its awaits. Replacing the list
+            // outright would drop any episode merged in meanwhile - a newly published one -
+            // so apply the refreshed states onto the live list instead.
+            let refreshedEpisodes = self.mergeRefreshedStates(episodesWithFreshStates, into: feedId)
+            
             // Update isolation manager with fresh states
-            self.feedIsolationManager.replaceEpisodesForFeed(episodesWithFreshStates, feedId: feedId)
+            self.feedIsolationManager.replaceEpisodesForFeed(refreshedEpisodes, feedId: feedId)
             
             // CRITICAL FIX: Always update current episodes and filter if this is the selected feed
             // This ensures Favorites and Downloads tabs refresh with new states
             if self.currentEpisodes.isEmpty || self.currentEpisodes.first?.feedId == feedId {
-                self.currentEpisodes = episodesWithFreshStates
+                self.currentEpisodes = refreshedEpisodes
+                self.clearTabFilterCache(for: feedId)
                 self.updateFilter(tab: self.currentTab)
                 print("   ✅ UI updated with refreshed states (filter updated for tab: \(self.currentTab))")
             }
@@ -4166,7 +4188,7 @@ class PodcastViewModel: ObservableObject {
         if isInitialLoad && !cachedEpisodes.isEmpty {
             print("🚀 IMMEDIATE CHECK: Starting lightweight check for newest episodes on feed open")
             Task.detached(priority: .userInitiated) {
-                await self.checkForNewEpisodesImmediatelyOnFeedOpen(feedId: feedId)
+                await self.checkForNewEpisodesImmediatelyOnFeedOpen(feedId: feedId, allowConditionalGet: false)
             }
         } else if !isInitialLoad {
             // For non-initial loads (pull-to-refresh, etc), do standard background refresh
@@ -4995,7 +5017,8 @@ class PodcastViewModel: ObservableObject {
         
         // INSTANT CACHE: Check for pre-computed cached results with counts
         if let cachedEpisodes = tabFilterCache[feedId]?[newTab],
-           let cachedCounts = tabFilterCounts[feedId] {
+           let cachedCounts = tabFilterCounts[feedId],
+           cachedCounts.all == feedIsolationManager.getEpisodesForFeed(feedId).count {
             print("⚡ INSTANT CACHE HIT: Using pre-computed results for tab \(newTab) (\(cachedEpisodes.count) episodes)")
             
             // BULLETPROOF STATE APPLICATION: Use centralized state refresh function
@@ -5020,8 +5043,14 @@ class PodcastViewModel: ObservableObject {
         // Try to get episodes from memory first (from feed object or current episodes)
         var availableEpisodes: [PodcastEpisode] = []
         
-        // First, try to get from the feed object in memory
-        if let feed = podcastFeeds.first(where: { $0.id == feedId }), !feed.episodes.isEmpty {
+        // The isolation manager backs `currentEpisodes`, so an episode merged in since the feed
+        // object was built - a newly published one - exists only here.
+        let isolatedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
+        
+        if !isolatedEpisodes.isEmpty {
+            availableEpisodes = isolatedEpisodes
+            print("⚡ FAST TAB SWITCH: Using isolated episodes (\(isolatedEpisodes.count) episodes)")
+        } else if let feed = podcastFeeds.first(where: { $0.id == feedId }), !feed.episodes.isEmpty {
             availableEpisodes = feed.episodes
             print("⚡ FAST TAB SWITCH: Using feed episodes (\(feed.episodes.count) episodes)")
         } else if !currentEpisodes.isEmpty && oldTab >= 0 {
@@ -5169,6 +5198,30 @@ class PodcastViewModel: ObservableObject {
         print("⚡ ULTRA-MINIMAL: Showing \(filteredEpisodes.count) episodes for tab \(tab) (cached for future)")
     }
     
+    /// Applies a background refresh's states onto the feed's live episode list without dropping
+    /// episodes the refresh never saw. Extras the refresh found are kept too, so a Core Data
+    /// reload still contributes rows the isolation manager is missing.
+    @MainActor
+    private func mergeRefreshedStates(_ refreshed: [PodcastEpisode], into feedId: String) -> [PodcastEpisode] {
+        let live = feedIsolationManager.getEpisodesForFeed(feedId)
+        guard !live.isEmpty else { return refreshed }
+        
+        let statesById = Dictionary(refreshed.map { ($0.id, $0.state) }, uniquingKeysWith: { _, latest in latest })
+        var merged = live.map { episode -> PodcastEpisode in
+            guard let state = statesById[episode.id] else { return episode }
+            var updated = episode
+            updated.state = state
+            return updated
+        }
+        
+        let liveIds = Set(live.map { $0.id })
+        let onlyInRefresh = refreshed.filter { !liveIds.contains($0.id) }
+        guard !onlyInRefresh.isEmpty else { return merged }
+        
+        merged.append(contentsOf: onlyInRefresh)
+        return merged.sorted { $0.publicationDate > $1.publicationDate }
+    }
+    
     /// Clear tab filter cache for a specific feed when episodes are updated
     private func clearTabFilterCache(for feedId: String) {
         tabFilterCache.removeValue(forKey: feedId)
@@ -5271,6 +5324,10 @@ class PodcastViewModel: ObservableObject {
                             self.feedIsolationManager.replaceEpisodesForFeed(updatedEpisodes, feedId: feedId)
                             print("📸 IMMEDIATE: Created new cache with \(updatedEpisodes.count) episodes")
                         }
+                        
+                        // The per-tab snapshots predate these episodes.
+                        self.clearTabFilterCache(for: feedId)
+                        self.currentEpisodeCutoffCache.removeValue(forKey: feedId)
                     }
                 }
                 
@@ -6805,7 +6862,7 @@ class PodcastViewModel: ObservableObject {
                 // Load feeds from Core Data
                 await MainActor.run {
                     print("🎯 EXISTING INSTALL: About to call loadFeedsFromCoreData()")
-                    self.loadFeedsFromCoreData()
+                    self.loadFeedsFromCoreData(coalesce: true)
                     print("🎯 EXISTING INSTALL: After loadFeedsFromCoreData() - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
                     
                     // Still trigger UI refresh for consistency
@@ -7871,7 +7928,7 @@ class PodcastViewModel: ObservableObject {
         }
         
         // Start with Core Data load for immediate UI
-        loadFeedsFromCoreData()
+        loadFeedsFromCoreData(coalesce: true)
         
         // Single CloudKit sync in background
         Task {
@@ -9420,11 +9477,10 @@ extension PodcastViewModel {
         
         // Update DataSyncManager to show we're starting a save operation
         await MainActor.run {
-            DataSyncManager.shared.podcastFeedsStatus = .inProgress
-            DataSyncManager.shared.podcastFeedsOperation = "Saving podcast feeds to iCloud"
-            DataSyncManager.shared.podcastFeedsProgress = 0.0
-            DataSyncManager.shared.podcastFeedsTotalCount = podcastFeeds.count
-            DataSyncManager.shared.podcastFeedsCurrentCount = 0
+            DataSyncManager.shared.beginPodcastFeedsSync(
+                totalCount: podcastFeeds.count,
+                operation: "Saving podcast feeds to iCloud"
+            )
         }
         
         // Save each feed to CloudKit
@@ -9446,11 +9502,11 @@ extension PodcastViewModel {
             }
         }
         
-        // Mark operation as completed
+        // Mark operation as completed - DataSyncManager clears the banner itself
         await MainActor.run {
-            DataSyncManager.shared.podcastFeedsStatus = .completed
-            DataSyncManager.shared.podcastFeedsOperation = "Saved \(savedCount) feeds to CloudKit"
-            DataSyncManager.shared.podcastFeedsProgress = 1.0
+            DataSyncManager.shared.completePodcastFeedsSync(
+                operation: "Saved \(savedCount) feeds to CloudKit"
+            )
         }
         
         print("📡 ✅ PODCAST FEED ORDER SYNC: Successfully synced \(savedCount) feeds to CloudKit")
@@ -9706,9 +9762,15 @@ extension PodcastViewModel {
     }
     
     /// Load podcast feeds from Core Data using background processing to prevent main thread blocking
-    func loadFeedsFromCoreData() {
+    func loadFeedsFromCoreData(coalesce: Bool = false) {
         // PERFORMANCE: Prevent redundant Core Data operations
         guard !isLoadingFromCoreData else {
+            return
+        }
+
+        // Launch fans out to this from several places (init, scene activation, list appearance);
+        // opt those in to a cooldown so the whole feed set isn't parsed twice on every cold start.
+        if coalesce, let last = lastCoreDataLoadStarted, Date().timeIntervalSince(last) < 5 {
             return
         }
         
@@ -9718,6 +9780,7 @@ extension PodcastViewModel {
             return
         }
         
+        lastCoreDataLoadStarted = Date()
         isLoadingFromCoreData = true
         isLoading = true  // Set main loading flag for UI coordination
         
@@ -9976,6 +10039,17 @@ extension PodcastViewModel {
                 }
             }
             
+            // Downloaded audio lives on disk, outside Core Data, so it must be removed explicitly.
+            await deleteAllDownloadedEpisodeFiles()
+            
+            // Sweep anything the per-feed deletion above could not address by record name.
+            for recordType in ["PodcastFeed", "EpisodeState"] {
+                if let sweepError = await deleteAllCloudKitRecords(ofType: recordType) {
+                    allSuccess = false
+                    lastError = sweepError
+                }
+            }
+            
             // Now delete from local Core Data using efficient batch deletion
             // Debug: Check what data exists before deletion
             print("🔍 CORE DATA DEBUG: Checking data before deletion...")
@@ -10109,6 +10183,8 @@ extension PodcastViewModel {
             await clearAllEpisodeStatesFromManager()
             print("📡 ✅ CRITICAL FIX: Cleared all episode states from EpisodeStateManager")
             
+            clearPodcastPreferences()
+            
             // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup  
             if allSuccess {
                 print("🎯 ✅ Successfully deleted all podcast data from both CloudKit and Core Data")
@@ -10139,6 +10215,94 @@ extension PodcastViewModel {
         }
     }
     
+    /// Empties Documents/DownloadedEpisodes — bulk Core Data deletion drops `localFilePath` but
+    /// leaves the audio files behind.
+    private func deleteAllDownloadedEpisodeFiles() async {
+        let fileManager = FileManager.default
+        guard let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let episodesFolder = documents.appendingPathComponent("DownloadedEpisodes")
+        guard fileManager.fileExists(atPath: episodesFolder.path) else { return }
+        
+        do {
+            let files = try fileManager.contentsOfDirectory(at: episodesFolder, includingPropertiesForKeys: nil)
+            var removed = 0
+            for file in files {
+                do {
+                    try fileManager.removeItem(at: file)
+                    removed += 1
+                } catch {
+                    print("❌ Failed to delete downloaded file \(file.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            print("🗑️ Deleted \(removed) of \(files.count) downloaded episode file(s)")
+        } catch {
+            print("❌ Failed to read DownloadedEpisodes folder: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Deleting by `CKRecord.ID(recordName: feedId)` misses records whose recordName drifted from the
+    /// local feed id (the manager reuses an existing record when it finds a URL match), and it misses
+    /// records for feeds that only exist on another device. Both would resurrect on the next sync, so
+    /// every record of the type is swept instead.
+    private func deleteAllCloudKitRecords(ofType recordType: String) async -> Error? {
+        do {
+            let recordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { continuation in
+                DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: recordIDs ?? [])
+                    }
+                }
+            }
+            
+            guard !recordIDs.isEmpty else {
+                print("☁️ No \(recordType) records left to delete from CloudKit")
+                return nil
+            }
+            
+            print("☁️ Sweeping \(recordIDs.count) remaining \(recordType) record(s) from CloudKit")
+            try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDs)
+            print("☁️ ✅ Deleted \(recordIDs.count) \(recordType) record(s) from CloudKit")
+            return nil
+        } catch {
+            // An absent record type or already-deleted records are not failures.
+            if let ckError = error as? CKError, ckError.code == .unknownItem || ckError.code == .invalidArguments {
+                print("⚠️ \(recordType) records not present in CloudKit - nothing to delete")
+                return nil
+            }
+            print("❌ Failed to delete \(recordType) records from CloudKit: \(error.localizedDescription)")
+            return error
+        }
+    }
+    
+    /// Podcast preferences survive Core Data deletion and would repopulate stale ordering/resume state.
+    private func clearPodcastPreferences() {
+        let defaults = UserDefaults.standard
+        let keys = [
+            "PodcastFeedOrder",
+            "LastPlayedEpisodeData",
+            "PodcastIsAscendingSort",
+            "PodcastViewModel_LoadingComplete",
+            "PodcastViewModel_FeedsLoaded",
+            "podcastPlaybackSpeed"
+        ]
+        for key in keys {
+            defaults.removeObject(forKey: key)
+        }
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("playbackSpeed_") {
+            defaults.removeObject(forKey: key)
+        }
+        
+        // Feed refresh timestamps are written to the app-group suite to avoid CFPreferences overflow.
+        for suite in [defaults, UserDefaults(suiteName: "group.streamradios")].compactMap({ $0 }) {
+            for key in suite.dictionaryRepresentation().keys where key.hasPrefix("LastRSSRefresh_") {
+                suite.removeObject(forKey: key)
+            }
+        }
+        print("🗑️ Cleared podcast preferences from UserDefaults")
+    }
+    
     /// Move feed order (following radio station pattern)
     func movePodcastFeed(from source: IndexSet, to destination: Int) {
         print("📡 🔄 PODCAST DRAG AND DROP: Starting movePodcastFeed - source: \(source), destination: \(destination)")
@@ -10151,6 +10315,13 @@ extension PodcastViewModel {
             if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
                 reorderedFeeds.append(feed)
             }
+        }
+        // A feed missing from the order array would otherwise be dropped here and then deleted
+        // from Core Data by saveFeedsToCoreData().
+        let orderedIds = Set(podcastFeedOrder)
+        for feed in podcastFeeds where !orderedIds.contains(feed.id) {
+            reorderedFeeds.append(feed)
+            podcastFeedOrder.append(feed.id)
         }
         podcastFeeds = reorderedFeeds
         
@@ -10431,27 +10602,7 @@ extension PodcastViewModel {
             }
             
             // ENHANCED FEED ISOLATION: Validate all episodes actually belong to this feed
-            let trulyIsolatedEpisodes = feedEpisodes.compactMap { episode -> PodcastEpisode? in
-                // Check if episode ID contains feed information that matches
-                if episode.id.hasPrefix("det_f") {
-                    let feedHash = abs(feedId.lowercased().hashValue)
-                    let expectedPrefix = "det_f\(feedHash)_"
-                    if !episode.id.hasPrefix(expectedPrefix) {
-                        print("🚨 FEED ISOLATION: Episode ID \(episode.id) doesn't match expected feed hash pattern for feed \(feedId)")
-                        // Regenerate proper episode ID
-                        var correctedEpisode = episode
-                        correctedEpisode.id = PodcastEpisode.generateDeterministicID(
-                            title: episode.title,
-                            audioUrl: episode.audioUrl,
-                            publicationDate: episode.publicationDate,
-                            feedUrl: feedId // Use feedId as feedUrl for consistency
-                        )
-                        print("🔧 FEED ISOLATION: Corrected episode ID to \(correctedEpisode.id)")
-                        return correctedEpisode
-                    }
-                }
-                return episode
-            }
+            let trulyIsolatedEpisodes = feedEpisodes
             
             // Sanitize episodes for this feed
             let sanitizedFeedEpisodes = EpisodeContaminationGuard.sanitizeEpisodes(trulyIsolatedEpisodes, targetFeedId: feedId)

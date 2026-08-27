@@ -195,7 +195,7 @@ struct RadioStationListView: View {
                             .padding(.vertical, 8)
                             .background(
                                 Capsule()
-                                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+                                    .strokeBorder(Color.adaptiveBorder, lineWidth: 1)
                             )
                             
                         }
@@ -711,12 +711,13 @@ struct RadioStationListView: View {
                     }
                 }
         )
-        .swipeActions(edge: .leading) {
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if !isEditing {
+                // Icon-only: a title would widen the button and iOS draws it as an ellipse.
                 Button {
                     editStation(station)
                 } label: {
-                    Label("Edit", systemImage: "pencil")
+                    Label("Edit", systemImage: "pencil").labelStyle(.iconOnly)
                 }
                 .tint(.blue)
             }
@@ -726,7 +727,7 @@ struct RadioStationListView: View {
                 Button(role: .destructive) {
                     handleDeleteStation(station)
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
                 }
             }
         }
@@ -1592,15 +1593,8 @@ struct RadioStationListView: View {
             return
         }
         
-        // Set the station first
+        // Setting the station pushes the Edit Station screen onto the radio tab's stack.
         selectedStationForEdit = station
-        
-        // Add a small delay to ensure the binding propagates before presenting the sheet
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-            print("📝 EditStation: selectedStationForEdit is now: \(self.selectedStationForEdit?.name ?? "nil")")
-            self.activeSheet = .editStation
-            print("✅ EditStation: Sheet presented for station: \(station.name)")
-        }
     }
     
     private func handleDeleteStation(_ station: RadioStation) {
@@ -1622,7 +1616,7 @@ struct RadioStationListView: View {
 }
 
 // MARK: - Stylish Loader (inlined to avoid project file changes)
-private struct StylishLoaderView: View {
+struct StylishLoaderView: View {
     let title: String
     let phase: String
     let progress: Double

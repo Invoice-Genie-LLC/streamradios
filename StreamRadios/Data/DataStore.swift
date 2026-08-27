@@ -196,8 +196,9 @@ class DataStore {
             return
         }
         
-        // Start conservatively to reduce likelihood of throttling, can split further if needed
-        let initialBatchSize = 100
+        // CloudKit caps a modify operation at 400 records; the adaptive splitter below halves the
+        // batch if the server pushes back, so start near the ceiling to keep round trips down.
+        let initialBatchSize = 300
         let batches = recordIDs.chunked(into: initialBatchSize)
         
         print("🗑️ Starting deletion of \(recordIDs.count) records in \(batches.count) batches")
@@ -325,6 +326,32 @@ class DataStore {
                 
             } catch {
                 lastError = error
+                
+                // `isAtomic = false` reports any per-record problem as `.partialFailure`. Records that
+                // are already gone are the expected outcome here, not something to retry.
+                if let ckError = error as? CKError, ckError.code == .partialFailure {
+                    let perRecordErrors = (ckError.partialErrorsByItemID ?? [:]).values.compactMap { $0 as? CKError }
+                    let unresolved = perRecordErrors.filter { $0.code != .unknownItem }
+                    
+                    if unresolved.isEmpty {
+                        print("✅ Batch \(batchNumber)/\(totalBatches): \(batch.count) record(s) already deleted")
+                        return batch.count
+                    }
+                    
+                    let isTransient = unresolved.allSatisfy {
+                        $0.code == .requestRateLimited || $0.code == .networkFailure
+                            || $0.code == .networkUnavailable || $0.code == .serviceUnavailable
+                    }
+                    guard isTransient, attempt < maxRetries else {
+                        print("❌ Batch \(batchNumber): \(unresolved.count) record(s) failed to delete: \(unresolved.first?.localizedDescription ?? "")")
+                        throw error
+                    }
+                    
+                    let retryDelay = min(Double(attempt * attempt), 10.0)
+                    print("🔄 Batch \(batchNumber): \(unresolved.count) transient failure(s), retrying after \(retryDelay)s (Attempt \(attempt)/\(maxRetries))")
+                    try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+                    continue
+                }
                 
                 // Handle rate limiting with exponential backoff
                 if let ckError = error as? CKError, ckError.code == .requestRateLimited {

@@ -75,9 +75,13 @@ struct PodcastPreviewView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
             .navigationBarItems(leading: 
-                Button("Cancel") {
+                Button {
                     isPresented = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
                 }
+                .accessibilityLabel("Back")
             )
         }
         .onAppear {
@@ -97,7 +101,7 @@ struct PodcastPreviewView: View {
                 onUpdate: nil
             )
         }
-        .sheet(isPresented: showingEpisodeNotes) {
+        .fullScreenCover(isPresented: showingEpisodeNotes) {
             if let presentedEpisode = presentedEpisode {
                 // Use enhancedFeed if available, otherwise fallback to original podcast
                 let feedToUse = enhancedFeed ?? podcast

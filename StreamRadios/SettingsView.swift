@@ -12,6 +12,7 @@ import MediaPlayer
 import UserNotifications
 import os.log
 import CloudKit
+import StreamRadiosKit
 
 // MARK: - Exception Info Structure
 struct ExceptionInfo: Identifiable {
@@ -366,11 +367,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $showingSubscriptionView : .constant(false)) {
-            SubscriptionView(showManagementScreen: true)
-                .environmentObject(subscriptionManager)
-        }
-        .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $showingSubscriptionView : .constant(false)) {
+        .fullScreenCover(isPresented: $showingSubscriptionView) {
             SubscriptionView(showManagementScreen: true)
                 .environmentObject(subscriptionManager)
         }
@@ -3009,6 +3006,90 @@ struct InternalDataManagementView: View {
     
     // MARK: - Deletion Methods
     
+    /// Deletion steps report from several queues at once, so the shared result needs a lock.
+    private final class DeletionOutcome {
+        private let lock = NSLock()
+        private var success = true
+        private var message: String?
+        
+        func recordFailure(_ text: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            success = false
+            if message == nil { message = text }
+        }
+        
+        var isSuccess: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return success
+        }
+        
+        var failureMessage: String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return message
+        }
+    }
+    
+    /// The iCloud sweep can run for minutes on a large library; without this the app is suspended
+    /// mid-batch as soon as the user leaves the screen and the deletion reports a failure.
+    private func withDeletionBackgroundTask(_ work: () async -> Void) async {
+        var taskID = UIBackgroundTaskIdentifier.invalid
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "DataDeletion") {
+            if taskID != .invalid {
+                UIApplication.shared.endBackgroundTask(taskID)
+                taskID = .invalid
+            }
+        }
+        
+        await work()
+        
+        if taskID != .invalid {
+            UIApplication.shared.endBackgroundTask(taskID)
+            taskID = .invalid
+        }
+    }
+    
+    /// Radio state that lives outside Core Data and would otherwise repopulate after a wipe.
+    private func clearStationPersistedState() {
+        let defaults = UserDefaults.standard
+        for key in ["selectedCountry", "DeletedStationIds", "UnfavoritedStationURLs", "FavoriteStationsOrder"] {
+            defaults.removeObject(forKey: key)
+        }
+        
+        let keyValueStore = NSUbiquitousKeyValueStore.default
+        for key in ["selectedCountry", "instant_station_updated", "instant_station_deleted",
+                    "instant_bulk_station_updated", "instant_bulk_station_deleted"] {
+            keyValueStore.removeObject(forKey: key)
+        }
+        keyValueStore.synchronize()
+        
+        Task { await SRImageLoader.shared.clearCaches() }
+        print("🗑️ DATA MANAGEMENT: Cleared station preferences, iCloud key-value entries and artwork caches")
+    }
+    
+    /// `removePersistentDomain` only covers the standard suite — the app-group suite used by the
+    /// widget/CarPlay and the iCloud key-value store both survive it.
+    private func clearAllPersistedPreferences() {
+        if let bundleID = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        }
+        if let groupDefaults = UserDefaults(suiteName: "group.streamradios") {
+            groupDefaults.removePersistentDomain(forName: "group.streamradios")
+        }
+        
+        let keyValueStore = NSUbiquitousKeyValueStore.default
+        for key in keyValueStore.dictionaryRepresentation.keys {
+            keyValueStore.removeObject(forKey: key)
+        }
+        keyValueStore.synchronize()
+        
+        URLCache.shared.removeAllCachedResponses()
+        Task { await SRImageLoader.shared.clearCaches() }
+        print("🗑️ DATA MANAGEMENT: Cleared standard + app-group defaults, iCloud key-value store and all caches")
+    }
+    
     private func initiateAppDataDeletion() async {
         // Reset all states immediately on main queue
         DispatchQueue.main.async {
@@ -3025,8 +3106,7 @@ struct InternalDataManagementView: View {
         notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all app data...")
         
         let group = DispatchGroup()
-        var allSuccess = true
-        var lastError: String?
+        let outcome = DeletionOutcome()
         
         // Delete station data from local CoreData
         group.enter()
@@ -3036,8 +3116,7 @@ struct InternalDataManagementView: View {
         }
         viewModel.deleteAllData { success, errorMessage in
             if !success {
-                allSuccess = false
-                lastError = errorMessage?.localizedDescription ?? "Station deletion failed"
+                outcome.recordFailure(errorMessage?.localizedDescription ?? "Station deletion failed")
             } else {
                 // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
                 print("🔄 DATA MANAGEMENT: Station Core Data deletion completed successfully")
@@ -3062,8 +3141,7 @@ struct InternalDataManagementView: View {
         }
         podcastViewModel.clearPodcastCoreData { success, error in
             if !success {
-                allSuccess = false
-                lastError = error?.localizedDescription ?? "Failed to clear local podcast data"
+                outcome.recordFailure(error?.localizedDescription ?? "Failed to clear local podcast data")
             } else {
                 // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
                 print("🔄 DATA MANAGEMENT: Podcast Core Data deletion completed successfully")
@@ -3086,6 +3164,7 @@ struct InternalDataManagementView: View {
         // Delete all station records from CloudKit using enhanced async batch deletion
         group.enter()
         Task {
+            await withDeletionBackgroundTask {
             do {
                 await MainActor.run {
                     self.appDataDeletionPhase = "Fetching station records..."
@@ -3127,10 +3206,10 @@ struct InternalDataManagementView: View {
                 group.leave()
                 
             } catch {
-                allSuccess = false
-                lastError = "Enhanced station deletion failed: \(error.localizedDescription)"
+                outcome.recordFailure("Enhanced station deletion failed: \(error.localizedDescription)")
                 print("❌ App Data Deletion: Enhanced station records deletion failed - \(error.localizedDescription)")
                 group.leave()
+            }
             }
         }
         
@@ -3145,18 +3224,18 @@ struct InternalDataManagementView: View {
         
         // Update progress to reflect completed podcast deletion step
         await MainActor.run {
-            self.appDataDeletionProgress = 1.0
-            self.appDataDeletionPhase = "Podcast deletion completed via clearPodcastCoreData()"
+            self.appDataDeletionPhase = "Removing podcast data from iCloud..."
         }
         
         group.notify(queue: .main) {
+            let allSuccess = outcome.isSuccess
+            let lastError = outcome.failureMessage
             print("🔄 App Data Deletion: All operations completed - Success: \(allSuccess)")
             
             // Clear UserDefaults only if all other operations succeeded
             if allSuccess {
-                UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
-                UserDefaults.standard.synchronize()
-                print("✅ App Data Deletion: UserDefaults cleared")
+                self.clearAllPersistedPreferences()
+                print("✅ App Data Deletion: Preferences and caches cleared")
                 
                 // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup
                 print("🎯 ✅ Successfully deleted all app data from both CloudKit and Core Data")
@@ -3209,7 +3288,7 @@ struct InternalDataManagementView: View {
                 // **CRITICAL**: Restart app after successful deletion for clean state
                 if allSuccess {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        self.restartApp()
+                        self.restartApp(destroyingStore: true)
                     }
                 }
                 
@@ -3239,8 +3318,7 @@ struct InternalDataManagementView: View {
         notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all radio station data...")
         
         let group = DispatchGroup()
-        var allSuccess = true
-        var lastError: String?
+        let outcome = DeletionOutcome()
         
         // Delete from local CoreData
         group.enter()
@@ -3250,8 +3328,7 @@ struct InternalDataManagementView: View {
         }
         viewModel.deleteAllData { success, errorMessage in
             if !success {
-                allSuccess = false
-                lastError = errorMessage?.localizedDescription ?? "Station deletion failed"
+                outcome.recordFailure(errorMessage?.localizedDescription ?? "Station deletion failed")
             } else {
                 // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
                 print("🔄 DATA MANAGEMENT: Station Core Data deletion completed successfully")
@@ -3277,6 +3354,7 @@ struct InternalDataManagementView: View {
         // Delete from CloudKit using enhanced async batch deletion
         group.enter()
         Task {
+            await withDeletionBackgroundTask {
             do {
                 await MainActor.run {
                     self.stationDataDeletionPhase = "Fetching station records from iCloud..."
@@ -3319,18 +3397,21 @@ struct InternalDataManagementView: View {
                 group.leave()
                 
             } catch {
-                allSuccess = false
-                lastError = "Enhanced CloudKit deletion failed: \(error.localizedDescription)"
+                outcome.recordFailure("Enhanced CloudKit deletion failed: \(error.localizedDescription)")
                 print("❌ Station Data Deletion: Enhanced deletion failed - \(error.localizedDescription)")
                 group.leave()
+            }
             }
         }
         
         group.notify(queue: .main) {
+            let allSuccess = outcome.isSuccess
+            let lastError = outcome.failureMessage
             print("🔄 Station Data Deletion: All operations completed - Success: \(allSuccess)")
             
             // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup
             if allSuccess {
+                self.clearStationPersistedState()
                 print("🎯 ✅ Successfully deleted all station data from both CloudKit and Core Data")
                 
                 // Trigger cross-device sync to ensure station data is removed from all devices
@@ -3365,7 +3446,7 @@ struct InternalDataManagementView: View {
                 if let error = lastError {
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "Station data deletion failed: \(error)")
                 } else if !allSuccess {
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All station data has been successfully deleted.")
+                    self.notificationManager.notifyUser(title: "Deletion Incomplete", message: "Some station data could not be deleted. Please try again.")
                 }
                 
                 // **CRITICAL**: Restart app after successful deletion for clean state
@@ -3402,8 +3483,7 @@ struct InternalDataManagementView: View {
         notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all podcast data...")
         
         let group = DispatchGroup()
-        var allSuccess = true
-        var lastError: String?
+        let outcome = DeletionOutcome()
         
         // Delete podcast data from local CoreData
         group.enter()
@@ -3413,8 +3493,7 @@ struct InternalDataManagementView: View {
         }
         podcastViewModel.clearPodcastCoreData { success, error in
             if !success { 
-                allSuccess = false
-                lastError = error?.localizedDescription ?? "Failed to clear local podcast data"
+                outcome.recordFailure(error?.localizedDescription ?? "Failed to clear local podcast data")
             } else {
                 // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
                 print("🔄 DATA MANAGEMENT: Podcast Core Data deletion completed successfully")
@@ -3445,11 +3524,13 @@ struct InternalDataManagementView: View {
         
         // Update progress to reflect completed podcast deletion step
         await MainActor.run {
-            self.podcastDataDeletionProgress = 1.0
-            self.podcastDataDeletionPhase = "Podcast deletion completed via clearPodcastCoreData()"
+            self.podcastDataDeletionPhase = "Removing podcast data from iCloud..."
         }
         
         group.notify(queue: .main) {
+            let allSuccess = outcome.isSuccess
+            let lastError = outcome.failureMessage
+            
             // Update UI states immediately
             self.isDeletingPodcastData = false
             self.podcastDataDeletionComplete = allSuccess
@@ -3463,6 +3544,7 @@ struct InternalDataManagementView: View {
             // Refresh view models to update UI immediately
             if allSuccess {
                 // Note: podcastViewModel already clears its data in clearPodcastCoreData completion
+                Task { await SRImageLoader.shared.clearCaches() }
             }
             
             // Force UI refresh and show notification
@@ -3494,7 +3576,7 @@ struct InternalDataManagementView: View {
     // MARK: - App Restart Functionality
     
     /// Reset app to fresh state after data deletion completion
-    private func restartApp() {
+    private func restartApp(destroyingStore: Bool = false) {
         print("🔄 APP RESET: Initiating app state reset after data deletion...")
         
         // Show final notification before reset
@@ -3529,6 +3611,12 @@ struct InternalDataManagementView: View {
                     // Close app after brief delay to ensure notification is seen
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         print("🔄 APP RESET: Closing app to complete clean reset process...")
+                        // Last point at which nothing else can touch Core Data.
+                        if destroyingStore {
+                            CoreDataStack.shared.destroyStores()
+                        } else {
+                            CoreDataStack.shared.checkpointAndCompactStores()
+                        }
                         exit(0)
                     }
                 }

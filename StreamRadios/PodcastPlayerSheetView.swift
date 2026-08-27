@@ -28,6 +28,8 @@ struct PodcastPlayerSheetView: View {
     @State private var currentChapterIndex = 0
     @State private var selectedTab = 0 // 0: Now Playing, 1: Details, 2: Chapters
     @State private var fallbackChapters: [PodcastChapter] = []
+    /// Chapter URLs recovered from the audio file's ID3 tag, keyed by start time and by title.
+    @State private var chapterLinkIndex: [String: String] = [:]
     @State private var showDeleteDownloadAlert = false
     @State private var refreshTrigger = false // Force view refresh after download operations
     @State private var hasScrolledToCurrentChapter = false
@@ -40,6 +42,7 @@ struct PodcastPlayerSheetView: View {
     @State private var isDraggingProgress = false
     @State private var draggedProgress: Double = 0
     @Environment(\.colorScheme) var colorScheme
+    @Namespace private var playerTabNamespace
     
     // UserDefaults keys for timer persistence
     private let timerActiveKey = "PodcastSleepTimerActive"
@@ -126,8 +129,18 @@ struct PodcastPlayerSheetView: View {
     
     // Get chapters for navigation - using same logic as PodcastChaptersNotesView
     private var chapters: [PodcastChapter] {
-        let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+        var chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+        guard !chapterLinkIndex.isEmpty else { return chaptersToShow }
+        
+        for index in chaptersToShow.indices where chaptersToShow[index].url == nil {
+            chaptersToShow[index].url = chapterLink(for: chaptersToShow[index])
+        }
         return chaptersToShow
+    }
+    
+    private func chapterLink(for chapter: PodcastChapter) -> String? {
+        chapterLinkIndex["t:\(Int(chapter.startTime.rounded()))"]
+            ?? chapterLinkIndex["n:\(chapter.title.lowercased())"]
     }
     
     private var hasChapters: Bool {
@@ -176,41 +189,7 @@ struct PodcastPlayerSheetView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Top navigation bar with custom segmented control
-                HStack(spacing: 16) {
-                    // Back button (downward arrow)
-                    Button(action: {
-                        isPresented = false
-                    }) {
-                        Image(systemName: "chevron.down")
-                            .font(.title2)
-                            .foregroundColor(backButtonColor)
-                            .frame(width: 44, height: 44)
-                    }
-                    
-                    // Simple segmented picker
-                    if hasChapters {
-                        Picker("", selection: $selectedTab) {
-                            Text("Now Playing").tag(0)
-                            Text("Notes").tag(1)
-                            Text("Chapters").tag(2)
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                    } else {
-                        Picker("", selection: $selectedTab) {
-                            Text("Now Playing").tag(0)
-                            Text("Notes").tag(1)
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(topBarBackgroundColor)
-                )
-                .conditionalGlassEffect(cornerRadius: 24)
+                playerHeader
                 
                 // Swipeable content container
                 TabView(selection: $selectedTab) {
@@ -282,11 +261,88 @@ struct PodcastPlayerSheetView: View {
                 Task { await loadChaptersFromAsset() }
             }
             
+            Task { await loadChapterLinks() }
+            
             // If no chapters and currently on chapters tab, switch to Now Playing
             if !hasChapters && selectedTab == 2 {
                 selectedTab = 0
             }
         }
+    }
+    
+    // MARK: - Header
+    
+    /// Mirrors the radio player header: a leading capsule button plus a capsule segmented control.
+    private var playerHeader: some View {
+        HStack(spacing: 10) {
+            Button {
+                isPresented = false
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.adaptivePrimaryText)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+            .conditionalGlassEffect(cornerRadius: 20)
+            
+            playerTabBar
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(Color.adaptiveBackground)
+    }
+    
+    private var playerTabBar: some View {
+        HStack(spacing: 4) {
+            playerTabButton("Now Playing", tag: 0)
+            playerTabButton("Notes", tag: 1)
+            if hasChapters {
+                playerTabButton("Chapters", tag: 2)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.adaptiveSectionBackground))
+    }
+    
+    private func playerTabButton(_ title: String, tag: Int) -> some View {
+        let isSelected = selectedTab == tag
+        
+        return Button {
+            UIDevice.playHapticFeedback()
+            withAnimation(.snappy(duration: 0.28)) { selectedTab = tag }
+        } label: {
+            Text(title)
+                .font(.footnote.weight(isSelected ? .semibold : .regular))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundStyle(isSelected ? selectedTabForeground : Color.adaptiveSecondaryText)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(selectedTabFill)
+                            .shadow(color: colorScheme == .dark ? .clear : Color.accentColor.opacity(0.35),
+                                    radius: 4, y: 2)
+                            .matchedGeometryEffect(id: "selectedPodcastPlayerTab", in: playerTabNamespace)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private var selectedTabFill: Color {
+        colorScheme == .dark ? Color.blue.opacity(0.15) : Color.accentColor
+    }
+    
+    private var selectedTabForeground: Color {
+        colorScheme == .dark ? .blue : .white
     }
     
     // MARK: - Tab Views
@@ -391,41 +447,46 @@ struct PodcastPlayerSheetView: View {
                 // Episode header
                 episodeHeaderView
                 
-                // Episode details/notes - using same logic as PodcastChaptersNotesView
-                if let notes = episode.notes {
-                    // Show notes content with rich formatting
-                    if !notes.content.isEmpty {
-                        FormattedNotesView(content: notes.content)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                if let notes = episode.notes, !notes.content.isEmpty {
+                    NotesCardView(content: notes.content)
                 } else {
-                    // Fallback if no notes - using same logic as PodcastChaptersNotesView
-                    VStack(alignment: .leading, spacing: 8) {
-                        Image(systemName: "doc.text")
-                            .font(.largeTitle)
-                            .foregroundColor(.adaptiveSecondaryText)
-                        
-                        Text("No show notes available")
-                            .font(.body)
-                            .foregroundColor(.adaptiveSecondaryText)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 40)
+                    NotesEmptyStateView()
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            .padding(.bottom, 24)
         }
     }
     
     @ViewBuilder
     private var chaptersView: some View {
-        GeometryReader { geometry in
+        let chaptersToShow = chapters
+        
+        if chaptersToShow.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "list.number")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundColor(.adaptiveSecondaryText)
+                
+                Text("No chapters available")
+                    .font(.headline)
+                    .foregroundColor(.adaptivePrimaryText)
+                
+                Text("This episode doesn't include chapter markers.")
+                    .font(.footnote)
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 40)
+        } else {
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        let chaptersToShow = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
-                        if !chaptersToShow.isEmpty {
+                VStack(spacing: 0) {
+                    chaptersSummaryBar(chaptersToShow, proxy: proxy)
+                    
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
                             ForEach(chaptersToShow) { chapter in
                                 ChapterRowView(
                                     chapter: chapter,
@@ -446,23 +507,12 @@ struct PodcastPlayerSheetView: View {
                                 )
                                 .id(chapter.id)
                             }
-                        } else {
-                            // Fallback if no chapters - using same logic as PodcastChaptersNotesView
-                            VStack(alignment: .leading, spacing: 8) {
-                                Image(systemName: "list.number")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.adaptiveSecondaryText)
-                                
-                                Text("No chapters available")
-                                    .font(.body)
-                                    .foregroundColor(.adaptiveSecondaryText)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(.top, 40)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 16)
+                        .animation(.easeInOut(duration: 0.25), value: currentChapterIndex)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
                 }
                 .onAppear {
                     // Scroll to current chapter when chapters view appears
@@ -481,6 +531,50 @@ struct PodcastPlayerSheetView: View {
                 }
             }
         }
+    }
+    
+    private func chaptersSummaryBar(_ chaptersToShow: [PodcastChapter], proxy: ScrollViewProxy) -> some View {
+        let isThisEpisode = podcastPlayer.currentEpisode?.id == episode.id
+        
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(chaptersToShow.count) chapters")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(.adaptivePrimaryText)
+                
+                if isThisEpisode, let current = currentChapter,
+                   let index = chaptersToShow.firstIndex(where: { $0.id == current.id }) {
+                    Text("Playing \(index + 1) of \(chaptersToShow.count)")
+                        .font(.caption2)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+            }
+            
+            Spacer(minLength: 0)
+            
+            if isThisEpisode && currentChapter != nil {
+                Button {
+                    UIDevice.playHapticFeedback()
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        scrollToCurrentChapter(proxy: proxy)
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Current")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundColor(Color.accentColor)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.14)))
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
     }
     
     // MARK: - Artwork View
@@ -798,15 +892,15 @@ struct PodcastPlayerSheetView: View {
     
     // MARK: - Bottom Menu
     private var bottomMenuView: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             // AirPlay button
-            VStack(spacing: 4) {
-                AirPlayButtonView()
-                    .frame(width: 44, height: 24)
-                    .tint(.adaptivePrimaryText)
-                Text("AirPlay")
-                    .font(.caption)
-                    .foregroundColor(.adaptiveSecondaryText)
+            VStack(spacing: 6) {
+                menuIcon(isActive: false) {
+                    AirPlayButtonView()
+                        .frame(width: 28, height: 24)
+                        .tint(.adaptivePrimaryText)
+                }
+                menuLabel("AirPlay", isActive: false)
             }
             .frame(maxWidth: .infinity)
             
@@ -814,15 +908,13 @@ struct PodcastPlayerSheetView: View {
             Button(action: {
                 showSleepTimer = true
             }) {
-                VStack(spacing: 4) {
-                    ZStack {
+                VStack(spacing: 6) {
+                    menuIcon(isActive: sleepTimerActive) {
                         Image(systemName: sleepTimerActive ? "moon.fill" : "moon")
-                            .font(.system(size: 24))
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundColor(sleepTimerActive ? .blue : .adaptivePrimaryText)
                     }
-                    Text(sleepTimerActive ? "Timer On" : "Timer")
-                        .font(.caption)
-                        .foregroundColor(.adaptiveSecondaryText)
+                    menuLabel(sleepTimerActive ? "Timer On" : "Timer", isActive: sleepTimerActive)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -831,13 +923,13 @@ struct PodcastPlayerSheetView: View {
             Button(action: {
                 showAudioSettings = true
             }) {
-                VStack(spacing: 4) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 24))
-                        .foregroundColor(.adaptivePrimaryText)
-                    Text("Settings")
-                        .font(.caption)
-                        .foregroundColor(.adaptiveSecondaryText)
+                VStack(spacing: 6) {
+                    menuIcon(isActive: false) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.adaptivePrimaryText)
+                    }
+                    menuLabel("Settings", isActive: false)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -848,22 +940,18 @@ struct PodcastPlayerSheetView: View {
                     toggleDownload()
                 }
             }) {
-                VStack(spacing: 4) {
-                    ZStack {
+                VStack(spacing: 6) {
+                    menuIcon(isActive: isDownloaded || isDownloading) {
                         if isDownloaded {
-                            // Downloaded state - filled icon
                             Image(systemName: "arrow.down.circle.fill")
-                                .font(.system(size: 24))
-                                
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.blue)
                         } else if isDownloading {
-                            // Downloading state - circular progress with percentage
                             ZStack {
-                                // Background circle
                                 Circle()
                                     .stroke(Color.gray.opacity(0.3), lineWidth: 3)
                                     .frame(width: 24, height: 24)
                                 
-                                // Progress circle
                                 Circle()
                                     .trim(from: 0, to: CGFloat(downloadProgress))
                                     .stroke(Color.blue, lineWidth: 3)
@@ -871,27 +959,25 @@ struct PodcastPlayerSheetView: View {
                                     .frame(width: 24, height: 24)
                                     .animation(.easeInOut(duration: 0.3), value: downloadProgress)
                                 
-                                // Percentage text or download icon
-                                if downloadProgress > 0.05 { // Show percentage after 5% to avoid cramped text
-                                    Text("\(Int(downloadProgress * 100))%")
-                                        .font(.caption2)
-                                        
+                                // Show percentage after 5% to avoid cramped text
+                                if downloadProgress > 0.05 {
+                                    Text("\(Int(downloadProgress * 100))")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundColor(.adaptivePrimaryText)
                                 } else {
                                     Image(systemName: "arrow.down")
                                         .font(.caption2)
-                                        
+                                        .foregroundColor(.adaptivePrimaryText)
                                 }
                             }
                         } else {
-                            // Not downloaded state - outline icon
                             Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 24))
+                                .font(.system(size: 18, weight: .medium))
                                 .foregroundColor(.adaptivePrimaryText)
                         }
                     }
-                    Text(isDownloaded ? "Downloaded" : (isDownloading ? "Downloading" : "Download"))
-                        .font(.caption)
-                        .foregroundColor(.adaptiveSecondaryText)
+                    menuLabel(isDownloaded ? "Downloaded" : (isDownloading ? "Downloading" : "Download"),
+                              isActive: isDownloaded)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -903,20 +989,42 @@ struct PodcastPlayerSheetView: View {
                 print("🔘 Favorite button tapped! Current state: \(isFavorite)")
                 toggleFavorite()
             }) {
-                VStack(spacing: 4) {
-                    Image(systemName: isFavorite ? "heart.fill" : "heart")
-                        .font(.system(size: 24))
-                        .foregroundColor(isFavorite ? .red : .adaptivePrimaryText)
-                    Text(isFavorite ? "Favorited" : "Favorite")
-                        .font(.caption)
-                        .foregroundColor(.adaptiveSecondaryText)
+                VStack(spacing: 6) {
+                    menuIcon(isActive: isFavorite, tint: .red) {
+                        Image(systemName: isFavorite ? "heart.fill" : "heart")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(isFavorite ? .red : .adaptivePrimaryText)
+                    }
+                    menuLabel(isFavorite ? "Favorited" : "Favorite", isActive: isFavorite, tint: .red)
                 }
             }
             .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 14)
         .background(Color.adaptiveSecondaryBackground)
+    }
+    
+    private func menuIcon<Content: View>(
+        isActive: Bool,
+        tint: Color = .blue,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(width: 40, height: 40)
+            .background(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(isActive ? tint.opacity(0.16) : Color.adaptiveFieldBackground)
+            )
+    }
+    
+    /// The labels sit in fifths of the screen, so they have to shrink rather than wrap.
+    private func menuLabel(_ title: String, isActive: Bool, tint: Color = .blue) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundColor(isActive ? tint : .adaptiveSecondaryText)
     }
     
     // MARK: - Helper Properties
@@ -1182,6 +1290,19 @@ struct PodcastPlayerSheetView: View {
         // Check for direct chapter URL
         if let url = chapter.url, hasValidURL(url) { return url }
         
+        // Chapters derived from the notes carry no URL of their own, so fall back to any note link
+        // timestamped inside this chapter's window.
+        let (start, end) = chapterBounds(for: chapter)
+        if let links = episode.notes?.links, !links.isEmpty {
+            if let match = links.first(where: { link in
+                guard hasValidURL(link.url) else { return false }
+                guard let ts = link.timeStamp else { return false }
+                return ts >= start && ts < end
+            }) {
+                return match.url
+            }
+        }
+        
         // Check for URL embedded in the title text
         let title = chapter.title
         if let range = title.range(of: #"https?://\S+"#, options: .regularExpression) {
@@ -1380,7 +1501,44 @@ struct PodcastPlayerSheetView: View {
             }
         }
         chapters.sort { $0.startTime < $1.startTime }
+        attachInlineLinks(to: &chapters, from: content)
         return chapters
+    }
+    
+    /// The chapter regexes run on tag-stripped text, so any `<a href>` wrapping a chapter line is
+    /// lost by then — recover it by matching each chapter back to its original HTML line.
+    private func attachInlineLinks(to chapters: inout [PodcastChapter], from content: String) {
+        guard !chapters.isEmpty else { return }
+        
+        var normalized = content
+        for tag in ["<br>", "<br/>", "<br />", "</p>", "</li>", "</div>"] {
+            normalized = normalized.replacingOccurrences(of: tag, with: "\n", options: [.caseInsensitive])
+        }
+        
+        var linksByLine: [(text: String, url: String)] = []
+        for rawLine in normalized.components(separatedBy: "\n") {
+            guard rawLine.range(of: "<a", options: .caseInsensitive) != nil else { continue }
+            guard let hrefRange = rawLine.range(of: #"href\s*=\s*["']([^"']+)["']"#, options: [.regularExpression, .caseInsensitive]) else { continue }
+            
+            let href = String(rawLine[hrefRange])
+                .replacingOccurrences(of: #"^href\s*=\s*["']"#, with: "", options: [.regularExpression, .caseInsensitive])
+                .replacingOccurrences(of: #"["']$"#, with: "", options: .regularExpression)
+            guard hasValidURL(href) else { continue }
+            
+            let text = stripHTML(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            linksByLine.append((text.lowercased(), href))
+        }
+        
+        guard !linksByLine.isEmpty else { return }
+        
+        for index in chapters.indices where chapters[index].url == nil {
+            let title = chapters[index].title.lowercased()
+            guard title.count > 2 else { continue }
+            if let match = linksByLine.first(where: { $0.text.contains(title) }) {
+                chapters[index].url = match.url
+            }
+        }
     }
 }
 
@@ -1414,9 +1572,30 @@ extension PodcastPlayerSheetView {
         }
     }
 
+    /// Chapter links live in the audio file's ID3 tag, which AVFoundation doesn't expose.
     @MainActor
-    private func loadChaptersFromAsset() async {
-        guard let url = URL(string: episode.audioUrl) else { return }
+    private func loadChapterLinks() async {
+        guard chapterLinkIndex.isEmpty else { return }
+        
+        let embedded = await ID3ChapterReader.loadChapters(
+            remoteURL: URL(string: episode.audioUrl),
+            localPath: episode.localFilePath
+        )
+        
+        var index: [String: String] = [:]
+        for chapter in embedded {
+            guard let url = chapter.url else { continue }
+            index["t:\(Int(chapter.startTime.rounded()))"] = url
+            index["n:\(chapter.title.lowercased())"] = url
+        }
+        
+        guard !index.isEmpty else { return }
+        chapterLinkIndex = index
+        persistFallbackChapters(chapters)
+    }
+
+    @MainActor
+    private func loadChaptersFromAsset() async {        guard let url = URL(string: episode.audioUrl) else { return }
         let asset = AVURLAsset(url: url)
         do {
             let locales = try await asset.load(.availableChapterLocales)

@@ -51,6 +51,13 @@ struct RadioStreamApp: App {
                         DataSyncManager.shared.checkAndResumeRadioStationSync()
                     }
                     
+                    // Warm every feed now so opening one already shows the newest episodes
+                    Task { @MainActor in
+                        // Must finish first, or the refresh re-inserts legacy IDs as duplicates.
+                        await PodcastCoreDataManager.shared.migrateUnstableEpisodeIDs()
+                        await podcastViewModel.prefetchNewEpisodesForAllFeeds()
+                    }
+                    
                     // Initialize comprehensive debug logging system
                     // DebugLogger.logInfo will be added when import is fixed
                 }
@@ -60,6 +67,10 @@ struct RadioStreamApp: App {
                     
                     if PodcastPlayer.shared.currentEpisode == nil {
                         PodcastPlayer.shared.configure(with: podcastViewModel)
+                    }
+                    
+                    Task { @MainActor in
+                        await podcastViewModel.prefetchNewEpisodesForAllFeeds()
                     }
                 }
                 .onDisappear {

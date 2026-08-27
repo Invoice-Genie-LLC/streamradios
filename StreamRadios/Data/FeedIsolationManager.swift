@@ -322,6 +322,5 @@ struct ContaminationReport {
 /// Generate episode ID with absolute feed isolation
 private func generateIsolatedEpisodeId(title: String, audioUrl: String, publicationDate: Date, feedId: String) -> String {
     let content = "\(feedId)_\(title)_\(audioUrl)_\(publicationDate.timeIntervalSince1970)"
-    let hash = abs(content.hashValue)
-    return "iso_\(feedId)_\(hash)"
+    return "iso_\(feedId)_\(StableHash.of(content))"
 }

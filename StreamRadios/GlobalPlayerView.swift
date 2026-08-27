@@ -8,6 +8,66 @@
 import SwiftUI
 import AVFoundation
 
+/// Publishes how tall the tab bar actually is, above the home indicator.
+///
+/// SwiftUI doesn't expose this, and it differs by idiom, OS version and whether the device has a
+/// home indicator at all — a constant that clears the bar on iPhone overlaps it on iPad.
+final class TabBarClearance: ObservableObject {
+    static let shared = TabBarClearance()
+
+    @Published private(set) var height: CGFloat = 49
+
+    /// The window's bottom safe-area inset, so callers can cancel it out with negative padding.
+    @Published private(set) var bottomInset: CGFloat = 0
+
+    private var measuredForWindowSize: CGSize?
+
+    func measure(from view: UIView?, includeTabBar: Bool = true) {
+        guard let window = view?.window else { return }
+
+        let inset = window.safeAreaInsets.bottom
+        if abs(inset - bottomInset) > 0.5 { bottomInset = inset }
+
+        guard includeTabBar else { return }
+        if measuredForWindowSize == window.bounds.size { return }
+        guard let bar = Self.tabBar(in: window) else { return }
+
+        let barFrame = bar.convert(bar.bounds, to: window)
+        // The bar can be mid-transition or parked offscreen while it's hidden; ignore those frames.
+        guard barFrame.maxY <= window.bounds.maxY + 1 else { return }
+        let measured = window.bounds.maxY - barFrame.minY - inset
+        guard measured > 0 else { return }
+
+        measuredForWindowSize = window.bounds.size
+        if abs(measured - height) > 0.5 { height = measured }
+    }
+
+    private static func tabBar(in view: UIView) -> UITabBar? {
+        if let bar = view as? UITabBar { return bar }
+        for subview in view.subviews {
+            if let found = tabBar(in: subview) { return found }
+        }
+        return nil
+    }
+}
+
+/// Invisible hook that lets `TabBarClearance` reach the UIKit window behind the SwiftUI hierarchy.
+struct TabBarClearanceProbe: UIViewRepresentable {
+    let isActive: Bool
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            TabBarClearance.shared.measure(from: uiView, includeTabBar: isActive)
+        }
+    }
+}
+
 /// Global player that displays across all main views (except sheet views)
 /// Shows either podcast or radio player depending on what's currently playing
 /// Uses the same positioning and logic as ContentView
@@ -55,8 +115,6 @@ struct GlobalPlayerView: View {
                             podcastPlayer.pause()
                         }
                     )
-                    .allowsHitTesting(!isScrolling) // Disable podcast player taps when Home button is showing
-                    .zIndex(0) // Player is below home button
                     .onTapGesture {
                         // Only allow tap when Home button is not showing to prevent conflicts
                         if !isScrolling, let currentFeed = podcastPlayer.currentFeed {
@@ -66,6 +124,10 @@ struct GlobalPlayerView: View {
                             selectedTab = .podcast
                         }
                     }
+                    // Must stay outside the tap gesture, or the gesture keeps swallowing taps while
+                    // the player itself is disabled.
+                    .allowsHitTesting(!isScrolling) // Disable podcast player taps when Home button is showing
+                    .zIndex(0) // Player is below home button
                 }
                 .padding(.horizontal, playerHorizontalPadding)
             } else if shouldShowRadioPlayerFirst {

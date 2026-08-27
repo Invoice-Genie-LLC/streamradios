@@ -168,10 +168,13 @@ struct TermsAndConditionsView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button("Done") {
+                Button {
                     dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
                 }
-                
+                .accessibilityLabel("Back")
             }
         }
     }

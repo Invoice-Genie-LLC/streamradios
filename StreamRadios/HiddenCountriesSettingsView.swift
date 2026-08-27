@@ -7,6 +7,7 @@
 
 import SwiftUI
 import FlagKit
+import StreamRadiosKit
 
 // MARK: - Conditional Liquid Glass Modifier
 struct ConditionalLiquidGlass: ViewModifier {
@@ -50,6 +51,8 @@ struct HiddenCountriesSettingsView: View {
     @State private var hiddenCountries: Set<String> = []
     @State private var searchText = ""
     @State private var isSearchPresented = false
+    @State private var isAscendingSort = true
+    @FocusState private var isSearchFieldFocused: Bool
     
     // Default initializer for backward compatibility
     init() {
@@ -65,10 +68,14 @@ struct HiddenCountriesSettingsView: View {
     
     private let allCountries = Country.getAllCountriesWithAPICodes().filter { $0.name != "Select Country" }
     
-    private var filteredCountries: [Country] {
+    private var groupedCountries: [CountryRegion: [Country]] {
         let filtered = searchText.isEmpty ? allCountries :
             allCountries.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-        return filtered.sorted { $0.name < $1.name }
+        return Dictionary(grouping: filtered) { CountryRegion.region(for: $0.name) }
+    }
+    
+    private func sortedByName(_ list: [Country]) -> [Country] {
+        list.sorted { isAscendingSort ? $0.name < $1.name : $0.name > $1.name }
     }
     
     private var backgroundColor: Color {
@@ -89,48 +96,45 @@ struct HiddenCountriesSettingsView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Custom Search Bar (when presented)
-            if isSearchPresented {
-                CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search countries...")
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-                    .background(Color.adaptiveBackground)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
+            header
             
-            // Countries list
             List {
-                Section {
-                    ForEach(filteredCountries, id: \.id) { country in
-                        HiddenCountryRow(
-                            country: country,
-                            isHidden: hiddenCountries.contains(country.name),
-                            onToggle: { isHidden in
-                                toggleCountryVisibility(country.name, isHidden: isHidden)
+                ForEach(Array(groupedCountries.keys).sorted { $0.sortOrder < $1.sortOrder }, id: \.self) { region in
+                    if let regionCountries = groupedCountries[region], !regionCountries.isEmpty {
+                        Section {
+                            ForEach(sortedByName(regionCountries), id: \.id) { country in
+                                HiddenCountryRow(
+                                    country: country,
+                                    isHidden: hiddenCountries.contains(country.name),
+                                    showRegion: !searchText.isEmpty
+                                ) {
+                                    toggleCountryVisibility(country.name, isHidden: !hiddenCountries.contains(country.name))
+                                }
+                                .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                             }
-                        )
-                        .listRowBackground(cardBackgroundColor)
-                }
-                } header: {
-                    HStack {
-                        Text("Countries")
-                            .font(.subheadline)
-                            .foregroundColor(secondaryTextColor)
-                        Spacer()
-                        Text("\(hiddenCountries.count) hidden")
-                            .font(.caption)
-                            .foregroundColor(secondaryTextColor)
+                        } header: {
+                            if searchText.isEmpty {
+                                sectionHeader(region.displayName, systemImage: region.icon, tint: .adaptiveSecondaryText)
+                            }
+                        }
                     }
+                }
+                
+                Section {
+                    EmptyView()
                 } footer: {
                     Text("Hidden countries will not appear in the country picker when adding stations or browsing by country.")
                         .font(.caption)
-                        .foregroundColor(secondaryTextColor)
+                        .foregroundColor(.adaptiveSecondaryText)
+                        .padding(.horizontal, 4)
+                        .padding(.top, 8)
                 }
             }
-            .listStyle(InsetGroupedListStyle())
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(backgroundColor)
+            .background(Color.adaptiveBackground)
             .safeAreaInset(edge: .bottom) {
                 // Add space at bottom to prevent player obstruction
                 Color.clear.frame(height: 100)
@@ -141,95 +145,165 @@ struct HiddenCountriesSettingsView: View {
                         // IMMEDIATE update - no conditions, just set it
                         DispatchQueue.main.async {
                             if !isScrolling {
-                                print("🏠 DEBUG: Setting isScrolling = true in HiddenCountriesSettingsView")
                                 isScrolling = true
-                                // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
-                                // REMOVED: Direct isFooterMenuHidden assignment - let ContentView shouldHideFooterMenu logic handle this
                             }
                         }
                     }
                     .onEnded { _ in
                         // Debounce the scroll end to prevent rapid state changes
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            print("🏠 DEBUG: Setting isScrolling = false in HiddenCountriesSettingsView")
                             isScrolling = false
-                            // Note: Don't reset isFooterMenuHidden here - let home button control it
                         }
                     }
             )
         }
-        .background(backgroundColor)
-        .navigationTitle("Hidden Countries")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(false)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Group {
-                    if isSearchPresented {
-                        // Cancel button when search is active
-                        Button("Cancel") {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                isSearchPresented = false
-                                searchText = ""
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            }
-                        }
-                        
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            Capsule()
-                                .fill(Color.clear)
-                        )
-                    } else {
-                        HStack(spacing: 8) {
-                            // Search button
-                            Button(action: {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    isSearchPresented = true
-                                }
-                            }) {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundColor(.adaptivePrimaryText)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .frame(width: 32, height: 32)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            // Menu button
-                            Menu {
-                                Button("Hide All") {
-                                    hideAllCountries()
-                                }
-                                
-                                Button("Show All") {
-                                    showAllCountries()
-                                }
-                                
-                                Button("Reset to Default") {
-                                    resetToDefault()
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis.circle")
-                                    .foregroundColor(.adaptivePrimaryText)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .frame(width: 32, height: 32)
-                            }
-                            .menuStyle(.borderlessButton)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                       // .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                    }
-                }
+        .background(Color.adaptiveBackground)
+        .navigationBarHidden(true)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded { _ in
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
-        }
+        )
         .onAppear {
             loadHiddenCountries()
         }
         .onDisappear {
             saveHiddenCountries()
         }
+    }
+    
+    // MARK: - Header
+    
+    /// Mirrors the Select Country header: a leading capsule plus a trailing action capsule.
+    private var header: some View {
+        HStack(spacing: 10) {
+            if isSearchPresented {
+                searchBar
+            } else {
+                headerActionButton("chevron.left") {
+                    dismiss()
+                }
+                .frame(height: 40)
+                .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+                .modifier(ConditionalLiquidGlass(cornerRadius: 20))
+                
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Hidden Countries")
+                        .font(.headline)
+                        .foregroundColor(.adaptivePrimaryText)
+                        .lineLimit(1)
+                    
+                    Text("\(hiddenCountries.count) hidden")
+                        .font(.caption2)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
+            headerActions
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(Color.adaptiveBackground)
+    }
+    
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline)
+                .foregroundColor(.adaptiveSecondaryText)
+            
+            TextField("Search countries...", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.subheadline)
+                .foregroundColor(.adaptivePrimaryText)
+                .focused($isSearchFieldFocused)
+                .submitLabel(.search)
+            
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveFieldBackground))
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isSearchFieldFocused = true
+            }
+        }
+    }
+    
+    private var headerActions: some View {
+        HStack(spacing: 0) {
+            if isSearchPresented {
+                Button("Cancel") {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isSearchPresented = false
+                        searchText = ""
+                        isSearchFieldFocused = false
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.adaptivePrimaryText)
+                .padding(.horizontal, 14)
+            } else {
+                headerActionButton("magnifyingglass") {
+                    withAnimation(.easeInOut(duration: 0.25)) { isSearchPresented = true }
+                }
+                
+                headerActionButton(isAscendingSort ? "arrow.up.circle" : "arrow.down.circle") {
+                    isAscendingSort.toggle()
+                }
+                
+                Menu {
+                    Button("Hide All") { hideAllCountries() }
+                    Button("Show All") { showAllCountries() }
+                    Button("Reset to Default") { resetToDefault() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.adaptivePrimaryText)
+                        .frame(width: 38, height: 40)
+                        .contentShape(Rectangle())
+                }
+            }
+        }
+        .frame(height: 40)
+        .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+        .modifier(ConditionalLiquidGlass(cornerRadius: 20))
+    }
+    
+    private func headerActionButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(.adaptivePrimaryText)
+                .frame(width: 38, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func sectionHeader(_ title: String, systemImage: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+            Text(title)
+        }
+        .font(.caption.weight(.semibold))
+        .textCase(.uppercase)
+        .foregroundColor(tint)
+        .padding(.leading, 4)
+        .padding(.top, 6)
     }
     
     private func toggleCountryVisibility(_ countryName: String, isHidden: Bool) {
@@ -325,87 +399,86 @@ struct HiddenCountriesSettingsView: View {
 struct HiddenCountryRow: View {
     let country: Country
     let isHidden: Bool
-    let onToggle: (Bool) -> Void
+    let showRegion: Bool
+    let onToggle: () -> Void
     
-    @Environment(\.colorScheme) var colorScheme
-    
-    private var primaryTextColor: Color {
-        colorScheme == .dark ? .white : .primary
-    }
-    
-    private var secondaryTextColor: Color {
-        colorScheme == .dark ? .gray : .secondary
-    }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Flag
-            Group {
-                if country.flag.isEmpty {
-                    Image(systemName: "flag.slash")
-                        .foregroundColor(secondaryTextColor)
+        Button(action: onToggle) {
+            HStack(spacing: 14) {
+                flagView
+                    .opacity(isHidden ? 0.45 : 1)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(country.name)
                         .font(.body)
-                        .frame(width: 40, height: 30)
-                } else {
-                    if let flag = Flag(countryCode: country.flag) {
-                        Image(uiImage: flag.image(style: .roundedRect))
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 40, height: 30)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
-                            )
-                    } else {
-                        Image(systemName: "flag.slash")
-                            .foregroundColor(secondaryTextColor)
-                            .font(.body)
-                            .frame(width: 40, height: 30)
+                        .foregroundColor(isHidden ? .adaptiveSecondaryText : .adaptivePrimaryText)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(1)
+                    
+                    if showRegion {
+                        Text(CountryRegion.region(for: country.name).displayName)
+                            .font(.caption)
+                            .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
-            }
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(country.name)
-                    .font(.body)
-                    .foregroundColor(isHidden ? secondaryTextColor : primaryTextColor)
-                    .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 
-                Text(CountryRegion.region(for: country.name).displayName)
-                    .font(.caption)
-                    .foregroundColor(secondaryTextColor)
-            }
-            
-            Spacer()
-            
-            // Hidden status
-            HStack(spacing: 8) {
                 if isHidden {
                     Text("Hidden")
-                        .font(.caption)
+                        .font(.caption.weight(.semibold))
                         .foregroundColor(.red)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(Color.red.opacity(0.1))
-                        .cornerRadius(8)
+                        .background(Capsule().fill(Color.red.opacity(0.15)))
                 }
                 
-                Button(action: {
-                    onToggle(!isHidden)
-                }) {
-                    Image(systemName: isHidden ? "eye.slash.fill" : "eye.fill")
-                        .foregroundColor(isHidden ? .red : .blue)
-                        .font(.body)
-                }
-                .buttonStyle(PlainButtonStyle())
+                Image(systemName: isHidden ? "eye.slash.fill" : "eye.fill")
+                    .font(.body)
+                    .foregroundColor(isHidden ? .red : SRColor.accent)
             }
+            .frame(minHeight: 44)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(shape.fill(isHidden ? Color.red.opacity(0.10) : Color.adaptiveCardBackground))
+            .overlay(shape.stroke(isHidden ? Color.red.opacity(0.30) : Color.clear, lineWidth: 1))
+            .contentShape(shape)
         }
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onToggle(!isHidden)
+        .buttonStyle(HiddenCountryRowButtonStyle())
+        .animation(.snappy(duration: 0.25), value: isHidden)
+    }
+    
+    @ViewBuilder
+    private var flagView: some View {
+        if !country.flag.isEmpty, let flag = Flag(countryCode: country.flag) {
+            Image(uiImage: flag.image(style: .roundedRect))
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 46, height: 34)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.adaptiveBorder, lineWidth: 0.5)
+                )
+        } else {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.adaptiveSectionBackground)
+                .frame(width: 46, height: 34)
+                .overlay(
+                    Image(systemName: "globe")
+                        .font(.footnote)
+                        .foregroundColor(.adaptiveSecondaryText)
+                )
         }
+    }
+}
+
+private struct HiddenCountryRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 

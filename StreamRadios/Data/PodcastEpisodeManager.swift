@@ -806,27 +806,6 @@ class PodcastEpisodeManager {
                 return nil // Filter out contaminated episodes
             }
             
-            // ADDITIONAL VALIDATION: Check episode ID integrity for deterministic IDs
-            if episode.id.hasPrefix("det_f") {
-                let expectedFeedHash = abs(feedId.lowercased().hashValue)
-                let expectedPrefix = "det_f\(expectedFeedHash)_"
-                if !episode.id.hasPrefix(expectedPrefix) {
-                    print("🚨 EPISODE ID CONTAMINATION: Episode '\(episode.title)' has ID '\(episode.id)' that doesn't match feed hash pattern for feed '\(feedId)'")
-                    
-                    // CORRECTIVE ACTION: Regenerate proper episode ID
-                    var correctedEpisode = episode
-                    correctedEpisode.id = PodcastEpisode.generateDeterministicID(
-                        title: episode.title,
-                        audioUrl: episode.audioUrl,
-                        publicationDate: episode.publicationDate,
-                        feedUrl: feedId
-                    )
-                    correctedEpisode.feedId = feedId // Ensure feedId is correct
-                    print("🔧 EPISODE ID CORRECTION: Corrected episode ID from '\(episode.id)' to '\(correctedEpisode.id)'")
-                    episode = correctedEpisode
-                }
-            }
-            
             // ADDITIONAL SAFETY: Validate episode has required fields
             guard !episode.feedId.isEmpty,
                   !episode.id.isEmpty,

@@ -1320,68 +1320,53 @@ class EpisodeStateManager: ObservableObject {
     private func cleanupOrphanedStates() async {
         let context = CoreDataStack.shared.newBackgroundContext()
         
+        var validEpisodeIds = Set<String>()
         await context.perform {
-            // Get all episode IDs currently in Core Data
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             fetchRequest.propertiesToFetch = ["id"]
             
             do {
                 let episodes = try context.fetch(fetchRequest)
-                let validEpisodeIds = Set(episodes.compactMap { $0.id })
-                
-                print("🧹 ORPHAN CLEANUP: Found \(validEpisodeIds.count) valid episodes in Core Data")
-                
-                // Check each state dictionary for orphaned entries
-                var orphanedProgress = 0
-                var orphanedFavorites = 0
-                var orphanedDownloads = 0
-                var orphanedStates = 0
-                
-                // Clean progress
-                for episodeId in self.episodeProgress.keys {
-                    if !validEpisodeIds.contains(episodeId) {
-                        self.episodeProgress.removeValue(forKey: episodeId)
-                        orphanedProgress += 1
-                    }
-                }
-                
-                // Clean favorites
-                for episodeId in self.episodeFavorites.keys {
-                    if !validEpisodeIds.contains(episodeId) {
-                        self.episodeFavorites.removeValue(forKey: episodeId)
-                        orphanedFavorites += 1
-                    }
-                }
-                
-                // Clean downloads
-                for episodeId in self.episodeDownloads.keys {
-                    if !validEpisodeIds.contains(episodeId) {
-                        self.episodeDownloads.removeValue(forKey: episodeId)
-                        orphanedDownloads += 1
-                    }
-                }
-                
-                // Clean states
-                for episodeId in self.episodeStates.keys {
-                    if !validEpisodeIds.contains(episodeId) {
-                        self.episodeStates.removeValue(forKey: episodeId)
-                        orphanedStates += 1
-                    }
-                }
-                
-                if orphanedProgress > 0 || orphanedFavorites > 0 || orphanedDownloads > 0 || orphanedStates > 0 {
-                    print("🧹 ORPHAN CLEANUP: Removed orphaned states:")
-                    print("   - Progress: \(orphanedProgress)")
-                    print("   - Favorites: \(orphanedFavorites)")
-                    print("   - Downloads: \(orphanedDownloads)")
-                    print("   - States: \(orphanedStates)")
-                    print("✅ ORPHAN CLEANUP: Memory cleaned - only valid episode states remain")
-                } else {
-                    print("✅ ORPHAN CLEANUP: No orphaned states found - all episode states are valid")
-                }
-                
+                validEpisodeIds = Set(episodes.compactMap { $0.id })
             } catch {
                 print("❌ ORPHAN CLEANUP: Failed to fetch episode IDs: \(error)")
+            }
+        }
+        
+        // An empty store means Core Data was reset, not that every episode is an orphan.
+        guard !validEpisodeIds.isEmpty else {
+            print("⚠️ ORPHAN CLEANUP: No episodes in Core Data - skipping to avoid wiping recoverable state")
+            return
+        }
+        
+        print("🧹 ORPHAN CLEANUP: Found \(validEpisodeIds.count) valid episodes in Core Data")
+        
+        await MainActor.run {
+            // Keep anything the user actually did - the episode may come back on a later refresh.
+            let isOrphan: (String) -> Bool = { episodeId in
+                guard !validEpisodeIds.contains(episodeId) else { return false }
+                let hasProgress = (self.episodeProgress[episodeId] ?? 0) > 0
+                let isFavorite = self.episodeFavorites[episodeId] ?? false
+                let isDownloaded = self.episodeDownloads[episodeId] ?? false
+                let wasPlayed = self.episodeStates[episodeId] == .played
+                return !hasProgress && !isFavorite && !isDownloaded && !wasPlayed
+            }
+            
+            let before = self.episodeProgress.count + self.episodeFavorites.count
+                + self.episodeDownloads.count + self.episodeStates.count
+            
+            self.episodeProgress = self.episodeProgress.filter { !isOrphan($0.key) }
+            self.episodeFavorites = self.episodeFavorites.filter { !isOrphan($0.key) }
+            self.episodeDownloads = self.episodeDownloads.filter { !isOrphan($0.key) }
+            self.episodeStates = self.episodeStates.filter { !isOrphan($0.key) }
+            
+            let removed = before - (self.episodeProgress.count + self.episodeFavorites.count
+                + self.episodeDownloads.count + self.episodeStates.count)
+            
+            if removed > 0 {
+                print("🧹 ORPHAN CLEANUP: Removed \(removed) orphaned entries with no user data")
+            } else {
+                print("✅ ORPHAN CLEANUP: No orphaned states found - all episode states are valid")
             }
         }
     }
@@ -2706,6 +2691,19 @@ class EpisodeStateManager: ObservableObject {
     }
     
 
+    
+    /// Carry in-memory state across an episode ID rewrite (see migrateUnstableEpisodeIDs).
+    @MainActor
+    func remapEpisodeIds(_ pairs: [(old: String, new: String)]) {
+        for (old, new) in pairs {
+            if let value = episodeProgress.removeValue(forKey: old) { episodeProgress[new] = value }
+            if let value = episodeFavorites.removeValue(forKey: old) { episodeFavorites[new] = value }
+            if let value = episodeDownloads.removeValue(forKey: old) { episodeDownloads[new] = value }
+            if let value = episodeStates.removeValue(forKey: old) { episodeStates[new] = value }
+        }
+        saveCurrentStates()
+        sendImmediateUpdate()
+    }
     
     /// Get favorite state for an episode
     func isFavorite(_ episodeId: String) -> Bool {

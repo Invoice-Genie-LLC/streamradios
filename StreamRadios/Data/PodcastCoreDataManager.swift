@@ -18,122 +18,68 @@ class PodcastCoreDataManager {
     
     private init() {}
     
-    // MARK: - Fresh Install Storage
+    // MARK: - Unstable ID Migration
     
-    /// Store all podcast data efficiently for fresh install
-    func storeFreshInstallData(_ feeds: [PodcastFeed]) async throws {
-        os_log("💾 Storing fresh install data for %d feeds", log: log, type: .info, feeds.count)
-        
-        let backgroundContext = coreDataStack.newBackgroundContext()
-        backgroundContext.automaticallyMergesChangesFromParent = true
-        
-        try await backgroundContext.perform {
-            // Clear existing data first
-            try self.clearAllPodcastData(in: backgroundContext)
-            
-            // Use batch insert for maximum performance
-            try self.batchInsertFeeds(feeds, in: backgroundContext)
-            try self.batchInsertEpisodes(from: feeds, in: backgroundContext)
-            
-            // Save with proper error handling
-            try backgroundContext.save()
-            
-            os_log("✅ Successfully stored fresh install data", log: self.log, type: .info)
-        }
-    }
+    private static let idMigrationKey = "DidMigrateUnstableEpisodeIDs"
     
-    /// Clear all existing podcast data
-    private func clearAllPodcastData(in context: NSManagedObjectContext) throws {
-        // Delete episodes first (child objects)
-        let episodeDeleteRequest = NSBatchDeleteRequest(fetchRequest: PodcastModel.fetchRequest())
-        try context.execute(episodeDeleteRequest)
+    /// Episode IDs built from `String.hashValue` changed on every launch, so those episodes
+    /// re-inserted as duplicates and lost their state. Rewrite them once to the SHA-256 scheme.
+    func migrateUnstableEpisodeIDs() async {
+        let defaults = UserDefaults(suiteName: "group.streamradios") ?? .standard
+        guard !defaults.bool(forKey: Self.idMigrationKey) else { return }
         
-        // Delete feeds
-        let feedDeleteRequest = NSBatchDeleteRequest(fetchRequest: FeedModel.fetchRequest())
-        try context.execute(feedDeleteRequest)
+        let context = coreDataStack.newBackgroundContext()
+        var remapped: [(old: String, new: String)] = []
         
-        os_log("🗑️ Cleared existing podcast data", log: log, type: .debug)
-    }
-    
-    /// Batch insert feeds for optimal performance
-    private func batchInsertFeeds(_ feeds: [PodcastFeed], in context: NSManagedObjectContext) throws {
-        guard !feeds.isEmpty else { return }
-        
-        let batchInsert = NSBatchInsertRequest(entity: FeedModel.entity()) { (managedObject: NSManagedObject) -> Bool in
-            guard let feedModel = managedObject as? FeedModel else { return true }
+        await context.perform {
+            let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+            let feedUrlsById: [String: String] = ((try? context.fetch(feedRequest)) ?? [])
+                .reduce(into: [:]) { result, feed in
+                    if let id = feed.id, let url = feed.url, !url.isEmpty { result[id] = url }
+                }
             
-            var index = 0
-            defer { index += 1 }
+            let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            request.predicate = NSPredicate(format: "id BEGINSWITH %@", "det_f")
             
-            if index < feeds.count {
-                let feed = feeds[index]
-                feedModel.id = feed.id
-                feedModel.title = feed.title
-                feedModel.url = feed.url
-                feedModel.artworkUrl = feed.artworkUrl
-                feedModel.descriptionText = feed.descriptionText
-                feedModel.imageData = feed.imageData
-                feedModel.sortOrder = Int16(index)
-                return false
+            guard let legacyEpisodes = try? context.fetch(request), !legacyEpisodes.isEmpty else { return }
+            
+            let existingRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            existingRequest.propertiesToFetch = ["id"]
+            var takenIds = Set(((try? context.fetch(existingRequest)) ?? []).compactMap { $0.id })
+            
+            for episode in legacyEpisodes {
+                guard let oldId = episode.id,
+                      let feedId = episode.feedId,
+                      let feedUrl = feedUrlsById[feedId],
+                      let title = episode.title,
+                      let audioUrl = episode.audioUrl,
+                      let publicationDate = episode.publicationDate else { continue }
+                
+                let newId = PodcastEpisode.generateDeterministicID(
+                    title: title,
+                    audioUrl: audioUrl,
+                    publicationDate: publicationDate,
+                    feedUrl: feedUrl
+                )
+                
+                guard newId != oldId, !takenIds.contains(newId) else { continue }
+                
+                episode.id = newId
+                takenIds.insert(newId)
+                remapped.append((old: oldId, new: newId))
             }
-            return true
-        }
-        
-        batchInsert.resultType = NSBatchInsertRequestResultType.objectIDs
-        try context.execute(batchInsert)
-        
-        os_log("📦 Batch inserted %d feeds", log: log, type: .debug, feeds.count)
-    }
-    
-    /// Batch insert episodes with duplicate checking for optimal performance
-    private func batchInsertEpisodes(from feeds: [PodcastFeed], in context: NSManagedObjectContext) throws {
-        let allEpisodes = feeds.flatMap { feed in
-            feed.episodes.map { episode in (episode, feed.id) }
-        }
-        
-        guard !allEpisodes.isEmpty else { return }
-        
-        // CRITICAL FIX: Check for existing episodes to prevent duplicates
-        let episodeIds = allEpisodes.map { $0.0.id }
-        let existingEpisodeIds = try getExistingEpisodeIds(episodeIds: episodeIds, in: context)
-        
-        // Filter out episodes that already exist
-        let newEpisodes = allEpisodes.filter { !existingEpisodeIds.contains($0.0.id) }
-        
-        guard !newEpisodes.isEmpty else {
-            os_log("📦 No new episodes to insert - all %d episodes already exist", log: log, type: .debug, allEpisodes.count)
-            return
-        }
-        
-        // Batch insert only new episodes
-        var insertIndex = 0
-        let batchInsert = NSBatchInsertRequest(entity: PodcastModel.entity()) { (managedObject: NSManagedObject) -> Bool in
-            guard let episodeModel = managedObject as? PodcastModel else { return true }
             
-            if insertIndex < newEpisodes.count {
-                let (episode, feedId) = newEpisodes[insertIndex]
-                episodeModel.id = episode.id
-                episodeModel.title = episode.title
-                episodeModel.audioUrl = episode.audioUrl
-                episodeModel.descriptionText = episode.descriptionText
-                episodeModel.publicationDate = episode.publicationDate
-                episodeModel.duration = episode.duration
-                episodeModel.fileSize = episode.fileSize ?? 0
-                episodeModel.feedId = feedId
-                episodeModel.progress = 0.0
-                episodeModel.isPlayed = false
-                episodeModel.isFavorite = false
-                episodeModel.isDownloaded = false
-                insertIndex += 1
-                return false
+            if context.hasChanges {
+                try? context.save()
             }
-            return true
         }
         
-        batchInsert.resultType = NSBatchInsertRequestResultType.objectIDs
-        try context.execute(batchInsert)
+        if !remapped.isEmpty {
+            await EpisodeStateManager.shared.remapEpisodeIds(remapped)
+        }
         
-        os_log("📦 Batch inserted %d new episodes (skipped %d duplicates)", log: log, type: .info, newEpisodes.count, existingEpisodeIds.count)
+        defaults.set(true, forKey: Self.idMigrationKey)
+        os_log("🔧 ID MIGRATION: Rewrote %d unstable episode IDs", log: log, type: .info, remapped.count)
     }
     
     /// Get existing episode IDs for multiple episodes (batch duplicate checking)
@@ -407,17 +353,6 @@ class PodcastCoreDataManager {
                     continue
                 }
                 
-                // EPISODE ID INTEGRITY CHECK: Validate deterministic IDs match expected pattern
-                if episode.id.hasPrefix("det_f") {
-                    let expectedFeedHash = abs(feedId.lowercased().hashValue)
-                    let expectedPrefix = "det_f\(expectedFeedHash)_"
-                    if !episode.id.hasPrefix(expectedPrefix) {
-                        print("🚨 CORE DATA SAVE: Episode ID '\(episode.id)' doesn't match feed hash pattern for feed '\(feedId)'")
-                        print("🚨 Expected prefix: '\(expectedPrefix)', Episode title: '\(episode.title)'")
-                        continue // Skip contaminated episode
-                    }
-                }
-                
                 let managedEpisode = PodcastModel(context: backgroundContext)
                 var safeEpisode = episode
                 safeEpisode.feedId = feedId  // CRITICAL: Always use the correct feedId
@@ -582,13 +517,8 @@ class PodcastCoreDataManager {
                     parsedIds.insert(episode.id)
                     
                     if let existing = existingById[episode.id] {
-                        // Update existing episode while preserving download data
-                        let preservedLocalPath = existing.localFilePath
-                        let preservedFileSize = existing.fileSize
-                        existing.update(from: episode)
+                        existing.updateMetadata(from: episode)
                         existing.feedId = feedId
-                        existing.localFilePath = preservedLocalPath
-                        existing.fileSize = preservedFileSize
                         updatedCount += 1
                     } else {
                         // Insert new episode and add to tracking dictionary to prevent duplicates
@@ -611,7 +541,9 @@ class PodcastCoreDataManager {
             // Delete episodes that are no longer present in the feed
             let toDelete = existingManaged.filter { model in
                 guard let id = model.id else { return false }
-                return !parsedIds.contains(id) && !coreDataDuplicates.contains(model)  // Don't double-count duplicates
+                guard !parsedIds.contains(id), !coreDataDuplicates.contains(model) else { return false }
+                // Feeds publish a rolling window; aging out must not erase what the user did with it.
+                return !self.holdsUserData(model)
             }
             var deletedCount = 0
             for model in toDelete { 
@@ -820,6 +752,11 @@ class PodcastCoreDataManager {
         }
     }
     
+    /// True when deleting this episode would throw away something the user did.
+    private func holdsUserData(_ model: PodcastModel) -> Bool {
+        return model.progress > 0 || model.isFavorite || model.isDownloaded || model.isPlayed
+    }
+    
     /// Enforce episode limit for a feed by removing oldest episodes
     private func enforceEpisodeLimit(for feedId: String, maxEpisodes: Int, in context: NSManagedObjectContext) throws {
         // Get all episodes for this feed, sorted by publication date (newest first)
@@ -831,7 +768,7 @@ class PodcastCoreDataManager {
         
         // If we have more episodes than the limit, delete the oldest ones
         if allEpisodes.count > maxEpisodes {
-            let episodesToDelete = Array(allEpisodes.dropFirst(maxEpisodes))
+            let episodesToDelete = Array(allEpisodes.dropFirst(maxEpisodes)).filter { !holdsUserData($0) }
             
             for episode in episodesToDelete {
                 context.delete(episode)

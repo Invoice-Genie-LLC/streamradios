@@ -6,10 +6,17 @@
 //
 
 import CoreData
+import StreamRadiosKit
 
 class CoreDataStack {
     static let shared = CoreDataStack()
 
+    /// Retains the will-save observer that keeps `CDStation.searchText` current.
+    private var stationIndexObserver: NSObjectProtocol?
+
+    /// Must stay `lazy var`. Something reached from container creation calls back into
+    /// `CoreDataStack.shared`; a `let` built in `init()` deadlocks on the once-token and the
+    /// watchdog kills the app. `lazy` tolerates the re-entry, at the cost of an extra container.
     lazy var persistentContainer: NSPersistentContainer = {
         let container = NSPersistentContainer(name: "StreamRadiosModel")  // Name here should match the .xcdatamodeld file name
         
@@ -73,6 +80,10 @@ class CoreDataStack {
                 }
             }
         }
+
+        startMaintainingStationSearchIndex()
+        backfillStationSearchIndexIfNeeded(using: container)
+
         return container
     }()
 
@@ -87,6 +98,108 @@ class CoreDataStack {
         newContext.automaticallyMergesChangesFromParent = true
         newContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         return newContext
+    }
+
+    // MARK: - Station search index
+
+    /// Keeps `CDStation.searchText` in sync from a single place.
+    ///
+    /// Station writes happen at ~20 sites across RadioStationViewModel; intercepting the
+    /// context's will-save notification covers all of them, including any added later,
+    /// without touching those call sites.
+    private func startMaintainingStationSearchIndex() {
+        guard stationIndexObserver == nil else { return }
+
+        stationIndexObserver = NotificationCenter.default.addObserver(
+            forName: .NSManagedObjectContextWillSave,
+            object: nil,
+            queue: nil
+        ) { notification in
+            guard let context = notification.object as? NSManagedObjectContext else { return }
+
+            for case let station as CDStation in context.insertedObjects.union(context.updatedObjects) {
+                let expected = SRSearchNormalizer.stationIndexText(
+                    name: station.name,
+                    country: station.country
+                )
+                // Compare first: an unconditional write would dirty every object on every save.
+                if station.searchText != expected {
+                    station.searchText = expected
+                }
+            }
+        }
+    }
+
+    /// Populates the column for stations that were persisted before it existed.
+    private func backfillStationSearchIndexIfNeeded(using container: NSPersistentContainer) {
+        let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+
+        context.perform {
+            let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            request.predicate = NSPredicate(format: "searchText == nil")
+            request.fetchBatchSize = 500
+
+            do {
+                let pending = try context.fetch(request)
+                guard !pending.isEmpty else { return }
+
+                for station in pending {
+                    station.searchText = SRSearchNormalizer.stationIndexText(
+                        name: station.name,
+                        country: station.country
+                    )
+                }
+                try context.save()
+                print("CoreData: Backfilled search index for \(pending.count) stations")
+            } catch {
+                print("CoreData: Station search index backfill failed: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Store purging
+
+    /// Batch deletion frees rows but leaves their payload inside the SQLite file and its `-wal`
+    /// sidecar until a checkpoint. Reopening with `journal_mode = DELETE` forces one and drops the
+    /// sidecars. Only safe when nothing will touch Core Data afterwards.
+    func checkpointAndCompactStores() {
+        let coordinator = persistentContainer.persistentStoreCoordinator
+        for store in coordinator.persistentStores {
+            guard let url = store.url else { continue }
+            do {
+                let configuration = store.configurationName
+                try coordinator.remove(store)
+                let reopened = try coordinator.addPersistentStore(
+                    ofType: NSSQLiteStoreType,
+                    configurationName: configuration,
+                    at: url,
+                    options: [NSSQLitePragmasOption: ["journal_mode": "DELETE"]]
+                )
+                try coordinator.remove(reopened)
+                print("🗜️ CoreData: Checkpointed and compacted store \(url.lastPathComponent)")
+            } catch {
+                print("❌ CoreData: Failed to compact store \(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Deletes the SQLite file and its sidecars outright. Only safe immediately before termination.
+    func destroyStores() {
+        let coordinator = persistentContainer.persistentStoreCoordinator
+        for store in coordinator.persistentStores {
+            guard let url = store.url else { continue }
+            do {
+                try coordinator.remove(store)
+                try coordinator.destroyPersistentStore(at: url, ofType: NSSQLiteStoreType, options: nil)
+            } catch {
+                print("❌ CoreData: Failed to destroy store \(url.lastPathComponent): \(error.localizedDescription)")
+            }
+            for path in [url.path, url.path + "-wal", url.path + "-shm"] {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+            print("🗑️ CoreData: Destroyed store \(url.lastPathComponent)")
+        }
     }
 
     func saveContext() {
@@ -256,7 +369,7 @@ class CoreDataStack {
                 do {
                     let results = try backgroundContext.fetch(fetchRequest)
                     if let existingEpisode = results.first {
-                        existingEpisode.update(from: episode)
+                        existingEpisode.updateMetadata(from: episode)
                     } else {
                         let newEpisode = PodcastModel(context: backgroundContext)
                         newEpisode.update(from: episode)

@@ -6,7 +6,7 @@
 
 import Foundation
 
-struct RadioStation: Identifiable, Codable, Equatable {
+struct RadioStation: Identifiable, Codable, Equatable, Hashable {
     var id: String
     var name: String
     var url: String
@@ -19,6 +19,17 @@ struct RadioStation: Identifiable, Codable, Equatable {
     var order: Int = 0 // Order for stations in the All tab
     var lastPlayed: Date?
     var isRecent: Bool? = false
+    
+    /// True when the station carries data the user would lose forever if it were dropped.
+    /// Plain Radio Browser results are excluded — they are re-fetchable from the API, so
+    /// syncing them to the user's private iCloud database costs quota and buys nothing.
+    var isUserOwned: Bool {
+        if isFavorite || favoritedAt != nil || favoriteOrder != nil { return true }
+        if iconData != nil || iTunesArtworkData != nil { return true }
+        if lastPlayed != nil { return true }
+        if id.hasPrefix("manual_") || id.hasPrefix("import_") { return true }
+        return false
+    }
     
     enum CodingKeys: String, CodingKey {
         case id

@@ -3,11 +3,14 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		35784634DC5C44839E7A7E8C /* CarPlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */; };
+		5AB1C0DE0000000000000003 /* StreamRadiosKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5AB1C0DE0000000000000002 /* StreamRadiosKit */; };
+		5AB1C0DE0000000000000011 /* NowPlayingCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000010 /* NowPlayingCenter.swift */; };
+		5AB1C0DE0000000000000021 /* SRRadioListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000020 /* SRRadioListView.swift */; };
 		7706149B2E65F71D0022C94A /* StationSubmissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149A2E65F71D0022C94A /* StationSubmissionView.swift */; };
 		7706149D2E67DF9C0022C94A /* SyncStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149C2E67DF9C0022C94A /* SyncStateManager.swift */; };
 		7706149F2E67E16B0022C94A /* DetailedSyncProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149E2E67E16B0022C94A /* DetailedSyncProgressView.swift */; };
@@ -135,6 +138,8 @@
 
 /* Begin PBXFileReference section */
 		13EEBEE095834FD2A182D6544F831109 /* AudioSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsSheet.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000010 /* NowPlayingCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingCenter.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000020 /* SRRadioListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SRRadioListView.swift; sourceTree = "<group>"; };
 		6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayManager.swift; sourceTree = "<group>"; };
 		7706149A2E65F71D0022C94A /* StationSubmissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSubmissionView.swift; sourceTree = "<group>"; };
 		7706149C2E67DF9C0022C94A /* SyncStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStateManager.swift; sourceTree = "<group>"; };
@@ -245,6 +250,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5AB1C0DE0000000000000003 /* StreamRadiosKit in Frameworks */,
 				77F50BBE2C63BAEF00187488 /* GoogleSignInSwift in Frameworks */,
 				77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */,
 				77F50BBC2C63BAEF00187488 /* GoogleSignIn in Frameworks */,
@@ -319,6 +325,8 @@
 				7706149A2E65F71D0022C94A /* StationSubmissionView.swift */,
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
 				77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */,
+				5AB1C0DE0000000000000010 /* NowPlayingCenter.swift */,
+				5AB1C0DE0000000000000020 /* SRRadioListView.swift */,
 				7741804F2C6703FC0030B459 /* PodcastPlayer.swift */,
 				77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
@@ -490,6 +498,7 @@
 			);
 			name = StreamRadios;
 			packageProductDependencies = (
+				5AB1C0DE0000000000000002 /* StreamRadiosKit */,
 				77CC1EB42C2DBD8600F8FD5B /* Reachability */,
 				7780E9612C3CDEF2009CCF6F /* FlagKit */,
 				77F50BBB2C63BAEE00187488 /* GoogleSignIn */,
@@ -544,6 +553,7 @@
 			);
 			mainGroup = 7707DA2C2C152EF2006D5EBB;
 			packageReferences = (
+				5AB1C0DE0000000000000001 /* XCLocalSwiftPackageReference "Packages/StreamRadiosKit" */,
 				77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */,
 				7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */,
 				77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
@@ -649,6 +659,8 @@
 				35784634DC5C44839E7A7E8C /* CarPlayManager.swift in Sources */,
 				CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */,
 				77E23F4E2C90A0B300CDECD9 /* PlaybackManager.swift in Sources */,
+				5AB1C0DE0000000000000011 /* NowPlayingCenter.swift in Sources */,
+				5AB1C0DE0000000000000021 /* SRRadioListView.swift in Sources */,
 				7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */,
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
 				77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */,
@@ -745,7 +757,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -802,7 +814,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -836,12 +848,12 @@
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.4;
+				MARKETING_VERSION = 3.1.0;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -876,12 +888,12 @@
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.4;
+				MARKETING_VERSION = 3.1.0;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -982,6 +994,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		5AB1C0DE0000000000000001 /* XCLocalSwiftPackageReference "Packages/StreamRadiosKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/StreamRadiosKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1010,6 +1029,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		5AB1C0DE0000000000000002 /* StreamRadiosKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5AB1C0DE0000000000000001 /* XCLocalSwiftPackageReference "Packages/StreamRadiosKit" */;
+			productName = StreamRadiosKit;
+		};
 		7780E9612C3CDEF2009CCF6F /* FlagKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */;

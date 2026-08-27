@@ -213,13 +213,6 @@ struct ContentSubmissionView: View {
                         .fontWeight(.semibold)
                         .foregroundColor(primaryTextColor)
                 }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    
-                }
             }
         .sheet(isPresented: $showingTerms) {
             TermsAndConditionsView(showDragIndicator: true)

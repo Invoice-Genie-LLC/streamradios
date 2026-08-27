@@ -2144,18 +2144,38 @@ class PodcastCloudKitManager: ObservableObject {
         record["isPlayed"] = isPlayed as CKRecordValue
         record["lastUpdated"] = Date() as CKRecordValue
         
-        // Create CloudKit reference to the podcast feed for automatic deletion
+        // .none, not .deleteSelf: removing a feed record must never destroy the user's progress.
         let feedRecordID = CKRecord.ID(recordName: feedId)
-        let feedReference = CKRecord.Reference(recordID: feedRecordID, action: .deleteSelf)
-        record["podcastFeed"] = feedReference as CKRecordValue
+        record["podcastFeed"] = CKRecord.Reference(recordID: feedRecordID, action: .none) as CKRecordValue
         
-        // Save with proper policy
+        do {
+            try await modify(record)
+        } catch let error as CKError where error.code == .referenceViolation {
+            // Feed record isn't in CloudKit yet - the state matters more than the relationship.
+            os_log("⚠️ Feed record %@ missing - saving episode state without reference", log: log, type: .info, feedId)
+            record["podcastFeed"] = nil
+            try await modify(record)
+        }
+        
+        os_log("✅ Saved episode state to CloudKit: %@ -> %@", log: log, type: .info, episodeId, feedId)
+    }
+    
+    private func modify(_ record: CKRecord) async throws {
         let operation = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
         operation.savePolicy = .changedKeys // Only update changed fields
         operation.qualityOfService = .userInitiated
         
-        privateDatabase.add(operation)
-        os_log("✅ Saved episode state to CloudKit with feed reference: %@ -> %@", log: log, type: .info, episodeId, feedId)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            operation.modifyRecordsResultBlock = { result in
+                switch result {
+                case .success:
+                    continuation.resume()
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            privateDatabase.add(operation)
+        }
     }
     
     /// Fetch episode state from CloudKit

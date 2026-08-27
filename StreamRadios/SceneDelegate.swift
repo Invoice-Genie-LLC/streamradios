@@ -13,26 +13,23 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     // Background task for CloudKit sync continuation
     private var cloudKitSyncBackgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
-    var window: UIWindow?
-    
+    // SwiftUI's `WindowGroup` already owns this scene's window. Resolved on demand rather than
+    // stored, because SwiftUI creates it after `willConnectTo` returns.
+    private weak var windowScene: UIWindowScene?
+
+    var window: UIWindow? {
+        windowScene?.keyWindow ?? windowScene?.windows.first
+    }
+
     // PERFORMANCE: Throttling to prevent rapid successive app activation hangs
     private var lastBecameActiveTime: Date?
     private let becameActiveThrottleInterval: TimeInterval = 2.0 // Minimum 2 seconds between activations
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        // Create a SwiftUI view that provides the window contents.
-        let contentView = ContentView()
-        
-        if let urlContext = connectionOptions.urlContexts.first {
-                    handleIncomingURL(urlContext.url)
-                }
+        windowScene = scene as? UIWindowScene
 
-        // Use a UIHostingController as window root view controller.
-        if let windowScene = scene as? UIWindowScene {
-            let window = UIWindow(windowScene: windowScene)
-            window.rootViewController = UIHostingController(rootView: contentView) // Set the SwiftUI view as the root view.
-            self.window = window
-            window.makeKeyAndVisible()
+        if let urlContext = connectionOptions.urlContexts.first {
+            handleIncomingURL(urlContext.url)
         }
     }
     
@@ -107,7 +104,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             if !isPodcastPlaying && !isCarPlayConnected && !hasActivePodcastSession {
                 // 1. Force PodcastViewModel to reload on background thread (only if no podcast is playing)
                 await MainActor.run {
-                    PodcastViewModel.shared.loadFeedsFromCoreData()
+                    PodcastViewModel.shared.loadFeedsFromCoreData(coalesce: true)
                 }
             } else {
                 if isCarPlayConnected {
@@ -251,7 +248,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         (UIApplication.shared.delegate as? AppDelegate)?.updatePodcastStateAndSave()
         
         // Save Core Data context
-        (UIApplication.shared.delegate as? AppDelegate)?.saveContext()
+        CoreDataStack.shared.saveContext()
         
         // Save radio state
         RadioPlayer.shared.saveLastPlayedStation()
