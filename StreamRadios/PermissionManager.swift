@@ -48,37 +48,6 @@ class PermissionManager: ObservableObject {
         }
     }
     
-    func checkMicrophonePermission(completion: @escaping (Bool) -> Void) {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            DispatchQueue.main.async {
-                completion(true)
-            }
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                DispatchQueue.main.async {
-                    if granted {
-                        completion(true)
-                    } else {
-                        self.alertMessage = "Microphone access is needed to identify songs via Shazam. You can enable access in Settings."
-                        self.isPermissionAlertPresented = true
-                        completion(false)
-                    }
-                }
-            }
-        case .denied, .restricted:
-            DispatchQueue.main.async {
-                self.alertMessage = "Microphone access is restricted or was denied. You can enable access in Settings."
-                self.isPermissionAlertPresented = true
-                completion(false)
-            }
-        @unknown default:
-            DispatchQueue.main.async {
-                completion(false)
-            }
-        }
-    }
-    
     func openAppSettings() {
         guard let settingsUrl = URL(string: UIApplication.openSettingsURLString) else {
             return

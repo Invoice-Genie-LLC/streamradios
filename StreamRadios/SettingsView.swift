@@ -995,7 +995,6 @@ extension SettingsView {
                             CarPlay: \(getCarPlayPermission())
                             Apple Music: \(getMediaLibraryPermission()) (for Shazam saves)
                             Camera/Photos: \(getCameraPhotosPermission())
-                            Microphone: \(getMicrophonePermission()) (for Shazam)
                             Location: \(getLocationPermission())
                             """
                         )
@@ -1241,7 +1240,6 @@ extension SettingsView {
         CarPlay: \(getCarPlayPermission())
         Apple Music: \(getMediaLibraryPermission()) (for Shazam saves)
         Camera/Photos: \(getCameraPhotosPermission())
-        Microphone: \(getMicrophonePermission()) (for Shazam)
         Location: \(getLocationPermission())
         
         🚨 STACK TRACES & EXCEPTIONS
@@ -1331,7 +1329,6 @@ extension SettingsView {
         🔒 PERMISSIONS STATUS
         ──────────────────
         Notifications: \(notificationPermissionStatus)
-        Microphone: \(getMicrophonePermission())
         Apple Music: \(getMediaLibraryPermission())
         Background App Refresh: \(getBackgroundRefreshPermission())
         CarPlay: \(getCarPlayPermission())
@@ -1660,15 +1657,6 @@ extension SettingsView {
     
     private func getCameraPhotosPermission() -> String {
         return "Not Required" // Basic functionality doesn't require camera/photos
-    }
-    
-    private func getMicrophonePermission() -> String {
-        switch AVAudioSession.sharedInstance().recordPermission {
-        case .granted: return "Granted"
-        case .denied: return "Denied"
-        case .undetermined: return "Not Requested"
-        @unknown default: return "Unknown"
-        }
     }
     
     private func getLocationPermission() -> String {
