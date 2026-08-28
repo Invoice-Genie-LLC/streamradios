@@ -655,9 +655,12 @@ private struct SRStationListBody: View, Equatable {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !isEditing {
-                Button(role: .destructive) { onDelete(id) } label: {
+                // Not `role: .destructive`: SwiftUI animates the row out the moment a destructive
+                // swipe button is tapped, so cancelling the confirmation still lost the row.
+                Button { onDelete(id) } label: {
                     Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
                 }
+                .tint(.red)
             }
         }
     }

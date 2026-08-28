@@ -150,6 +150,17 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let audioSession = AVAudioSession.sharedInstance()
+                    
+                    // The session is active and routed at this point. Changing the category options
+                    // on it - .allowAirPlay in particular needs a route change - is what returns -50,
+                    // and it buys nothing since playback is already running. Only an outright wrong
+                    // category is worth correcting, and Shazam legitimately owns .playAndRecord.
+                    guard audioSession.category != .playback,
+                          audioSession.category != .playAndRecord else {
+                        print("✅ PodcastPlayer: Audio session category is fine for background (\(audioSession.category.rawValue)) - leaving it alone")
+                        return
+                    }
+                    
                     // MAIN THREAD FIX: Configure audio session on background queue to avoid IPC delays
                     try audioSession.setCategory(.playback, 
                                                mode: .default, 

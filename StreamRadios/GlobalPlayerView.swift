@@ -263,8 +263,12 @@ struct GlobalPlayerView: View {
 struct HomeButton: View {
     @Binding var isFooterMenuHidden: Bool
     @Binding var isScrolling: Bool
-    @State private var shouldShow = false
     @Environment(\.colorScheme) var colorScheme
+    
+    // The button is the only way back to the tab bar, so its visibility has to be derived from
+    // the menu state. A latched @State flag resets whenever the player is rebuilt, which stranded
+    // the user with no tab bar and no way to restore it.
+    private var shouldShow: Bool { isFooterMenuHidden || isScrolling }
     
     // Computed properties for adaptive colors
     private var iconColor: Color {
@@ -305,8 +309,7 @@ struct HomeButton: View {
     
     var body: some View {
         Group {
-            // Show button directly based on isScrolling OR shouldShow state
-            if isScrolling || shouldShow {
+            if shouldShow {
                 Button(action: {
                     print("🏠 HOME BUTTON: Tapped - forcing TabView to show")
                     // Use smooth animation for TabView restoration
@@ -314,7 +317,6 @@ struct HomeButton: View {
                         // CRITICAL: Always force TabView to show regardless of current state
                         isFooterMenuHidden = false // Show TabView when tapped
                         isScrolling = false // Stop scrolling state immediately
-                        shouldShow = false // Hide Home button only when tapped
                     }
                     
                     // SAFETY: Post notification to ensure all views reset their scrolling state
@@ -367,25 +369,9 @@ struct HomeButton: View {
                     insertion: .scale(scale: 0.3).combined(with: .opacity).combined(with: .move(edge: .leading)),
                     removal: .scale(scale: 0.8).combined(with: .opacity).combined(with: .move(edge: .leading))
                 ))
-                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: isScrolling)
             }
         }
-        // Monitor isScrolling changes and update shouldShow immediately
-        .onChange(of: isScrolling) { oldValue, newValue in
-            print("🏠 DEBUG: HomeButton onChange - oldValue: \(oldValue), newValue: \(newValue), shouldShow: \(shouldShow)")
-            if newValue {
-                // Show immediately when scrolling starts
-                shouldShow = true
-                print("🏠 DEBUG: HomeButton shouldShow set to true")
-            }
-            // Don't hide when scrolling stops - only when button is tapped
-        }
-        // Check current state on appear
-        .onAppear {
-            if isScrolling {
-                shouldShow = true
-            }
-        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: shouldShow)
     }
 }
 

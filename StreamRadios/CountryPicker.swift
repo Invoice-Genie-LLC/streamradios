@@ -273,13 +273,16 @@ struct CountryPicker: View {
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if let count = stationCount?(country.name), count > 0 {
-                Button(role: .destructive) {
+                // Not `role: .destructive`: SwiftUI animates the row out the moment a destructive
+                // swipe button is tapped, so cancelling the confirmation still lost the row.
+                Button {
                     countryToDelete = country
                     showingDeleteAlert = true
                 } label: {
                     // Icon-only: a title widens the button and iOS draws it as an ellipse.
                     Label("Delete Stations", systemImage: "trash").labelStyle(.iconOnly)
                 }
+                .tint(.red)
             }
         }
     }

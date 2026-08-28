@@ -575,7 +575,7 @@ struct PodcastListView: View {
                                 }
                                 .tint(.blue)
                                 
-                                Button(role: .destructive) {
+                                Button {
                                     print("🗑️ DELETE BUTTON TAPPED for feed: \(feed.title)")
                                     podcastToDelete = feed
                                     showingDeleteConfirmation = true
@@ -583,6 +583,7 @@ struct PodcastListView: View {
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                                .tint(.red)
                             }
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -2442,6 +2443,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     let isPlaying: Bool
     let onPlay: () -> Void
     let onStop: () -> Void
+    let onOpenNowPlaying: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
     @StateObject private var subscriptionManager = SubscriptionManager.shared
@@ -2603,12 +2605,14 @@ struct OptimizedEpisodeRowView: View, Equatable {
          isPlaying: Bool,
          onPlay: @escaping () -> Void,
          onStop: @escaping () -> Void,
+         onOpenNowPlaying: @escaping () -> Void,
          viewModel: PodcastViewModel,
          podcastPlayer: PodcastPlayer) {
         self.episode = episode
         self.isPlaying = isPlaying
         self.onPlay = onPlay
         self.onStop = onStop
+        self.onOpenNowPlaying = onOpenNowPlaying
         self.viewModel = viewModel
         self.podcastPlayer = podcastPlayer
         
@@ -3027,6 +3031,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
             .layoutPriority(1) // Give middle column flexibility
             .contentShape(Rectangle())
             .onTapGesture {
+                // Mirrors the radio list: tapping the row that is already playing opens Now
+                // Playing instead of toggling. The play button beside it still pauses.
+                guard !isPlaying else {
+                    onOpenNowPlaying()
+                    return
+                }
+
                 // Start local loading state when tapped
                 print("🎬 OPTIMIZED ROW TAP LOADING: Setting localLoadingState = true for episode: \(episode.title)")
                 localLoadingState = true
@@ -3316,6 +3327,7 @@ struct PodcastPlayerView: View {
     @State private var debounceTimer: Timer?
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showPodcastPlayerSheet = false
+    @State private var showNowPlaying = false
     
     // Simple auto-scroll state management
     @State private var hasScrolledToCurrentEpisode = false
@@ -3485,6 +3497,17 @@ struct PodcastPlayerView: View {
                                 get: { podcastPlayer.currentEpisode },
                                 set: { _ in }
                             )
+                        )
+                    }
+                }
+                .fullScreenCover(isPresented: $showNowPlaying) {
+                    if let playing = podcastPlayer.currentEpisode {
+                        PodcastPlayerSheetView(
+                            episode: playing,
+                            feed: feed,
+                            podcastPlayer: podcastPlayer,
+                            viewModel: viewModel,
+                            isPresented: $showNowPlaying
                         )
                     }
                 }
@@ -3740,6 +3763,7 @@ struct PodcastPlayerView: View {
                         playEpisode(episode)
                     },
                     onStop: { podcastPlayer.togglePlayPause() },
+                    onOpenNowPlaying: { showNowPlaying = true },
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
                 )
@@ -4733,11 +4757,12 @@ struct PodcastList: View {
                     }
                     .tint(.blue)
                     
-                    Button(role: .destructive) {
+                    Button {
                         onDelete(feed)
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .tint(.red)
                 }
             }
         }

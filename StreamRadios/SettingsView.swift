@@ -62,7 +62,9 @@ struct SettingsView: View {
     @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var isCleaningPodcasts = false
     @State private var podcastCleanupComplete = false
-    @EnvironmentObject var radioPlayer: RadioPlayer
+    // Never read here, and RadioPlayer publishes on every metadata/progress tick - observing it
+    // rebuilt this whole body throughout playback, which stuttered scrolling on the other tabs.
+    private let radioPlayer = RadioPlayer.shared
     @State private var showingSubscriptionView = false
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @State private var selectedPodcast: PodcastFeed?
@@ -73,29 +75,56 @@ struct SettingsView: View {
     @State private var selectedTab: Tab = .settings
     @State private var isPlayerSheetPresented = false
     @State private var showingDebugAlert = false
-    @State private var debugLogsContent = ""
-    @State private var showingDebugLogsView = false
     @State private var notificationPermissionStatus = "Unknown"
 
     
     // Debug counters that can be reset
     @State private var sessionStartTime = Date()
-    @State private var errorCount = 1
-    @State private var warningCount = 2
-    @State private var infoCount = 5
-    @State private var apiErrorCount = 3
-    @State private var networkErrorCount = 2
-    @State private var coreDataErrorCount = 1
     @State private var crashCount = 0
-    @State private var memoryWarningCount = 0
     @State private var recentExceptions: [ExceptionInfo] = []
     
     // Real crash data from DebugLogger
-    @ObservedObject private var debugLogger = DebugLogger.shared
-    @State private var audioSessionErrorCount = 1
-    @State private var carPlayDisconnectionCount = 2
-    @State private var playbackFailureCount = 0
-    @State private var jsonDecodeFailureCount = 1
+    // Read as a snapshot when a debug screen renders. Observing it rebuilt this body on every
+    // single log line, and playback logs constantly.
+    private let debugLogger = DebugLogger.shared
+    
+    // MARK: - Debug Counters (derived from the real log)
+    
+    private var problemEntries: [DebugLogger.LogEntry] {
+        debugLogger.logEntries.filter { $0.level == .error || $0.level == .critical }
+    }
+    
+    private func problemCount(inCategories categories: Set<String>) -> Int {
+        problemEntries.filter { categories.contains($0.category) }.count
+    }
+    
+    private var errorCount: Int { debugLogger.logEntries.filter { $0.level == .error }.count }
+    private var warningCount: Int { debugLogger.logEntries.filter { $0.level == .warning }.count }
+    private var infoCount: Int { debugLogger.logEntries.filter { $0.level == .info }.count }
+    private var apiErrorCount: Int { problemCount(inCategories: ["Network", "CloudKit", "RealtimeSync", "RadioStationCloudKit", "PodcastCloudKit"]) }
+    private var networkErrorCount: Int {
+        problemEntries.filter { $0.message.localizedCaseInsensitiveContains("timed out") || $0.message.localizedCaseInsensitiveContains("timeout") }.count
+    }
+    private var jsonDecodeFailureCount: Int {
+        problemEntries.filter { $0.message.localizedCaseInsensitiveContains("decode") }.count
+    }
+    private var coreDataErrorCount: Int { problemCount(inCategories: ["CoreData", "PodcastCoreData", "DataStore", "EpisodeManager"]) }
+    private var memoryWarningCount: Int { problemCount(inCategories: ["MemoryWarning", "MemoryPressure", "Memory"]) }
+    private var audioSessionErrorCount: Int { problemCount(inCategories: ["Audio", "AudioSession", "AudioInterruption", "BackgroundAudio", "LockScreenAudio"]) }
+    private var carPlayDisconnectionCount: Int { problemCount(inCategories: ["CarPlay", "CarPlayManager"]) }
+    private var playbackFailureCount: Int { problemCount(inCategories: ["Radio", "Podcast", "PodcastPlayer"]) }
+    private var lastProblem: DebugLogger.LogEntry? { problemEntries.max { $0.timestamp < $1.timestamp } }
+    private var lastAudioProblem: DebugLogger.LogEntry? {
+        let audioCategories: Set<String> = ["Audio", "AudioSession", "AudioInterruption", "BackgroundAudio", "LockScreenAudio", "CarPlay", "CarPlayManager", "Radio", "Podcast", "PodcastPlayer"]
+        return problemEntries.filter { audioCategories.contains($0.category) }.max { $0.timestamp < $1.timestamp }
+    }
+    
+    private func formatTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        return formatter.string(from: date)
+    }
     
     // Privacy and consent state variables
     @AppStorage("debugLoggingEnabled") private var debugLoggingEnabled = false
@@ -767,19 +796,7 @@ extension SettingsView {
             // Action Buttons
             HStack(spacing: 12) {
                 // View Logs Button
-                Button {
-                    if debugLoggingEnabled {
-                        updateNotificationPermissionStatus()
-                        // Enable battery monitoring early for accurate readings in debug logs
-                        UIDevice.current.isBatteryMonitoringEnabled = true
-                        // Give battery monitoring time to initialize accurate readings
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            showingDebugLogsView = true
-                        }
-                    } else {
-                        showingDebugEnableAlert = true
-                    }
-                } label: {
+                NavigationLink(destination: LazyDestination(debugLogsContent)) {
                     HStack(spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass")
                             .font(.body)
@@ -824,8 +841,26 @@ extension SettingsView {
         }
             .background(cardBackgroundColor)
             .cornerRadius(16)
-        .sheet(isPresented: $showingDebugLogsView) {
-            NavigationView {
+        .alert("Clear Debug Counters", isPresented: $showingDebugAlert) {
+            Button("Clear All Counters", role: .destructive) {
+                clearAllDebugCounters()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will reset all debug counters, error counts, and restart the session timer. This action cannot be undone.")
+        }
+        .alert("Enable Debug Logging", isPresented: $showingDebugEnableAlert) {
+            Button("Enable") {
+                debugLoggingEnabled = true
+                os_log("Debug logging enabled by user", log: OSLog(subsystem: "com.radio.streamradios", category: "Privacy"), type: .info)
+            }
+            Button("Keep Disabled", role: .cancel) { }
+        } message: {
+            Text("Debug logging is currently disabled. Would you like to enable it to view diagnostic information? You can always disable it later in Settings.")
+        }
+    }
+    
+    private var debugLogsContent: some View {
                 ScrollView {
                     VStack(spacing: 16) {
                         // Share Button at the top
@@ -899,8 +934,8 @@ extension SettingsView {
                             Recent API Errors: \(apiErrorCount)
                             JSON Decode Failures: \(jsonDecodeFailureCount)
                             Network Timeouts: \(networkErrorCount)
-                            Last Error: RadioBrowserAPI JSON decode failed
-                            Timestamp: \(getCurrentTimestamp())
+                            Last Error: \(lastProblem?.message ?? "None")
+                            Timestamp: \(lastProblem.map { formatTimestamp($0.timestamp) } ?? "-")
                             """
                         )
                         .padding(.horizontal, 16)
@@ -911,10 +946,9 @@ extension SettingsView {
                             icon: "externaldrive.badge.exclamationmark",
                             color: .purple,
                             content: """
-                            Save Failures: 0
-                            Fetch Errors: 0
-                            Context Issues: 0
-                            Last Successful Save: \(getCurrentTimestamp())
+                            Save Failures: \(coreDataErrorCount)
+                            Fetch Errors: \(problemCount(inCategories: ["CoreData", "PodcastCoreData"]))
+                            Context Issues: \(problemCount(inCategories: ["DataStore", "SyncState"]))
                             """
                         )
                         .padding(.horizontal, 16)
@@ -928,7 +962,7 @@ extension SettingsView {
                             Audio Session Errors: \(audioSessionErrorCount)
                             CarPlay Disconnections: \(carPlayDisconnectionCount)
                             Playback Failures: \(playbackFailureCount)
-                            Last Audio Error: CarPlay disconnect session maintenance
+                            Last Audio Error: \(lastAudioProblem?.message ?? "None")
                             """
                         )
                         .padding(.horizontal, 16)
@@ -939,11 +973,11 @@ extension SettingsView {
                             icon: "exclamationmark.warninglight",
                             color: .brown,
                             content: """
-                            Crash Reports: 0
-                            Background Task Failures: 0
-                            Launch Issues: 0
-                            Memory Warnings: 0
-                            App State: Foreground
+                            Crash Reports: \(crashCount)
+                            Background Task Failures: \(problemCount(inCategories: ["BackgroundTask", "TaskManager"]))
+                            Launch Issues: \(problemCount(inCategories: ["AppLifecycle", "SceneLifecycle", "SceneDelegate"]))
+                            Memory Warnings: \(memoryWarningCount)
+                            App Hangs: \(problemCount(inCategories: ["AppHang", "Watchdog"]))
                             """
                         )
                         .padding(.horizontal, 16)
@@ -1011,33 +1045,12 @@ extension SettingsView {
                     }
                     .padding(.top, 8)
                 }
-                .navigationTitle("Debug Logs")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Close") {
-                            showingDebugLogsView = false
-                        }
-                    }
-                }
-            }
-        }
-        .alert("Clear Debug Counters", isPresented: $showingDebugAlert) {
-            Button("Clear All Counters", role: .destructive) {
-                clearAllDebugCounters()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will reset all debug counters, error counts, and restart the session timer. This action cannot be undone.")
-        }
-        .alert("Enable Debug Logging", isPresented: $showingDebugEnableAlert) {
-            Button("Enable") {
-                debugLoggingEnabled = true
-                os_log("Debug logging enabled by user", log: OSLog(subsystem: "com.radio.streamradios", category: "Privacy"), type: .info)
-            }
-            Button("Keep Disabled", role: .cancel) { }
-        } message: {
-            Text("Debug logging is currently disabled. Would you like to enable it to view diagnostic information? You can always disable it later in Settings.")
+        .navigationTitle("Debug Logs")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            updateNotificationPermissionStatus()
+            // Battery readings stay at -1 until monitoring is switched on.
+            UIDevice.current.isBatteryMonitoringEnabled = true
         }
         .alert("Data Sharing Required", isPresented: $showingPrivacyConsentAlert) {
             Button("Allow Sharing") {
@@ -1060,36 +1073,15 @@ extension SettingsView {
         // Reset session timer
         sessionStartTime = Date()
         
-        // Clear all DebugLogger data
+        // Every counter is derived from the log, so clearing it zeroes them all.
         DebugLogger.clearAllLogs()
-        
-        // Reset all error counters
-        errorCount = 0
-        warningCount = 0
-        infoCount = 0
-        apiErrorCount = 0
-        networkErrorCount = 0
-        coreDataErrorCount = 0
         crashCount = 0
-        memoryWarningCount = 0
         
         // Clear exception history
         recentExceptions.removeAll()
         
-        // Reset audio and player error counters
-        audioSessionErrorCount = 0
-        carPlayDisconnectionCount = 0
-        playbackFailureCount = 0
-        jsonDecodeFailureCount = 0
-        
         print("🧹 All debug counters and timers have been reset")
         print("📊 Session timer restarted")
-        print("🔢 Error counters cleared: API(\(apiErrorCount)), Network(\(networkErrorCount)), Core Data(\(coreDataErrorCount))")
-        print("⚠️ Warning/Error logs reset: Errors(\(errorCount)), Warnings(\(warningCount)), Info(\(infoCount))")
-        print("💥 Crash and memory counters reset: Crashes(\(crashCount)), Memory Warnings(\(memoryWarningCount))")
-        print("🚨 Exception history cleared: \(recentExceptions.count) exceptions removed")
-        print("🔊 Audio/Player counters reset: Audio(\(audioSessionErrorCount)), CarPlay(\(carPlayDisconnectionCount)), Playback(\(playbackFailureCount))")
-        print("📡 Network decode counters reset: JSON Failures(\(jsonDecodeFailureCount))")
     }
     
     private func shareDebugLogs() {
@@ -1543,10 +1535,7 @@ extension SettingsView {
     
     private func getBatteryState() -> String {
         // Ensure battery monitoring is enabled for accurate readings
-        if !UIDevice.current.isBatteryMonitoringEnabled {
-            UIDevice.current.isBatteryMonitoringEnabled = true
-            Thread.sleep(forTimeInterval: 0.05)
-        }
+        UIDevice.current.isBatteryMonitoringEnabled = true
         
         switch UIDevice.current.batteryState {
         case .unknown: return "Unknown"
@@ -1563,27 +1552,12 @@ extension SettingsView {
             return "Simulated (N/A)"
         }
         
-        // Force a fresh battery reading by disabling and re-enabling monitoring
-        UIDevice.current.isBatteryMonitoringEnabled = false
+        // These getters run while the view is being built, so they must not sleep the main thread.
+        // Monitoring is switched on when the screen appears, which is what makes the level valid.
         UIDevice.current.isBatteryMonitoringEnabled = true
         
-        // Give the system time to update with fresh battery data
-        Thread.sleep(forTimeInterval: 0.2)
-        
         let batteryLevel = UIDevice.current.batteryLevel
-        if batteryLevel < 0 {
-            // Try once more with a longer delay if we get an invalid reading
-            Thread.sleep(forTimeInterval: 0.3)
-            let refreshedLevel = UIDevice.current.batteryLevel
-            
-            if refreshedLevel < 0 {
-                return "Unknown"
-            }
-            
-            // Use proper rounding for accurate percentage
-            let percentage = round(refreshedLevel * 100)
-            return "\(Int(percentage))%"
-        }
+        guard batteryLevel >= 0 else { return "Unknown" }
         
         // Use proper rounding for accurate percentage
         let percentage = round(batteryLevel * 100)
@@ -1595,12 +1569,7 @@ extension SettingsView {
             return "N/A (Simulator)"
         }
         
-        // Force a fresh battery reading by disabling and re-enabling monitoring
-        UIDevice.current.isBatteryMonitoringEnabled = false
         UIDevice.current.isBatteryMonitoringEnabled = true
-        
-        // Give the system time to update with fresh battery data
-        Thread.sleep(forTimeInterval: 0.2)
         
         let batteryLevel = UIDevice.current.batteryLevel
         if batteryLevel < 0 {
@@ -3807,6 +3776,19 @@ struct ModernProgressView: View {
                 .fill(colorScheme == .dark ? Color.gray.opacity(0.1) : Color.gray.opacity(0.05))
         )
     }
+}
+
+/// Defers building the destination until it is actually pushed.
+/// `NavigationLink(destination:)` constructs its destination eagerly, so a screen whose content
+/// is assembled from expensive lookups would run all of them on every parent body evaluation.
+struct LazyDestination<Content: View>: View {
+    private let build: () -> Content
+    
+    init(_ build: @autoclosure @escaping () -> Content) {
+        self.build = build
+    }
+    
+    var body: Content { build() }
 }
 
 struct DebugInfoCard: View {

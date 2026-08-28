@@ -2,8 +2,6 @@ import SwiftUI
 
 struct AboutView: View {
     @Environment(\.colorScheme) var colorScheme
-    @State private var showTerms = false
-    @State private var showPrivacy = false
     
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
@@ -28,9 +26,9 @@ struct AboutView: View {
             // Content
             VStack(spacing: 0) {
                 // Terms and Conditions Row
-                Button(action: {
-                    showTerms = true
-                }) {
+                NavigationLink {
+                    TermsAndConditionsView()
+                } label: {
                     HStack {
                         Text("Terms and Conditions")
                             .font(.body)
@@ -56,9 +54,9 @@ struct AboutView: View {
                     .padding(.leading, 16)
                 
                 // Privacy Policy Row
-                Button(action: {
-                    showPrivacy = true
-                }) {
+                NavigationLink {
+                    PrivacyPolicyView()
+                } label: {
                     HStack {
                         Text("Privacy policy")
                             .font(.body)
@@ -109,16 +107,6 @@ struct AboutView: View {
         .background(backgroundColor)
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showTerms) {
-            NavigationView {
-                TermsAndConditionsView()
-            }
-        }
-        .sheet(isPresented: $showPrivacy) {
-            NavigationView {
-                PrivacyPolicyView()
-            }
-        }
     }
 }
 

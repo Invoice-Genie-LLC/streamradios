@@ -1724,12 +1724,21 @@ struct YouTubeWebView: UIViewRepresentable {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 * { margin: 0; padding: 0; }
-                body { background: #000; overflow: hidden; }
+                html, body { height: 100%; }
+                body {
+                    background: #000;
+                    overflow: hidden;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                /* Sizing off the height keeps the player inside the fixed frame. Deriving it from
+                   the width instead overflowed on iPad and clipped the play button away. */
                 .video-container {
                     position: relative;
-                    width: 100%;
-                    padding-bottom: 56.25%;
-                    height: 0;
+                    height: 100%;
+                    aspect-ratio: 16 / 9;
+                    max-width: 100%;
                     border-radius: 12px;
                     overflow: hidden;
                 }
@@ -1739,6 +1748,7 @@ struct YouTubeWebView: UIViewRepresentable {
                     left: 0;
                     width: 100%;
                     height: 100%;
+                    border: none;
                     border-radius: 12px;
                 }
             </style>

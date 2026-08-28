@@ -380,25 +380,48 @@ class DebugLogger: ObservableObject {
     }
     
     private func setupWatchdogTimer() {
-        // Set up a watchdog timer to detect app hangs
         let watchdogQueue = DispatchQueue(label: "com.streamradios.watchdog", qos: .utility)
+        let heartbeatLock = NSLock()
         var lastHeartbeat = Date()
         
-        // Heartbeat on main queue
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            lastHeartbeat = Date()
+        DispatchQueue.main.async {
+            // .common mode: a default-mode timer stops firing during scroll tracking, which the
+            // watchdog cannot tell apart from a hang.
+            let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
+                heartbeatLock.lock()
+                lastHeartbeat = Date()
+                heartbeatLock.unlock()
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            
+            // Timers are frozen while the app is suspended, so the wall-clock gap measured on the
+            // first tick after resume is not a hang.
+            NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+                heartbeatLock.lock()
+                lastHeartbeat = Date()
+                heartbeatLock.unlock()
+            }
         }
+        DebugLogger.startAppStateTracking()
         
-        // Watchdog check on background queue
         watchdogQueue.async {
+            var reportedCurrentHang = false
             while true {
                 Thread.sleep(forTimeInterval: 5.0)
+                heartbeatLock.lock()
                 let timeSinceHeartbeat = Date().timeIntervalSince(lastHeartbeat)
+                heartbeatLock.unlock()
                 
-                if timeSinceHeartbeat > 8.0 { // 8 seconds without heartbeat
-                    DebugLogger.logCritical("App hang detected - no heartbeat for \(timeSinceHeartbeat) seconds", category: "Watchdog")
-                    self.persistLogsImmediately()
+                guard timeSinceHeartbeat > 8.0, DebugLogger.appIsActive else {
+                    reportedCurrentHang = false
+                    continue
                 }
+                // Report each hang once - re-logging every 5s buries the real event and the
+                // immediate persist adds file I/O while the main thread is already stuck.
+                guard !reportedCurrentHang else { continue }
+                reportedCurrentHang = true
+                DebugLogger.logCritical("App hang detected - no heartbeat for \(String(format: "%.1f", timeSinceHeartbeat)) seconds", category: "Watchdog")
+                self.persistLogsImmediately()
             }
         }
     }
@@ -663,6 +686,15 @@ class DebugLogger: ObservableObject {
         // Default mode stops firing during scroll tracking, which reads as a permanent hang.
         RunLoop.main.add(heartbeat, forMode: .common)
         
+        // Timers are frozen while the app is suspended, so the wall-clock gap measured on the
+        // first tick after resume is not a hang.
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            activityLock.lock()
+            lastMainThreadActivity = Date()
+            activityLock.unlock()
+        }
+        startAppStateTracking()
+        
         // Monitor from background
         monitorQueue.async {
             var reportedCurrentHang = false
@@ -672,7 +704,7 @@ class DebugLogger: ObservableObject {
                 let timeSinceActivity = Date().timeIntervalSince(lastMainThreadActivity)
                 activityLock.unlock()
                 
-                if timeSinceActivity > 5.0 {
+                if timeSinceActivity > 5.0 && appIsActive {
                     // Report each hang once - re-logging every second buries the real event and
                     // the immediate log persist adds I/O while the main thread is already stuck.
                     if !reportedCurrentHang {
@@ -683,6 +715,44 @@ class DebugLogger: ObservableObject {
                     reportedCurrentHang = false
                 }
             }
+        }
+    }
+    
+    // MARK: - App Activity State
+    
+    private static let appStateLock = NSLock()
+    private static var appIsActiveStorage = true
+    private static var appStateObserversInstalled = false
+    
+    /// Hang detection is only meaningful while the app is foreground-active: a suspended app
+    /// simply stops ticking, and that gap is indistinguishable from a blocked main thread.
+    static var appIsActive: Bool {
+        appStateLock.lock()
+        defer { appStateLock.unlock() }
+        return appIsActiveStorage
+    }
+    
+    static func startAppStateTracking() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { startAppStateTracking() }
+            return
+        }
+        guard !appStateObserversInstalled else { return }
+        appStateObserversInstalled = true
+        
+        appStateLock.lock()
+        appIsActiveStorage = UIApplication.shared.applicationState == .active
+        appStateLock.unlock()
+        
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            appStateLock.lock()
+            appIsActiveStorage = true
+            appStateLock.unlock()
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+            appStateLock.lock()
+            appIsActiveStorage = false
+            appStateLock.unlock()
         }
     }
     

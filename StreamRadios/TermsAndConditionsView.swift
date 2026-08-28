@@ -52,6 +52,41 @@ struct TermsAndConditionsView: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    // Subscription Section - kept first, and in sync with
+                    // https://autoforms.github.io/streamradios/terms.html, because App Review
+                    // reaches this screen from the paywall to check the auto-renewal disclosures.
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Subscriptions, Free Trial and Payments")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(primaryTextColor)
+                        
+                        Text("StreamRadios offers the following purchases through the Apple App Store:\n\n• StreamRadios Pro — $9.99 per year, an auto-renewable subscription with a 7-day free trial for new subscribers\n• Lifetime Access — $29.99, a one-time, non-renewing purchase\n\nPrices are in U.S. dollars and may vary by storefront. The price shown at the point of purchase in the app is the price that applies to you.")
+                            .font(.body)
+                            .foregroundColor(secondaryTextColor)
+                            .lineSpacing(4)
+                        
+                        Text("Billing and Automatic Renewal")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(primaryTextColor)
+                        
+                        Text("• Payment is charged to your Apple Account at confirmation of purchase.\n• The subscription renews automatically for the same period at the same price unless auto-renew is turned off at least 24 hours before the end of the current period.\n• Your Apple Account is charged for renewal within 24 hours prior to the end of the current period.\n• You can manage your subscription and turn off auto-renewal in your device's Settings under your Apple Account subscriptions, at any time after purchase.\n• Any unused portion of a free trial is forfeited when you purchase a subscription.\n• Deleting the app does not cancel a subscription; you must cancel through your Apple Account.")
+                            .font(.body)
+                            .foregroundColor(secondaryTextColor)
+                            .lineSpacing(4)
+                        
+                        Text("Refunds")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(primaryTextColor)
+                        
+                        Text("Purchases are processed by Apple, and refunds are handled by Apple according to its policies. StreamRadios cannot issue refunds directly. Refund requests can be submitted at reportaproblem.apple.com.")
+                            .font(.body)
+                            .foregroundColor(secondaryTextColor)
+                            .lineSpacing(4)
+                    }
+                    
                     // Platform Access Section
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Platform Access and User Responsibilities")
@@ -141,7 +176,7 @@ struct TermsAndConditionsView: View {
                             .fontWeight(.semibold)
                             .foregroundColor(primaryTextColor)
                         
-                        Text("StreamRadios available through Apple's App Store is governed by this agreement between you and StreamRadios only. Apple is not a party to these terms and has no responsibility for our application or its content.\n\nApple provides no technical support, maintenance, or warranties for StreamRadios. If you experience technical issues, contact StreamRadios directly. Apple's only obligation is to refund purchase prices for defective applications when notified.\n\nApple is not liable for any claims related to StreamRadios including:\n\n• Product defects or consumer protection violations\n• Failure to meet local regulatory requirements\n• Intellectual property disputes\n\nUsers must comply with Apple's App Store terms of service when using StreamRadios on iOS devices.")
+                        Text("StreamRadios available through Apple's App Store is governed by this agreement between you and StreamRadios only. Apple is not a party to these terms and has no responsibility for our application or its content.\n\nApple provides no technical support, maintenance, or warranties for StreamRadios. If you experience technical issues, contact StreamRadios directly. Apple's only obligation is to refund purchase prices for defective applications when notified.\n\nApple is not liable for any claims related to StreamRadios including:\n\n• Product defects or consumer protection violations\n• Failure to meet local regulatory requirements\n• Intellectual property disputes\n\nApple and its subsidiaries are third-party beneficiaries of this agreement and, upon your acceptance, have the right to enforce it against you. Users must comply with Apple's App Store terms of service when using StreamRadios on iOS devices.")
                             .font(.body)
                             .foregroundColor(secondaryTextColor)
                             .lineSpacing(4)

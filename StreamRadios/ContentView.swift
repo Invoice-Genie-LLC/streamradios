@@ -576,36 +576,44 @@ struct ContentView: View {
     /// Updates tab bar visibility using UIKit with enhanced animations
     private func updateTabBarVisibility() {
         DispatchQueue.main.async {
-            // Find the UITabBarController
-            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let window = windowScene.windows.first,
-                  let rootViewController = window.rootViewController else {
+            guard let tabBarController = self.findAppTabBarController() else {
                 return
             }
             
-            // Find the tab bar controller in the view hierarchy
-            if let tabBarController = findTabBarController(in: rootViewController) {
-                // Enhanced animation with spring effect for smoother feel
-                UIView.animate(
-                    withDuration: 0.4,
-                    delay: 0,
-                    usingSpringWithDamping: 0.8,
-                    initialSpringVelocity: 0.5,
-                    options: [.allowUserInteraction, .beginFromCurrentState],
-                    animations: {
-                        tabBarController.tabBar.isHidden = self.isFooterMenuHidden
-                        
-                        // Add subtle transform for extra visual feedback
-                        if self.isFooterMenuHidden {
-                            tabBarController.tabBar.transform = CGAffineTransform(translationX: 0, y: 10)
-                        } else {
-                            tabBarController.tabBar.transform = .identity
-                        }
-                    },
-                    completion: nil
-                )
-            }
+            // Enhanced animation with spring effect for smoother feel
+            UIView.animate(
+                withDuration: 0.4,
+                delay: 0,
+                usingSpringWithDamping: 0.8,
+                initialSpringVelocity: 0.5,
+                options: [.allowUserInteraction, .beginFromCurrentState],
+                animations: {
+                    tabBarController.tabBar.isHidden = self.isFooterMenuHidden
+                    
+                    // Add subtle transform for extra visual feedback
+                    if self.isFooterMenuHidden {
+                        tabBarController.tabBar.transform = CGAffineTransform(translationX: 0, y: 10)
+                    } else {
+                        tabBarController.tabBar.transform = .identity
+                    }
+                },
+                completion: nil
+            )
         }
+    }
+    
+    /// Locates the app's tab bar controller.
+    /// `connectedScenes` is an unordered Set and includes the CarPlay scene, so taking `.first`
+    /// intermittently resolved to the wrong scene and the tab bar was never shown again.
+    private func findAppTabBarController() -> UITabBarController? {
+        let keyWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+        
+        guard let rootViewController = keyWindow?.rootViewController else { return nil }
+        return findTabBarController(in: rootViewController)
     }
     
     /// Recursively finds UITabBarController in view hierarchy
@@ -1040,8 +1048,10 @@ struct ContentView: View {
                 isFooterMenuHidden = false
                 isScrolling = false
             }
-            updateTabBarVisibility()
         }
+        // Re-apply unconditionally: the UIKit bar can be left hidden by a TabView rebuild even
+        // when the state already says it should be visible, and nothing else would correct it.
+        updateTabBarVisibility()
     }
     
     private func checkAndStartDataSync() {

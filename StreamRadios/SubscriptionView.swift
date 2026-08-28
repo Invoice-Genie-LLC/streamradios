@@ -60,52 +60,27 @@ struct SubscriptionView: View {
                     .padding(.horizontal, 24)
                     .padding(.vertical, 32)
                 }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // Full screen cover has no swipe-to-dismiss, so the close button is the only way out.
-                // It stays hidden for the launch paywall (showManagementScreen == false) of an
-                // unsubscribed user, which is a hard gate by design.
-                if subscriptionManager.isSubscribedOrInTrial || showManagementScreen {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            // The gradient background suppresses the automatic toolbar glass, so the
-                            // circle is drawn explicitly to match the rest of the app's back buttons.
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.2, green: 0.2, blue: 0.2))
-                                .frame(width: 32, height: 32)
-                                .background(
-                                    Circle()
-                                        .fill(.ultraThinMaterial)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.35), lineWidth: 0.5)
-                                        )
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Back")
+                .safeAreaInset(edge: .top) {
+                    // Full screen cover has no swipe-to-dismiss, so this is the only way out. It
+                    // stays hidden for the launch paywall (showManagementScreen == false) of an
+                    // unsubscribed user, which is a hard gate by design.
+                    if subscriptionManager.isSubscribedOrInTrial || showManagementScreen {
+                        header
                     }
                 }
+            }
+            .navigationBarHidden(true)
+            .navigationDestination(isPresented: $showTerms) {
+                TermsAndConditionsView()
+            }
+            .navigationDestination(isPresented: $showPrivacy) {
+                PrivacyPolicyView()
             }
         }
         .alert("Subscription", isPresented: $showingAlert) {
             Button("OK") {}
         } message: {
             Text(alertMessage)
-        }
-        .sheet(isPresented: $showTerms) {
-            NavigationView {
-                TermsAndConditionsView()
-            }
-        }
-        .sheet(isPresented: $showPrivacy) {
-            NavigationView {
-                PrivacyPolicyView()
-            }
         }
         .onAppear {
             // Check subscription status when view appears to update trial expiration
@@ -126,6 +101,30 @@ struct SubscriptionView: View {
                 dismiss()
             }
         }
+    }
+    
+    // MARK: - Header
+    
+    private var header: some View {
+        HStack(spacing: 10) {
+            Button {
+                dismiss()
+            } label: {
+                // Deliberately outside the toolbar: iOS 26 draws its own opaque item background
+                // behind bar buttons, and that squircle is what kept showing instead of this.
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back")
+            
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
     
     // MARK: - Color Scheme Helpers
