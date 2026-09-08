@@ -2,6 +2,42 @@ import Foundation
 import CoreData
 import OSLog
 
+actor EpisodeWriteCoordinator {
+    static let shared = EpisodeWriteCoordinator()
+
+    private var activeFeedIds = Set<String>()
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    func perform<T>(for feedId: String, operation: () async throws -> T) async rethrows -> T {
+        await acquire(feedId)
+        defer { release(feedId) }
+        return try await operation()
+    }
+
+    private func acquire(_ feedId: String) async {
+        guard activeFeedIds.contains(feedId) else {
+            activeFeedIds.insert(feedId)
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters[feedId, default: []].append(continuation)
+        }
+    }
+
+    private func release(_ feedId: String) {
+        guard var feedWaiters = waiters[feedId], !feedWaiters.isEmpty else {
+            waiters.removeValue(forKey: feedId)
+            activeFeedIds.remove(feedId)
+            return
+        }
+
+        let next = feedWaiters.removeFirst()
+        waiters[feedId] = feedWaiters.isEmpty ? nil : feedWaiters
+        next.resume()
+    }
+}
+
 /// Enhanced Core Data manager specifically for podcast operations with optimal performance
 class PodcastCoreDataManager {
     static let shared = PodcastCoreDataManager()
@@ -83,9 +119,12 @@ class PodcastCoreDataManager {
     }
     
     /// Get existing episode IDs for multiple episodes (batch duplicate checking)
-    private func getExistingEpisodeIds(episodeIds: [String], in context: NSManagedObjectContext) throws -> Set<String> {
+    private func getExistingEpisodeIds(episodeIds: [String], feedId: String, in context: NSManagedObjectContext) throws -> Set<String> {
         let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        request.predicate = NSPredicate(format: "id IN %@", episodeIds)
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "feedId == %@", feedId),
+            NSPredicate(format: "id IN %@", episodeIds)
+        ])
         request.propertiesToFetch = ["id"]
         request.resultType = .managedObjectResultType
         
@@ -183,10 +222,6 @@ class PodcastCoreDataManager {
                 print("🚨 CONTAMINATED EPISODE: '\(episode.title)' has feedId '\(episode.feedId)' but was fetched for feed '\(feedId)'")
             }
             
-            // Trigger immediate Core Data cleanup for this feed
-            Task.detached(priority: .background) {
-                await self.cleanupContaminatedEpisodes(targetFeedId: feedId, contaminatedEpisodes: contaminatedEpisodes)
-            }
         }
         
         return validEpisodes
@@ -322,6 +357,12 @@ class PodcastCoreDataManager {
     
     /// Add new episodes to existing feed (for pull-to-refresh)
     func addNewEpisodes(_ episodes: [PodcastEpisode], to feedId: String) async throws {
+        try await EpisodeWriteCoordinator.shared.perform(for: feedId) {
+            try await self.addNewEpisodesWhileHoldingLock(episodes, to: feedId)
+        }
+    }
+
+    private func addNewEpisodesWhileHoldingLock(_ episodes: [PodcastEpisode], to feedId: String) async throws {
         guard !episodes.isEmpty else { return }
         
         let backgroundContext = coreDataStack.newBackgroundContext()
@@ -348,16 +389,13 @@ class PodcastCoreDataManager {
                 }
                 
                 // ENHANCED SAFETY CHECK: Ensure episode belongs to this feed
-                if !episode.feedId.isEmpty && episode.feedId != feedId {
+                if episode.feedId != feedId {
                     print("🚨 EPISODE FEEDID MISMATCH: Episode feedId='\(episode.feedId)' but adding to feed='\(feedId)'")
                     continue
                 }
                 
                 let managedEpisode = PodcastModel(context: backgroundContext)
-                var safeEpisode = episode
-                safeEpisode.feedId = feedId  // CRITICAL: Always use the correct feedId
-                managedEpisode.update(from: safeEpisode)
-                managedEpisode.feedId = feedId  // Double-ensure the feedId is correct
+                managedEpisode.update(from: episode)
             }
             
             try backgroundContext.save()
@@ -370,11 +408,22 @@ class PodcastCoreDataManager {
     /// - Upserts parsed episodes and deletes any that are no longer present in the feed
     /// - Uses optimized processing to prevent duplicates and avoid main thread blocking
     func reconcileEpisodes(for feedId: String, parsedEpisodes: [PodcastEpisode], maxEpisodes: Int? = nil) async throws {
+        try await EpisodeWriteCoordinator.shared.perform(for: feedId) {
+            try await self.reconcileEpisodesWhileHoldingLock(for: feedId, parsedEpisodes: parsedEpisodes, maxEpisodes: maxEpisodes)
+        }
+    }
+
+    private func reconcileEpisodesWhileHoldingLock(for feedId: String, parsedEpisodes: [PodcastEpisode], maxEpisodes: Int? = nil) async throws {
         // CRITICAL: Check for user scrolling and abort reconciliation if detected
         let isScrolling = UserDefaults.standard.bool(forKey: "isUserScrolling")
         if isScrolling {
             os_log("🚫 User is scrolling - aborting episode reconciliation to maintain UI responsiveness", log: self.log, type: .info)
             throw CancellationError()
+        }
+
+        guard parsedEpisodes.allSatisfy({ $0.feedId == feedId }) else {
+            os_log("🚫 Reconciliation rejected because parsed episodes do not all belong to feed %@", log: log, type: .error, feedId)
+            throw CoreDataError.invalidEpisodeOwnership
         }
         
         // Ensure all episodes have unique IDs to prevent duplicates from the start
@@ -681,6 +730,12 @@ class PodcastCoreDataManager {
     
     /// Reconcile only new episodes for quick refresh performance with episode limit enforcement
     func reconcileNewEpisodes(for feedId: String, newEpisodes: [PodcastEpisode], maxEpisodes: Int? = nil) async throws {
+        try await EpisodeWriteCoordinator.shared.perform(for: feedId) {
+            try await self.reconcileNewEpisodesWhileHoldingLock(for: feedId, newEpisodes: newEpisodes, maxEpisodes: maxEpisodes)
+        }
+    }
+
+    private func reconcileNewEpisodesWhileHoldingLock(for feedId: String, newEpisodes: [PodcastEpisode], maxEpisodes: Int? = nil) async throws {
         guard !newEpisodes.isEmpty else { return }
         
         let backgroundContext = coreDataStack.newBackgroundContext()
@@ -688,7 +743,7 @@ class PodcastCoreDataManager {
         try await backgroundContext.perform {
             // Check which episodes are actually new
             let episodeIds = newEpisodes.map { $0.id }
-            let existingEpisodeIds = try self.getExistingEpisodeIds(episodeIds: episodeIds, in: backgroundContext)
+            let existingEpisodeIds = try self.getExistingEpisodeIds(episodeIds: episodeIds, feedId: feedId, in: backgroundContext)
             let trulyNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
             
             guard !trulyNewEpisodes.isEmpty else {
@@ -700,6 +755,12 @@ class PodcastCoreDataManager {
             var addedCount = 0
             var rejectedCount = 0
             for episode in trulyNewEpisodes {
+                guard episode.feedId == feedId else {
+                    os_log("🚫 QUICK RECONCILE REJECTED: Episode %@ belongs to a different feed", log: self.log, type: .error, episode.id)
+                    rejectedCount += 1
+                    continue
+                }
+
                 // 🚨 COMPREHENSIVE VALIDATION: Reject episodes with ANY empty/invalid required fields
                 let trimmedId = episode.id.trimmingCharacters(in: .whitespacesAndNewlines)
                 let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -819,40 +880,6 @@ class PodcastCoreDataManager {
         }
     }
     
-    /// Clean up contaminated episodes in Core Data
-    private func cleanupContaminatedEpisodes(targetFeedId: String, contaminatedEpisodes: [PodcastEpisode]) async {
-        let backgroundContext = coreDataStack.newBackgroundContext()
-        
-        await backgroundContext.perform {
-            do {
-                print("🧹 CLEANUP: Starting Core Data cleanup for \(contaminatedEpisodes.count) contaminated episodes")
-                
-                for episode in contaminatedEpisodes {
-                    // Find the contaminated episode in Core Data
-                    let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                    request.predicate = NSPredicate(format: "id == %@", episode.id)
-                    
-                    let results = try backgroundContext.fetch(request)
-                    for managedEpisode in results {
-                        if managedEpisode.feedId != targetFeedId {
-                            print("🧹 CLEANUP: Correcting episode '\(episode.title)' feedId from '\(managedEpisode.feedId ?? "nil")' to '\(episode.feedId)'")
-                            managedEpisode.feedId = episode.feedId
-                        }
-                    }
-                }
-                
-                // Save the corrections
-                if backgroundContext.hasChanges {
-                    try backgroundContext.save()
-                    print("🧹 CLEANUP: Successfully corrected contaminated episodes in Core Data")
-                }
-                
-            } catch {
-                print("❌ CLEANUP ERROR: Failed to clean contaminated episodes: \(error)")
-            }
-        }
-    }
-    
     /// Delete corrupted episodes with empty titles from Core Data
     private func deleteCorruptedEpisodes(feedId: String, corruptedEpisodeIds: [String]) async {
         let backgroundContext = coreDataStack.newBackgroundContext()
@@ -931,4 +958,5 @@ enum CoreDataError: Error {
     case feedNotFound
     case batchInsertFailed
     case contextSaveFailed
+    case invalidEpisodeOwnership
 }

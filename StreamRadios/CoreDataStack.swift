@@ -13,11 +13,23 @@ class CoreDataStack {
 
     /// Retains the will-save observer that keeps `CDStation.searchText` current.
     private var stationIndexObserver: NSObjectProtocol?
+    private let persistentContainerLock = NSRecursiveLock()
+    private var storedPersistentContainer: NSPersistentContainer?
+    private var isPersistentStoreLoaded = false
+    private var persistentStoreWaiters: [(NSPersistentContainer) -> Void] = []
 
-    /// Must stay `lazy var`. Something reached from container creation calls back into
-    /// `CoreDataStack.shared`; a `let` built in `init()` deadlocks on the once-token and the
-    /// watchdog kills the app. `lazy` tolerates the re-entry, at the cost of an extra container.
-    lazy var persistentContainer: NSPersistentContainer = {
+    /// Publish one configured container before loading its store so recursive access can safely
+    /// reuse it and concurrent startup work cannot create multiple coordinators for the same file.
+    /// The lock must not cover `loadPersistentStores`: its callbacks can re-enter app startup on
+    /// another thread, which would deadlock the main thread while it waits for this getter.
+    var persistentContainer: NSPersistentContainer {
+        persistentContainerLock.lock()
+
+        if let storedPersistentContainer {
+            persistentContainerLock.unlock()
+            return storedPersistentContainer
+        }
+
         let container = NSPersistentContainer(name: "StreamRadiosModel")  // Name here should match the .xcdatamodeld file name
         
         // Configure the container to use the app group for data sharing between main app and CarPlay
@@ -37,6 +49,9 @@ class CoreDataStack {
         storeDescription.shouldMigrateStoreAutomatically = true
         storeDescription.shouldInferMappingModelAutomatically = true
         container.persistentStoreDescriptions = [storeDescription]
+
+        storedPersistentContainer = container
+        persistentContainerLock.unlock()
         
         container.loadPersistentStores { (storeDescription, error) in
             print("CoreData: Loaded store at \(storeDescription.url?.absoluteString ?? "Unknown URL")")
@@ -68,6 +83,8 @@ class CoreDataStack {
                             fatalError("Unresolved CoreData error after recreation: \(newError), \(newError.userInfo)")
                         } else {
                             print("CoreData: Successfully recreated store at \(newStoreDescription.url?.absoluteString ?? "Unknown URL")")
+                            self.finishPersistentStoreLoad(using: container)
+                            self.backfillStationSearchIndexIfNeeded(using: container)
                             
                             // CRITICAL: Notify EpisodeStateManager that Core Data has been recreated
                             // This allows it to restore data from backups
@@ -78,26 +95,66 @@ class CoreDataStack {
                 } else {
                     fatalError("Unresolved CoreData error \(error), \(error.userInfo)")
                 }
+            } else {
+                self.finishPersistentStoreLoad(using: container)
+                self.backfillStationSearchIndexIfNeeded(using: container)
             }
         }
 
         startMaintainingStationSearchIndex()
-        backfillStationSearchIndexIfNeeded(using: container)
 
         return container
-    }()
+    }
 
     var context: NSManagedObjectContext {
         return persistentContainer.viewContext
     }
     
     func newBackgroundContext() -> NSManagedObjectContext {
-        // Create independent background context connected directly to persistent store coordinator
-        // This avoids parent-child threading issues and provides better performance
-        let newContext = persistentContainer.newBackgroundContext()
+        let container = persistentContainer
+        return makeBackgroundContext(using: container)
+    }
+
+    func newBackgroundContextAfterStoreLoad() async -> NSManagedObjectContext {
+        await withCheckedContinuation { continuation in
+            performAfterPersistentStoreLoad { container in
+                continuation.resume(returning: self.makeBackgroundContext(using: container))
+            }
+        }
+    }
+
+    private func makeBackgroundContext(using container: NSPersistentContainer) -> NSManagedObjectContext {
+        let newContext = container.newBackgroundContext()
         newContext.automaticallyMergesChangesFromParent = true
         newContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         return newContext
+    }
+
+    private func performAfterPersistentStoreLoad(_ action: @escaping (NSPersistentContainer) -> Void) {
+        let container = persistentContainer
+
+        persistentContainerLock.lock()
+        if isPersistentStoreLoaded {
+            persistentContainerLock.unlock()
+            action(container)
+        } else {
+            persistentStoreWaiters.append(action)
+            persistentContainerLock.unlock()
+        }
+    }
+
+    private func finishPersistentStoreLoad(using container: NSPersistentContainer) {
+        persistentContainerLock.lock()
+        guard !isPersistentStoreLoaded else {
+            persistentContainerLock.unlock()
+            return
+        }
+        isPersistentStoreLoaded = true
+        let waiters = persistentStoreWaiters
+        persistentStoreWaiters.removeAll()
+        persistentContainerLock.unlock()
+
+        waiters.forEach { $0(container) }
     }
 
     // MARK: - Station search index
@@ -364,7 +421,10 @@ class CoreDataStack {
         backgroundContext.perform {
             for episode in uniqueEpisodes {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+                fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "feedId == %@", episode.feedId),
+                    NSPredicate(format: "id == %@", episode.id)
+                ])
                 
                 do {
                     let results = try backgroundContext.fetch(fetchRequest)
@@ -394,16 +454,14 @@ class CoreDataStack {
     /// Remove duplicate episodes using compositeID for robust duplicate detection
     private func removeDuplicateEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
         var seenCompositeIDs = Set<String>()
-        var seenIds = Set<String>()
         var uniqueEpisodes: [PodcastEpisode] = []
         
         for episode in episodes {
             let compositeKey = episode.compositeID
             
-            // Skip if we've seen this composite ID or episode ID before
-            if !seenCompositeIDs.contains(compositeKey) && !seenIds.contains(episode.id) {
+            // Raw RSS GUIDs are only unique within a feed.
+            if !seenCompositeIDs.contains(compositeKey) {
                 seenCompositeIDs.insert(compositeKey)
-                seenIds.insert(episode.id)
                 uniqueEpisodes.append(episode)
             } else {
                 print("CoreData: Skipping duplicate episode - ID: \(episode.id), Title: \(episode.title)")

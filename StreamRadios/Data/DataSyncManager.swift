@@ -138,6 +138,7 @@ class DataSyncManager: ObservableObject {
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
     private let syncQueue = DispatchQueue(label: "com.streamradios.sync", qos: .userInitiated)
+    private var expectedFreshInstallPodcastFeedCount = 0
     
     private init() {
         setupProgressCalculation()
@@ -399,6 +400,7 @@ class DataSyncManager: ObservableObject {
     private func syncPodcastFeeds() async {
         // Check how many feeds we expect to sync FIRST
         let expectedFeedCount = await getExpectedPodcastFeedCount()
+        expectedFreshInstallPodcastFeedCount = expectedFeedCount
         
         // If there are no feeds to sync, skip the entire process
         if expectedFeedCount == 0 {
@@ -476,24 +478,10 @@ class DataSyncManager: ObservableObject {
             let finalCount = podcastViewModel.podcastFeeds.count
             podcastFeedsCurrentCount = finalCount
             podcastFeedsTotalCount = max(podcastFeedsTotalCount, finalCount)
-            podcastFeedsProgress = 1.0
-            podcastFeedsStatus = .completed
-            podcastFeedsOperation = "✅ \(finalCount) podcast feeds loaded"
-            print("✅ Podcast feeds sync completed - \(finalCount) feeds actually loaded")
-            
-            // Start artwork download tracking after feeds are loaded
-            startArtworkDownloadTracking(totalFeeds: finalCount)
-            
-            // NEW: Auto-reset feed sync banner after brief completion display
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                self.podcastFeedsStatus = .none
-                self.podcastFeedsProgress = 0.0
-                self.podcastFeedsOperation = ""
-                // Optionally clear counts to be safe
-                self.podcastFeedsCurrentCount = 0
-                // Keep totalCount for analytics if needed; not required for UI gating
-            }
+            podcastFeedsProgress = 0.95
+            podcastFeedsStatus = .inProgress
+            podcastFeedsOperation = "Verifying \(finalCount) podcast feeds and episodes..."
+            print("✅ Podcast feed parsing finished - \(finalCount) feeds awaiting readiness verification")
             
         } catch {
             podcastFeedsStatus = .failed
@@ -665,6 +653,7 @@ class DataSyncManager: ObservableObject {
         coreDataEpisodesLoaded = false
         feedsLoadedFromCoreData = 0
         totalFeedsInCoreData = 0
+        expectedFreshInstallPodcastFeedCount = 0
         
         // User Preferences
         userPreferencesStatus = .pending
@@ -1171,6 +1160,8 @@ class DataSyncManager: ObservableObject {
     /// Report that an artwork download has completed
     @MainActor
     func reportArtworkDownloadCompleted(feedTitle: String) {
+        guard totalArtworkDownloads > 0, artworkDownloadsStatus == .inProgress else { return }
+
         completedArtworkDownloads += 1
         artworkDownloadsProgress = Double(completedArtworkDownloads) / Double(totalArtworkDownloads)
         currentOperation = "Downloaded artwork for \(feedTitle) (\(completedArtworkDownloads)/\(totalArtworkDownloads))"
@@ -1188,6 +1179,8 @@ class DataSyncManager: ObservableObject {
     /// Report that an artwork download failed
     @MainActor
     func reportArtworkDownloadFailed(feedTitle: String, error: Error) {
+        guard totalArtworkDownloads > 0, artworkDownloadsStatus == .inProgress else { return }
+
         completedArtworkDownloads += 1
         artworkDownloadsProgress = Double(completedArtworkDownloads) / Double(totalArtworkDownloads)
         currentOperation = "Artwork failed for \(feedTitle) (\(completedArtworkDownloads)/\(totalArtworkDownloads))"
@@ -1255,13 +1248,10 @@ class DataSyncManager: ObservableObject {
         let radioStationViewModel = RadioStationViewModel.shared
         await waitForRadioStationsToLoad(radioStationViewModel)
         
-        // Final verification that all sync statuses are completed
-        await waitForAllSyncStatusesToComplete()
-        
         // CRITICAL: Final verification that episode cache are available
         await verifyEpisodeCachesAreReady(podcastViewModel)
         
-        currentOperation = "Synchronization completed!"
+        currentOperation = "Verifying synchronized data..."
         
         // CRITICAL: Force Core Data save and reload before any verification
         print("🚀 CRITICAL: Forcing Core Data save and reload before UI refresh")
@@ -1269,6 +1259,23 @@ class DataSyncManager: ObservableObject {
         
         // CRITICAL: Load episodes from Core Data into FeedIsolationManager (in-memory cache)
         await loadEpisodesFromCoreDataToMemory(podcastViewModel)
+
+        guard await waitForFreshInstallPodcastData(podcastViewModel) else {
+            podcastFeedsStatus = .failed
+            podcastFeedsOperation = "Failed to load every podcast feed and its episodes"
+            currentOperation = "Podcast synchronization incomplete. Keep the app open to retry."
+            print("❌ FRESH INSTALL READINESS: Expected \(expectedFreshInstallPodcastFeedCount) feeds, but the complete feed and episode set is not available")
+            return
+        }
+
+        podcastFeedsStatus = .completed
+        podcastFeedsProgress = 1.0
+        podcastFeedsCurrentCount = expectedFreshInstallPodcastFeedCount
+        podcastFeedsOperation = "✅ \(expectedFreshInstallPodcastFeedCount) podcast feeds and episodes loaded"
+
+        // Final verification that all sync statuses are completed
+        await waitForAllSyncStatusesToComplete()
+        currentOperation = "Synchronization completed!"
         
         // CRITICAL: Ensure radio station caches are created for all countries before completion
         await ensureStationSnapshotsAreCreated(RadioStationViewModel.shared)
@@ -1298,11 +1305,12 @@ class DataSyncManager: ObservableObject {
             let feedCount = podcastViewModel.podcastFeeds.count
             let feedOrderCount = podcastViewModel.podcastFeedOrder.count
             
-            if feedCount > 0 && feedOrderCount > 0 {
+            let expectedFeedCount = expectedFreshInstallPodcastFeedCount
+            if feedCount >= expectedFeedCount && feedOrderCount >= expectedFeedCount {
                 print("✅ UI Update verified: \(feedCount) feeds and \(feedOrderCount) feed order items are now available")
                 
                 // Additional verification: make sure Core Data also has the feeds
-                let coreDataHasFeeds = await verifyCoreDataHasFeeds()
+                let coreDataHasFeeds = await verifyCoreDataHasFeeds(expectedCount: expectedFeedCount)
                 if coreDataHasFeeds {
                     print("✅ Core Data verification passed - feeds are properly persisted")
                     break
@@ -1333,19 +1341,6 @@ class DataSyncManager: ObservableObject {
             print("⚠️ This may indicate a data synchronization issue")
         }
         
-        // Mark sync as completed only after everything is truly ready
-        UserDefaults.standard.set(true, forKey: "DataSyncCompleted")
-        
-        // CRITICAL FIX: Set HasLaunchedBefore ONLY after sync completes
-        // This ensures fresh install detection works correctly during the sync process
-        UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
-        print("✅ SYNC COMPLETE: Marked HasLaunchedBefore=true after successful sync")
-        
-        // Note: synchronize() is deprecated and unnecessary
-        
-        print("🎉 Fresh install data synchronization completed successfully!")
-        print("📊 Final state: Podcast feeds: \(podcastViewModel.podcastFeeds.count), Radio stations: \(radioStationViewModel.stations.count)")
-        
         // Additional pause to ensure UI is fully updated before hiding progress view
         try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds for visual feedback
         
@@ -1359,16 +1354,16 @@ class DataSyncManager: ObservableObject {
         print("🎯 FINAL VERIFICATION: podcastFeeds.count=\(finalFeedCount), podcastFeedOrder.count=\(finalFeedOrderCount)")
         print("🎯 FINAL VERIFICATION: Current isFreshInstallUIReady=\(isFreshInstallUIReady)")
         
-        if finalFeedCount > 0 && finalFeedOrderCount > 0 {
+        let expectedFeedCount = expectedFreshInstallPodcastFeedCount
+        var finalDataReady = false
+        if finalFeedCount >= expectedFeedCount && finalFeedOrderCount >= expectedFeedCount {
             // CRITICAL: Check that Core Data episodes are loaded into memory and station snapshots are ready
             let dataReady = (coreDataEpisodesLoaded || totalFeedsInCoreData == 0) && 
                             (stationSnapshotsReady || totalCountriesRequiringSnapshots == 0)
             
             if dataReady {
                 print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds, \(finalFeedOrderCount) feed order items, \(feedsLoadedFromCoreData) episodes loaded from Core Data, and \(countriesWithSnapshots) station snapshots")
-                isFreshInstallUIReady = true
-                isSyncing = false
-                print("🚀 DataSyncProgressView hidden - UI is confirmed ready with Core Data loaded into memory")
+                finalDataReady = true
             } else {
                 print("⏳ WAITING FOR DATA: Feeds ready but Core Data not fully loaded - Episodes: (\(feedsLoadedFromCoreData)/\(totalFeedsInCoreData)), Stations: (\(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots))")
                 // Wait a bit more for data loading to complete
@@ -1379,9 +1374,7 @@ class DataSyncManager: ObservableObject {
                 
                 if dataReadyAfterWait {
                     print("✅ DATA READY: Core Data fully loaded into memory after wait")
-                    isFreshInstallUIReady = true
-                    isSyncing = false
-                    print("🚀 DataSyncProgressView hidden - UI is confirmed ready with Core Data in memory")
+                    finalDataReady = true
                 } else {
                     print("⏳ STILL WAITING: Data not ready after wait - will retry")
                 }
@@ -1397,16 +1390,73 @@ class DataSyncManager: ObservableObject {
             let retryFeedCount = podcastViewModel.podcastFeeds.count
             let retryFeedOrderCount = podcastViewModel.podcastFeedOrder.count
             
-            if retryFeedCount > 0 && retryFeedOrderCount > 0 {
+            if retryFeedCount >= expectedFeedCount && retryFeedOrderCount >= expectedFeedCount {
                 print("✅ RETRY SUCCESS: UI is ready with \(retryFeedCount) feeds after final attempt")
-                isFreshInstallUIReady = true
-                isSyncing = false
+                finalDataReady = (coreDataEpisodesLoaded || totalFeedsInCoreData == 0) &&
+                                 (stationSnapshotsReady || totalCountriesRequiringSnapshots == 0)
             } else {
-                print("❌ RETRY FAILED: Still no feeds after final attempt - allowing UI to show anyway")
-                isFreshInstallUIReady = true
-                isSyncing = false
+                print("❌ RETRY FAILED: Expected \(expectedFeedCount) feeds, found \(retryFeedCount) feeds and \(retryFeedOrderCount) order entries")
+                podcastFeedsStatus = .failed
+                podcastFeedsOperation = "Podcast data is incomplete"
+                currentOperation = "Podcast synchronization incomplete. Keep the app open to retry."
             }
         }
+
+        guard finalDataReady else { return }
+
+        podcastFeedsDismissTask?.cancel()
+        podcastFeedsDismissTask = nil
+        podcastFeedsStatus = .none
+        podcastFeedsProgress = 0.0
+        podcastFeedsOperation = ""
+        podcastFeedsCurrentCount = 0
+        podcastFeedsTotalCount = 0
+        feedParsingProgress = 0.0
+        feedParsingMessage = ""
+        isParsingFeeds = false
+
+        UserDefaults.standard.set(true, forKey: "DataSyncCompleted")
+        UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
+        UserDefaults.standard.synchronize()
+        isFreshInstallUIReady = true
+        isSyncing = false
+        print("✅ SYNC COMPLETE: Marked HasLaunchedBefore=true after successful sync")
+        print("🚀 DataSyncProgressView hidden - all synchronized data is ready")
+        print("🎉 Fresh install data synchronization completed successfully!")
+        print("📊 Final state: Podcast feeds: \(podcastViewModel.podcastFeeds.count), Radio stations: \(radioStationViewModel.stations.count)")
+    }
+
+    @MainActor
+    private func waitForFreshInstallPodcastData(_ podcastViewModel: PodcastViewModel) async -> Bool {
+        let expectedFeedCount = expectedFreshInstallPodcastFeedCount
+        guard expectedFeedCount > 0 else { return true }
+
+        for attempt in 1...10 {
+            let feeds = podcastViewModel.podcastFeeds
+            let orderedFeedCount = Set(podcastViewModel.podcastFeedOrder).count
+            let feedsWithEpisodes = feeds.filter { !$0.episodes.isEmpty }
+            let feedsWithCaches = feedsWithEpisodes.filter {
+                !podcastViewModel.feedIsolationManager.getEpisodesForFeed($0.id).isEmpty
+            }
+            let coreDataReady = await verifyCoreDataHasFeeds(expectedCount: expectedFeedCount)
+
+            if feeds.count >= expectedFeedCount,
+               orderedFeedCount >= expectedFeedCount,
+               feedsWithEpisodes.count >= expectedFeedCount,
+               feedsWithCaches.count >= expectedFeedCount,
+               coreDataReady {
+                print("✅ FRESH INSTALL READINESS: \(expectedFeedCount)/\(expectedFeedCount) feeds, episode sets, and caches are available")
+                return true
+            }
+
+            print("⏳ FRESH INSTALL READINESS \(attempt)/10: feeds \(feeds.count)/\(expectedFeedCount), order \(orderedFeedCount)/\(expectedFeedCount), parsed \(feedsWithEpisodes.count)/\(expectedFeedCount), cached \(feedsWithCaches.count)/\(expectedFeedCount)")
+
+            guard attempt < 10 else { break }
+            await podcastViewModel.forceSaveAndReload()
+            await loadEpisodesFromCoreDataToMemory(podcastViewModel)
+        }
+
+        return false
     }
     
     /// CORE DATA + IN-MEMORY CACHE: Load episodes from Core Data into FeedIsolationManager
@@ -1420,7 +1470,7 @@ class DataSyncManager: ObservableObject {
         var totalEpisodes = 0
         
         // Update tracking
-        totalFeedsInCoreData = feedsWithEpisodes.count
+        totalFeedsInCoreData = max(feedsWithEpisodes.count, expectedFreshInstallPodcastFeedCount)
         feedsLoadedFromCoreData = 0
         
         for feed in podcastViewModel.podcastFeeds {
@@ -1436,9 +1486,9 @@ class DataSyncManager: ObservableObject {
                     var updatedEpisode = episode
                     
                     // Get current states from EpisodeStateManager
-                    let progress = EpisodeStateManager.shared.getProgress(for: episode.id)
-                    let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
-                    let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                    let progress = EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
+                    let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id, feedId: episode.feedId)
+                    let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
                     let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
                     
                     // Update episode state with current values
@@ -1460,7 +1510,7 @@ class DataSyncManager: ObservableObject {
         }
         
         // Mark as loaded
-        coreDataEpisodesLoaded = (feedsLoadedFromCoreData == totalFeedsInCoreData)
+        coreDataEpisodesLoaded = (feedsLoadedFromCoreData >= totalFeedsInCoreData)
         
         print("💾 CORE DATA LOAD COMPLETE: \(feedsLoaded) feeds loaded with \(totalEpisodes) total episodes")
         print("💾 CORE DATA STATUS: \(feedsLoadedFromCoreData)/\(totalFeedsInCoreData) feeds loaded into memory - Ready: \(coreDataEpisodesLoaded)")
@@ -1591,15 +1641,15 @@ class DataSyncManager: ObservableObject {
     }
     
     /// Verify that Core Data actually contains podcast feeds
-    private func verifyCoreDataHasFeeds() async -> Bool {
+    private func verifyCoreDataHasFeeds(expectedCount: Int) async -> Bool {
         return await withCheckedContinuation { continuation in
             let context = CoreDataStack.shared.newBackgroundContext()
             context.perform {
                 let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                 do {
-                    let results = try context.fetch(request)
-                    let hasFeeds = !results.isEmpty
-                    print("🔍 Core Data verification: Found \(results.count) feeds in Core Data")
+                    let feedCount = try context.count(for: request)
+                    let hasFeeds = feedCount >= expectedCount
+                    print("🔍 Core Data verification: Found \(feedCount)/\(expectedCount) expected feeds in Core Data")
                     continuation.resume(returning: hasFeeds)
                 } catch {
                     print("❌ Core Data verification error: \(error)")
@@ -1667,6 +1717,8 @@ class DataSyncManager: ObservableObject {
             let cloudKitFeeds = try await syncFromCloudKitWithRetry()
             
             if !cloudKitFeeds.isEmpty {
+                expectedFreshInstallPodcastFeedCount = Set(cloudKitFeeds.map(\.url)).count
+                podcastFeedsTotalCount = expectedFreshInstallPodcastFeedCount
                 print("🌟 Found \(cloudKitFeeds.count) feeds in CloudKit for fresh install processing")
                 
                 // STEP 1: Clear any existing episode cache to start fresh
@@ -1706,7 +1758,7 @@ class DataSyncManager: ObservableObject {
                 
                 // STEP 3: Fetch ALL episode states from CloudKit for complete caches
                 podcastFeedsOperation = "Fetching ALL episode states from iCloud..."
-                podcastFeedsProgress = 1.0
+                podcastFeedsProgress = 0.9
                 episodeStatesStatus = .inProgress
                 episodeStatesOperation = "Fetching ALL episode states from CloudKit..."
                 episodeStatesProgress = 0.1
@@ -1716,9 +1768,8 @@ class DataSyncManager: ObservableObject {
                 print("☁️ This will restore your favorites, play positions, and episode states")
                 print("☁️ ========================================")
                 
-                let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-                print("☁️ FRESH INSTALL: Calling syncEpisodeStatesFromCloudKit with isFreshInstall=\(isFreshInstall)")
-                let episodeStatesSyncSuccess = await podcastViewModel.syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+                print("☁️ FRESH INSTALL: Calling syncEpisodeStatesFromCloudKit with isFreshInstall=true")
+                let episodeStatesSyncSuccess = await podcastViewModel.syncEpisodeStatesFromCloudKit(isFreshInstall: true)
                 print("☁️ FRESH INSTALL: Episode state sync completed with success=\(episodeStatesSyncSuccess)")
                 
                 if episodeStatesSyncSuccess {
@@ -1767,7 +1818,7 @@ class DataSyncManager: ObservableObject {
                 
                 // Complete feed parsing
                 podcastFeedsOperation = "Fresh install completed successfully"
-                podcastFeedsProgress = 1.0
+                podcastFeedsProgress = 0.95
                 feedParsingProgress = 1.0
                 feedParsingMessage = "Fresh install processing completed successfully"
                 // PERFORMANCE OPTIMIZATION: Removed 0.5s delay for instant UI readiness
@@ -1794,11 +1845,10 @@ class DataSyncManager: ObservableObject {
         } catch {
             print("❌ Failed to initialize CloudKit feeds for fresh install: \(error)")
             
-            // Mark episode states as completed with warning (sync failed)
-            episodeStatesStatus = .completed
-            episodeStatesProgress = 1.0
-            episodeStatesOperation = "⚠️ Episode sync skipped (feed sync failed)"
-            UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+            episodeStatesStatus = .failed
+            episodeStatesProgress = 0.0
+            episodeStatesOperation = "Episode sync failed before CloudKit states were fetched"
+            UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
             
             // Initialize artwork tracking with 0 feeds even on error
             startArtworkDownloadTracking(totalFeeds: 0)
@@ -1929,30 +1979,27 @@ class DataSyncManager: ObservableObject {
                     }
                 },
                 completion: { [weak self] stations, error in
-                    if let stations = stations {
-                        DispatchQueue.main.async {
+                    Task { @MainActor in
+                        if let stations = stations {
                             viewModel.mergeStationsFromCloudKit(stations)
                             viewModel.saveStationsToCoreData()
                             
                             // Update final counts
-                            Task { @MainActor in
-                                self?.radioStationsCurrentCount = stations.count
-                                self?.radioStationsTotalCount = stations.count
-                                self?.radioStationsOperation = "✅ \(stations.count) radio stations synced from iCloud"
-                            }
+                            self?.radioStationsCurrentCount = stations.count
+                            self?.radioStationsTotalCount = stations.count
+                            self?.radioStationsOperation = "✅ \(stations.count) radio stations synced from iCloud"
                             
                             print("✅ Synced \(stations.count) radio stations with progress tracking")
                             
                             // Mark radio stations as synced to prevent future CloudKit syncing on app launches
                             UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
-                        }
-                    } else if let error = error {
-                        Task { @MainActor in
+                            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                        } else if let error = error {
                             self?.radioStationsOperation = "❌ Failed to sync radio stations: \(error.localizedDescription)"
+                            print("❌ Failed to sync radio stations: \(error)")
                         }
-                        print("❌ Failed to sync radio stations: \(error)")
+                        continuation.resume()
                     }
-                    continuation.resume()
                 }
             )
         }

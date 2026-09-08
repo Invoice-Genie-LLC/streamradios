@@ -58,6 +58,9 @@ enum RadioSubTab: Int, CaseIterable {
 
 
 class RadioStationViewModel: NSObject, ObservableObject {
+    private static let favoriteOrderBackupKey = "FavoriteStationsOrder"
+    private static let favoriteOrderRevisionKey = "FavoriteStationsOrderRevision"
+
     @Published var stations: [RadioStation] = []
     @Published var countries: [Country] = Country.getAllCountriesWithAPICodes()
     @Published var selectedTab: Tab = .radio
@@ -1164,6 +1167,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         applyUnfavoriteTombstones(to: &mergedByURL, cloudKitStations: validatedCloudKitStations)
         stations = Array(mergedByURL.values)
+        if Self.applyPendingFavoriteOrder(to: &stations) {
+            print("📡 💾 Reapplied pending local favorite order after CloudKit merge")
+        }
         
         // Log recent stations count for verification
         let recentCount = stations.filter { $0.lastPlayed != nil }.count
@@ -2587,9 +2593,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 userDefaults.set(currentTime, forKey: syncKey)
                 print("📻 ☁️ FRESH INSTALL: Marked manual stations for \(country) as synced to prevent duplicate CloudKit saves")
             }
-            
-            userDefaults.set(true, forKey: hasLaunchedBeforeKey)
-            userDefaults.synchronize() // Ensure the flag is saved immediately
         }
     }
     
@@ -3124,25 +3127,28 @@ class RadioStationViewModel: NSObject, ObservableObject {
         print("📡 📊 DRAG AND DROP: Current favorites count: \(favoritesList.count)")
         
         favoritesList.move(fromOffsets: source, toOffset: destination)
-        
-        // Update favoriteOrder values
-        for (index, favorite) in favoritesList.enumerated() {
-            if let stationIndex = stations.firstIndex(where: { $0.id == favorite.id }) {
-                let oldOrder = stations[stationIndex].favoriteOrder
-                stations[stationIndex].favoriteOrder = index
-                print("📡 🔢 DRAG AND DROP: Updated \(favorite.name) - old order: \(oldOrder ?? -1), new order: \(index)")
-            }
+        setFavoriteStationOrder(favoritesList.map(\.id))
+    }
+
+    func setFavoriteStationOrder(_ orderedStationIds: [String]) {
+        guard !orderedStationIds.isEmpty else { return }
+
+        for (order, stationId) in orderedStationIds.enumerated() {
+            guard let stationIndex = stations.firstIndex(where: { $0.id == stationId }) else { continue }
+            let oldOrder = stations[stationIndex].favoriteOrder
+            stations[stationIndex].favoriteOrder = order
+            print("📡 🔢 FAVORITE ORDER: Updated \(stations[stationIndex].name) - old order: \(oldOrder ?? -1), new order: \(order)")
         }
-        
-        // Save to CoreData
-        print("📡 💾 DRAG AND DROP: Saving to CoreData...")
-        saveStationsToCoreData()
-        
-        // Save favorite order to UserDefaults for immediate persistence
-        let favoriteOrderDict = Dictionary(uniqueKeysWithValues: favoritesList.enumerated().map { ($0.element.id, $0.offset) })
-        UserDefaults.standard.set(favoriteOrderDict, forKey: "FavoriteStationsOrder")
+
+        let favoriteOrderDict = Dictionary(uniqueKeysWithValues: orderedStationIds.enumerated().map { ($0.element, $0.offset) })
+        UserDefaults.standard.set(favoriteOrderDict, forKey: Self.favoriteOrderBackupKey)
+        UserDefaults.standard.set(UUID().uuidString, forKey: Self.favoriteOrderRevisionKey)
         UserDefaults.standard.synchronize()
-        print("📡 💾 DRAG AND DROP: Saved favorite order to UserDefaults for \(favoritesList.count) stations")
+        print("📡 💾 FAVORITE ORDER: Saved exact order for \(orderedStationIds.count) stations")
+
+        // Persist this small user-driven change before returning so terminating the app immediately
+        // after the drag cannot leave Core Data with the previous order.
+        saveFavoriteOrderToCoreData(favoriteOrders: favoriteOrderDict)
         
         // ENHANCED CLOUDKIT SYNC: Sync favorite order changes to CloudKit
         print("📡 ☁️ DRAG AND DROP: Starting CloudKit sync...")
@@ -3156,11 +3162,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
             object: nil,
             userInfo: [
                 "reason": "manual_reorder",
-                "stationCount": favoritesList.count
+                "stationCount": orderedStationIds.count
             ]
         )
         
-        print("📡 ✅ DRAG AND DROP: Completed - Updated favorite order values for \(favoritesList.count) stations and notified CarPlay")
+        print("📡 ✅ FAVORITE ORDER: Persisted \(orderedStationIds.count) stations and notified CarPlay")
     }
     
     /// Sort stations alphabetically and toggle sort direction
@@ -3189,28 +3195,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
             favorites.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
         }
         
-        // Update favoriteOrder values based on new alphabetical order
-        for (index, favorite) in favorites.enumerated() {
-            if let stationIndex = stations.firstIndex(where: { $0.id == favorite.id }) {
-                stations[stationIndex].favoriteOrder = index
-            }
-        }
-        
-        // Save to CoreData
-        saveStationsToCoreData()
-        
-        // Save favorite order to UserDefaults
-        let favoriteOrderDict = Dictionary(uniqueKeysWithValues: favorites.enumerated().map { ($0.element.id, $0.offset) })
-        UserDefaults.standard.set(favoriteOrderDict, forKey: "FavoriteStationsOrder")
-        UserDefaults.standard.synchronize()
+        setFavoriteStationOrder(favorites.map(\.id))
         
         // Save the sort direction to UserDefaults
         UserDefaults.standard.set(isAscendingSort, forKey: "RadioStationSortAscending")
-        
-        // Sync to CloudKit
-        Task {
-            await syncFavoriteOrderChangesToCloudKit()
-        }
         
         print("📡 📝 Sorted \(favorites.count) favorites alphabetically: \(isAscendingSort ? "A-Z" : "Z-A")")
     }
@@ -3325,6 +3313,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
     /// Sync favorite order changes to CloudKit
     func syncFavoriteOrderChangesToCloudKit() async {
         print("📡 🚨 RADIO FAVORITE ORDER SYNC: Starting batch favorite order sync to CloudKit...")
+
+        let pendingRevision = UserDefaults.standard.string(forKey: Self.favoriteOrderRevisionKey)
         
         // **OPTIMIZED**: Sync all favorite stations to CloudKit in batches instead of individually
         let favorites = favoriteStations()
@@ -3351,6 +3341,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
             print("📡 ✅ RADIO FAVORITE ORDER SYNC: Successfully saved \(favorites.count) favorite stations in batches")
+
+                        // Clear only the reorder this upload actually represented. A newer drag may have
+                        // happened while this request was in flight and must remain protected.
+                        if let pendingRevision,
+                           UserDefaults.standard.string(forKey: Self.favoriteOrderRevisionKey) == pendingRevision {
+                            UserDefaults.standard.removeObject(forKey: Self.favoriteOrderBackupKey)
+                            UserDefaults.standard.removeObject(forKey: Self.favoriteOrderRevisionKey)
+                        }
             
             // Trigger cross-device favorite order sync notification
             await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "favorite_order_changed")
@@ -3372,6 +3370,52 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             print("📡 ❌ RADIO FAVORITE ORDER SYNC: Failed to sync favorite order to CloudKit: \(error)")
+        }
+    }
+
+    private static func pendingFavoriteOrder() -> [String: Int] {
+        let values = UserDefaults.standard.dictionary(forKey: favoriteOrderBackupKey) ?? [:]
+        return values.compactMapValues { ($0 as? NSNumber)?.intValue }
+    }
+
+    @discardableResult
+    private static func applyPendingFavoriteOrder(to stations: inout [RadioStation]) -> Bool {
+        let pendingOrder = pendingFavoriteOrder()
+        guard !pendingOrder.isEmpty else { return false }
+
+        var changed = false
+        for index in stations.indices where stations[index].isFavorite {
+            guard let order = pendingOrder[stations[index].id],
+                  stations[index].favoriteOrder != order else { continue }
+            stations[index].favoriteOrder = order
+            changed = true
+        }
+        return changed
+    }
+
+    private func saveFavoriteOrderToCoreData(favoriteOrders suppliedOrders: [String: Int]? = nil) {
+        let favoriteOrders = suppliedOrders ?? Dictionary(uniqueKeysWithValues: stations.compactMap { station in
+            station.isFavorite ? station.favoriteOrder.map { (station.id, $0) } : nil
+        })
+        guard !favoriteOrders.isEmpty else { return }
+
+        let context = CoreDataStack.shared.newBackgroundContext()
+        context.performAndWait {
+            let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            request.predicate = NSPredicate(format: "id IN %@", Array(favoriteOrders.keys))
+
+            do {
+                for station in try context.fetch(request) {
+                    guard let id = station.id, let order = favoriteOrders[id] else { continue }
+                    station.favoriteOrder = Int32(order)
+                }
+                if context.hasChanges {
+                    try context.save()
+                }
+                print("📡 💾 DRAG AND DROP: Favorite order committed to Core Data")
+            } catch {
+                print("📡 ❌ DRAG AND DROP: Failed to save favorite order: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -4115,11 +4159,26 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         // CRITICAL: Filter out manually deleted stations
         // Apply the same protection rule as API stations
-        let manualStations = allManualStations.filter { station in
+        var manualStations = allManualStations.filter { station in
             if isStationDeleted(station.id) {
                 return false
             }
             return true
+        }
+
+        manualStations = manualStations.map { configuredStation in
+            guard var existingStation = stations.first(where: {
+                $0.country == country &&
+                $0.name.caseInsensitiveCompare(configuredStation.name) == .orderedSame
+            }) else {
+                return configuredStation
+            }
+
+            existingStation.name = configuredStation.name
+            existingStation.url = configuredStation.url
+            existingStation.country = configuredStation.country
+            existingStation.order = configuredStation.order
+            return existingStation
         }
         
         if !manualStations.isEmpty {
@@ -4172,6 +4231,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func reportStationClick(for station: RadioStation) {
+        // Radio Browser emits canonical lowercase UUIDs. Local/imported stations use
+        // uppercase UUIDs or explicit prefixes and must not be sent to its click API.
+        guard station.id == station.id.lowercased(),
+              let uuid = UUID(uuidString: station.id),
+              uuid.uuidString.lowercased() == station.id else {
+            print("ℹ️ RadioBrowserAPI: Skipping click report for local station \(station.id)")
+            return
+        }
+
         Task {
             await RadioBrowserAPI.shared.reportStationClick(stationUuid: station.id)
         }
@@ -5671,69 +5739,77 @@ extension RadioStationViewModel {
     func loadStationsFromCoreData() {
         // Set loading state to prevent UI delays
         isLoading = true
-        
-        let context = CoreDataStack.shared.persistentContainer.viewContext
-        let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
-        
-        // Add a sort descriptor to ensure stations are loaded in the correct order
-        let sortDescriptor = NSSortDescriptor(key: "order", ascending: true)
-        request.sortDescriptors = [sortDescriptor]
-        
-        do {
-            let results = try context.fetch(request)
-            if results.isEmpty {
-                print("No stations found in CoreData.")
-                stations.removeAll()
-                print("📡 ✅ Cleared all in-memory station data due to empty Core Data")
-                isLoading = false
-                return
-            }
-            
-            // Map Core Data objects to app models
-            stations = results.map { cdStation in
-                RadioStation(
-                    id: cdStation.id ?? UUID().uuidString,
-                    name: cdStation.name ?? "Unknown",
-                    url: cdStation.url ?? "http://default.url",
-                    iconData: cdStation.iconData,
-                    country: cdStation.country ?? "Unknown",
-                    isFavorite: cdStation.isFavorite,
-                    favoritedAt: cdStation.favoritedAt,
-                    favoriteOrder: cdStation.favoriteOrder >= 0 ? Int(cdStation.favoriteOrder) : nil,
-                    order: Int(cdStation.order),
-                    lastPlayed: cdStation.lastPlayed
-                )
-            }
-            
-            // Set loading to false immediately to show stations
-            isLoading = false
 
-            // Repairs a store that accumulated URL-duplicate rows; the save collapses them for good.
-            if deduplicateStationsInMemory() > 0 {
-                saveStationsToCoreData()
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+
+            let context = await CoreDataStack.shared.newBackgroundContextAfterStoreLoad()
+            await context.perform {
+                let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                request.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
+
+                do {
+                    let results = try context.fetch(request)
+                    var loadedStations: [RadioStation] = results.map { cdStation in
+                        RadioStation(
+                            id: cdStation.id ?? UUID().uuidString,
+                            name: cdStation.name ?? "Unknown",
+                            url: cdStation.url ?? "http://default.url",
+                            iconData: cdStation.iconData,
+                            country: cdStation.country ?? "Unknown",
+                            isFavorite: cdStation.isFavorite,
+                            favoritedAt: cdStation.favoritedAt,
+                            favoriteOrder: cdStation.favoriteOrder >= 0 ? Int(cdStation.favoriteOrder) : nil,
+                            order: Int(cdStation.order),
+                            lastPlayed: cdStation.lastPlayed
+                        )
+                    }
+                    let restoredPendingFavoriteOrder = Self.applyPendingFavoriteOrder(to: &loadedStations)
+
+                    DispatchQueue.main.async {
+                        if loadedStations.isEmpty {
+                            print("No stations found in CoreData.")
+                            self.stations.removeAll()
+                            print("📡 ✅ Cleared all in-memory station data due to empty Core Data")
+                            self.isLoading = false
+                            return
+                        }
+
+                        self.stations = loadedStations
+                        self.isLoading = false
+
+                        if restoredPendingFavoriteOrder {
+                            print("📡 💾 Restored pending favorite order during startup")
+                            self.saveFavoriteOrderToCoreData()
+                            Task {
+                                await self.syncFavoriteOrderChangesToCloudKit()
+                            }
+                        }
+
+                        // Repairs a store that accumulated URL-duplicate rows; the save collapses them for good.
+                        if self.deduplicateStationsInMemory() > 0 {
+                            self.saveStationsToCoreData()
+                        }
+
+                        Task {
+                            await self.createStationSnapshotsForAllCountries()
+                        }
+
+                        self.objectWillChange.send()
+                        NotificationCenter.default.post(name: NSNotification.Name("StationsLoaded"), object: nil)
+
+                        // Defer maintenance operations to avoid blocking initial station display.
+                        DispatchQueue.main.async { [weak self] in
+                            self?.performDeferredMaintenance()
+                        }
+                    }
+                } catch {
+                    print("Failed to load stations from CoreData: \(error)")
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                    }
+                }
             }
-            
-            // PERFORMANCE: Create station snapshots for all countries after loading
-            Task {
-                await createStationSnapshotsForAllCountries()
-            }
-            
-            // Force UI update to ensure immediate refresh
-            DispatchQueue.main.async { [weak self] in
-                self?.objectWillChange.send()
-            }
-            
-            // Post notification that stations have been loaded
-            NotificationCenter.default.post(name: NSNotification.Name("StationsLoaded"), object: nil)
-            
-            // Defer maintenance operations to avoid blocking initial station display
-            DispatchQueue.main.async { [weak self] in
-                self?.performDeferredMaintenance()
-            }
-            
-        } catch {
-            print("Failed to load stations from CoreData: \(error)")
-            isLoading = false
         }
     }
     

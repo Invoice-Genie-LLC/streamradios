@@ -82,21 +82,20 @@ extension PodcastModel {
     
     func toPodcastEpisode() -> PodcastEpisode {
             let episodeId = self.id ?? UUID().uuidString
+            let episodeFeedId = self.feedId
             
                     // FIX: Use EpisodeStateManager as source of truth for ALL episode states
         // This ensures favorite/download states don't get reset during playback or screen changes
-        let episodeStateProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
-        let episodeState = EpisodeStateManager.shared.getState(for: episodeId)
+        let episodeStateProgress = EpisodeStateManager.shared.getProgress(for: episodeId, feedId: episodeFeedId)
+        let episodeState = EpisodeStateManager.shared.getState(for: episodeId, feedId: episodeFeedId)
         let episodeStateIsPlayed = episodeState == .played
-        let isUpgradeScenario = EpisodeStateManager.shared.isUpgradeScenario()
-        
         // Use the higher progress value and trust EpisodeStateManager for played status
         let progress = max(Double(self.progress), episodeStateProgress)
         
         // SAFE STATE RESOLUTION: Combine EpisodeStateManager and Core Data with OR logic
         // This prevents data loss during state transitions (upgrades, background/foreground, etc.)
-        let episodeStateManagerFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
-        let episodeStateManagerDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
+        let episodeStateManagerFavorite = EpisodeStateManager.shared.isFavorite(episodeId, feedId: episodeFeedId)
+        let episodeStateManagerDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId, feedId: episodeFeedId)
         
         // If EITHER source says favorited/downloaded, trust it
         // Core Data is now protected from RSS overwrites (see update method above)
@@ -119,8 +118,6 @@ extension PodcastModel {
             // During CloudKit sync, trust the EpisodeStateManager download status
             if let localPath = self.localFilePath, !localPath.isEmpty {
                 let fileExists = FileManager.default.fileExists(atPath: localPath)
-                let isUpgradeScenario = EpisodeStateManager.shared.isUpgradeScenario()
-                
                 // Only log if file is missing (potential issue)
                 if !fileExists {
                     print("🔍 CONVERT: File missing at '\(localPath)' for episode '\(self.title ?? "Unknown")'")
@@ -129,7 +126,7 @@ extension PodcastModel {
                 if !fileExists {
                     // File doesn't exist at stored path - try to recover it
                     print("🔧 PATH RECOVERY: Attempting to recover file for episode: \(self.title ?? "Unknown")")
-                    if let recoveredPath = attemptFileRecovery(for: episodeId, originalPath: localPath) {
+                    if let recoveredPath = Self.recoverDownloadedFilePath(for: episodeId, originalPath: localPath) {
                         print("✅ PATH RECOVERY: Successfully recovered file at: \(recoveredPath)")
                         resolvedLocalFilePath = recoveredPath
                         
@@ -150,25 +147,19 @@ extension PodcastModel {
                 if finalFileExists && !isDownloaded {
                     // File exists but EpisodeStateManager says it's not downloaded - sync the state
                     isDownloaded = true
-                    EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, reason: "file_found_sync")
+                    EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, feedId: feedId, reason: "file_found_sync")
                     print("✅ SYNC: Updated EpisodeStateManager - episode \(episodeId) marked as downloaded (file found)")
-                } else if !finalFileExists && isDownloaded && isUpgradeScenario {
-                    // UPGRADE PROTECTION: File missing during upgrade - preserve download state but log warning
-                    print("⚠️ UPGRADE: File missing for downloaded episode \(episodeId) during upgrade - preserving download state")
-                    // Keep isDownloaded = true as determined by EpisodeStateManager
-                    // Don't clear the download state during upgrades as files might be temporarily missing
-                } else if !finalFileExists && isDownloaded && !isUpgradeScenario {
-                    // Normal operation: File missing and not during upgrade - safe to clear download state
+                } else if !finalFileExists && isDownloaded {
                     isDownloaded = false
-                    EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                    EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false, feedId: feedId)
                     EpisodeStateManager.shared.clearEpisodeBackup(episodeId)  // Clear backup to prevent recovery
                     print("🧹 CLEANUP: Episode \(episodeId) marked as not downloaded (file missing)")
                     
                     // CRITICAL: Sync the download state change to CloudKit
                     if let feedId = self.feedId, !feedId.isEmpty {
                         Task.detached(priority: .utility) {
-                            let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
-                            let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+                            let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId, feedId: feedId)
+                            let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId, feedId: feedId)
                             await PodcastCloudKitManager.shared.saveEpisodeState(
                                 episodeId: episodeId,
                                 feedId: feedId,
@@ -185,25 +176,20 @@ extension PodcastModel {
                 // This preserves download status during CloudKit sync and app upgrades
             } else if isDownloaded {
                 // No local path but EpisodeStateManager says it's downloaded
-                let isUpgradeScenario = EpisodeStateManager.shared.isUpgradeScenario()
                 // Only log significant download state issues
                 if isDownloaded {
                     print("🔍 CONVERT: No path but marked as downloaded - '\(self.title ?? "Unknown")'")
                 }
                 
                 // Try to recover file without a stored path
-                if let recoveredPath = attemptFileRecovery(for: episodeId, originalPath: nil) {
+                if let recoveredPath = Self.recoverDownloadedFilePath(for: episodeId, originalPath: nil) {
                     print("✅ PATH RECOVERY: Found file without stored path at: \(recoveredPath)")
                     resolvedLocalFilePath = recoveredPath
                     
                     // Update Core Data with discovered path
                     self.localFilePath = recoveredPath
                     try? self.managedObjectContext?.save()
-                } else if isUpgradeScenario {
-                    print("⚠️ UPGRADE: No file path for downloaded episode \(episodeId) during upgrade - preserving download state")
-                    // Keep the download state during upgrades
                 } else {
-                    // Normal operation: No path and not during upgrade - clear download state
                     isDownloaded = false
                     EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
                     EpisodeStateManager.shared.clearEpisodeBackup(episodeId)  // Clear backup to prevent recovery
@@ -279,7 +265,7 @@ extension PodcastModel {
         }
     
     /// Attempts to recover a downloaded file when the stored path is invalid (iOS sandbox changes)
-    private func attemptFileRecovery(for episodeId: String, originalPath: String?) -> String? {
+    static func recoverDownloadedFilePath(for episodeId: String, originalPath: String?) -> String? {
         print("🔧 FILE RECOVERY: Starting recovery for episode ID: \(episodeId)")
         
         // Get current Documents directory (sandbox may have changed)
@@ -344,7 +330,7 @@ extension PodcastModel {
     }
     
     /// Sanitize filename by removing invalid characters (helper method)
-    private func sanitizeFilename(_ filename: String) -> String {
+    private static func sanitizeFilename(_ filename: String) -> String {
         let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
         let sanitized = filename.components(separatedBy: invalidCharacters).joined(separator: "_")
         

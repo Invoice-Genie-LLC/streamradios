@@ -107,7 +107,7 @@ struct PodcastListView: View {
     
     // FORCE UI REFRESH: Observe uiRefreshTrigger to force SwiftUI re-evaluation
     @State private var uiRefreshObserver = UUID()
-    private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
+    @ObservedObject private var podcastPlayer = PodcastPlayer.shared
     @StateObject private var radioPlayer = RadioPlayer.shared
     @EnvironmentObject private var radioStationViewModel: RadioStationViewModel
     @State private var scrollToEpisodeID: String?
@@ -1682,7 +1682,7 @@ struct EpisodeRowView: View {
         } else {
             // CRITICAL FIX: Always use EpisodeStateManager as source of truth for saved progress
             // This ensures progress bar matches exactly where progress was last saved
-            return EpisodeStateManager.shared.getProgress(for: episode.id)
+            return EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
         }
     }
     
@@ -1695,12 +1695,12 @@ struct EpisodeRowView: View {
     private var isDownloaded: Bool {
         // Force refresh trigger to re-evaluate when downloads change
         let _ = viewModel.uiRefreshTrigger
-        return EpisodeStateManager.shared.isDownloaded(episode.id)
+        return EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
     }
     
     // Computed property for checking if episode is marked as played
     private var isEpisodePlayed: Bool {
-        EpisodeStateManager.shared.getState(for: episode.id) == .played
+        EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId) == .played
     }
     
     // Static formatter to avoid recreation
@@ -1902,28 +1902,36 @@ struct EpisodeRowView: View {
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeProgressChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 refreshTrigger = UUID()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodePlayedChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 refreshTrigger = UUID()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeFavoriteChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 refreshTrigger = UUID()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeDownloadChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 refreshTrigger = UUID()
             }
         }
@@ -1954,7 +1962,7 @@ struct EpisodeRowView: View {
                     
                 Button(action: {
                     // FIX: Use EpisodeStateManager as source of truth for button behavior
-                    let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                    let episodeState = EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId)
                     let isPlayedByState = episodeState == .played
                     let isCompletedByProgress = currentProgress >= 0.99
                     
@@ -1979,7 +1987,7 @@ struct EpisodeRowView: View {
                     }
                 }) {
                     // FIX: Use EpisodeStateManager for consistent button display
-                    let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                    let episodeState = EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId)
                     let isPlayedByState = episodeState == .played
                     let isCompletedByProgress = currentProgress >= 0.99
                     let shouldShowRewind = isPlayedByState || isCompletedByProgress
@@ -2155,7 +2163,7 @@ struct EpisodeRowView: View {
     private var episodeStatusChip: some View {
         Group {
             // CRITICAL FIX: Always use EpisodeStateManager as the source of truth for status display
-            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId)
             let isPlayedByState = episodeState == .played
             let isCompletedByProgress = currentProgress >= 0.99 && !isPlaying
             
@@ -2499,13 +2507,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
         } else {
             // CRITICAL FIX: Always use EpisodeStateManager as source of truth for saved progress
             // This ensures progress bar matches exactly where progress was last saved
-            return EpisodeStateManager.shared.getProgress(for: episode.id)
+            return EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
         }
     }
     
     // Computed property for checking if episode is marked as played
     private var isEpisodePlayed: Bool {
-        EpisodeStateManager.shared.getState(for: episode.id) == .played
+        EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId) == .played
     }
     
 
@@ -2537,7 +2545,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     private var isDownloaded: Bool {
         // Force refresh trigger to re-evaluate when downloads change
         let _ = viewModel.uiRefreshTrigger
-        return EpisodeStateManager.shared.isDownloaded(episode.id)
+        return EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
     }
     
     // Real-time computed properties for dynamic updates
@@ -2546,7 +2554,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             return "PLAYING"
         } else {
             // Live, so the badge can never disagree with the play button beside it.
-            return EpisodeStateManager.shared.getState(for: episode.id).statusText.uppercased()
+            return EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId).statusText.uppercased()
         }
     }
     
@@ -2554,7 +2562,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         if isPlaying {
             return .blue
         } else {
-            return EpisodeStateManager.shared.getState(for: episode.id).statusColor
+            return EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId).statusColor
         }
     }
     
@@ -2618,8 +2626,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
         
         // Cache expensive computations once during initialization
         // For playing episodes, we'll use real-time progress; for others, use EpisodeStateManager
-        self.cachedProgress = isPlaying ? podcastPlayer.currentProgress : EpisodeStateManager.shared.getProgress(for: episode.id)
-        let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+        self.cachedProgress = isPlaying ? podcastPlayer.currentProgress : EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
+        let episodeState = EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId)
         self.cachedState = episodeState
         self.cachedIsCompleted = episodeState == .played || self.cachedProgress >= 0.99
         
@@ -2939,7 +2947,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .opacity(0.6)
                         } else {
                             // FIX: Use real-time EpisodeStateManager for button display
-                            let currentEpisodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                            let currentEpisodeState = EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId)
                             let currentButtonIcon = isPlaying ? "pause.fill" : currentEpisodeState.buttonImage
                             let currentButtonColor = isPlaying ? .blue : currentEpisodeState.buttonColor
                             
@@ -3105,7 +3113,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeProgressChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 // Force view refresh when this episode's progress changes instantly
                 refreshTrigger = UUID()
             }
@@ -3113,7 +3123,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodePlayedChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 // Force view refresh when this episode's played state changes instantly
                 refreshTrigger = UUID()
             }
@@ -3121,7 +3133,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeFavoriteChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 // Force view refresh when this episode's favorite state changes instantly
                 refreshTrigger = UUID()
             }
@@ -3129,7 +3143,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeDownloadChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,
                let episodeId = userInfo["episodeId"] as? String,
-               episodeId == episode.id {
+                    let feedId = userInfo["feedId"] as? String,
+                    episodeId == episode.id,
+                    feedId == episode.feedId {
                 // Force view refresh when this episode's download state changes instantly
                 refreshTrigger = UUID()
             }
@@ -3530,7 +3546,8 @@ struct PodcastPlayerView: View {
                 Spacer()
                 
                 HStack(spacing: 4) {
-                    Text("\(viewModel.currentEpisodes.count) episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
+                    let episodeCount = viewModel.episodesForDisplay(feedId: feed.id, tab: selectedTab).count
+                    Text("\(episodeCount) episode\(episodeCount == 1 ? "" : "s")")
                         .font(.caption2.weight(.semibold))
                         .foregroundColor(.adaptiveSecondaryText)
                     
@@ -3701,13 +3718,9 @@ struct PodcastPlayerView: View {
     }
 
     private var episodeRows: some View {
-        // 🚀 PERFORMANCE: Only access currentEpisodes ONCE per render, not per episode row
-        let allEpisodes: [PodcastEpisode]
-        if viewModel.selectedFeedId == feed.id {
-            allEpisodes = viewModel.currentEpisodes
-        } else {
-            allEpisodes = []
-        }
+        // The visible feed owns this list. CarPlay restoration may temporarily change global
+        // selection state, but that must not hide episodes already cached for this screen.
+        let allEpisodes = viewModel.episodesForDisplay(feedId: feed.id, tab: selectedTab)
         
         // 🛡️ SMART UI CONTAMINATION PREVENTION: Filter and show only clean episodes
         let episodes: [PodcastEpisode]
@@ -4154,13 +4167,13 @@ struct PodcastPlayerView: View {
             viewModel.pendingInitializationTasks.remove(taskKey)
             print("🔄 PodcastListView: Cleared loading state and pending tasks for feed switch")
         } else if viewModel.isReturningFromBackground {
-            // CRITICAL FIX: Only preserve episodes if they belong to THIS feed
-            // If episodes are from a different feed, clear them and load correct ones
+            // CarPlay can populate the player before the phone scene has hydrated this feed.
+            // Never clear the isolation cache while returning; an empty/wrong current projection
+            // must fall through to the normal Core Data load below.
             if currentEpisodesForThisFeed {
                 print("🔄 PodcastListView: Returning from background - preserving episodes (\(viewModel.currentEpisodes.count) episodes for feed \(feed.id))")
             } else {
-                print("🔄 PodcastListView: Returning from background - but episodes are from different feed, clearing them")
-                viewModel.currentEpisodes.removeAll()
+                print("🔄 PodcastListView: Returning from background - current projection needs reload for feed \(feed.id)")
             }
             
             // Update selectedFeedId to match current feed to stay in sync
@@ -4187,7 +4200,7 @@ struct PodcastPlayerView: View {
         }
         
         // CRITICAL PERFORMANCE: Skip ALL expensive operations when snapshots are available
-        let hasSnapshot = viewModel.feedIsolationManager.getEpisodesForFeed(feed.id) != nil
+        let hasSnapshot = !viewModel.feedIsolationManager.getEpisodesForFeed(feed.id).isEmpty
         if hasSnapshot {
             print("⚡ ULTRA PERFORMANCE: Using cache for feed \(feed.id) - SKIPPING ALL EXPENSIVE OPERATIONS")
             // Use cached data directly without any loading operations
@@ -4313,7 +4326,7 @@ struct PodcastPlayerView: View {
         if podcastPlayer.currentEpisode?.id == episode.id {
             // Check the specific episode's progress, not the current player's progress
             let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
-            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId)
             let isPlayedByState = episodeState == .played
             let isCompletedByProgress = episodeProgress >= 0.99
             
@@ -4331,7 +4344,7 @@ struct PodcastPlayerView: View {
         } else {
             // Check if this different episode is finished and should be rewound
             let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
-            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id, feedId: episode.feedId)
             let isPlayedByState = episodeState == .played
             let isCompletedByProgress = episodeProgress >= 0.99
             

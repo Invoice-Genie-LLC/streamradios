@@ -138,6 +138,23 @@ class EpisodeStateManager: ObservableObject {
     private let favoritesKey = "EpisodeFavorites" // New: Favorites storage key
     private let downloadsKey = "EpisodeDownloads" // New: Downloads storage key
     private let currentlyPlayingKey = "CurrentlyPlayingEpisode"
+    private static let stateKeySeparator = "\u{1F}"
+    private static let completionProgressThreshold = 0.99
+
+    private static func stateKey(episodeId: String, feedId: String?) -> String {
+        guard let feedId, !feedId.isEmpty else { return episodeId }
+        return "\(feedId)\(stateKeySeparator)\(episodeId)"
+    }
+
+    private static func parseStateKey(_ key: String) -> (episodeId: String, feedId: String?) {
+        guard let separatorRange = key.range(of: stateKeySeparator) else {
+            return (key, nil)
+        }
+        return (
+            String(key[separatorRange.upperBound...]),
+            String(key[..<separatorRange.lowerBound])
+        )
+    }
     
     // UPGRADE PROTECTION: Keys for tracking app version and preventing data loss
     private let appVersionKey = "EpisodeStateManagerAppVersion"
@@ -159,7 +176,7 @@ class EpisodeStateManager: ObservableObject {
     private var pendingCloudKitSyncs: Set<String> = []
     
     // SYNC DEDUPLICATION: Track recent syncs to prevent duplicates
-    private var recentSyncs: [String: Double] = [:]
+    private var recentSyncs: [String: (timestamp: Double, fingerprint: String)] = [:]
     private let syncDeduplicationWindow: TimeInterval = 0.5 // 0.5 seconds - much shorter to allow real-time syncs
     
     // PERFORMANCE: Control verbose logging during batch operations to reduce CPU usage
@@ -167,11 +184,18 @@ class EpisodeStateManager: ObservableObject {
     
     // EPISODE-SPECIFIC SYNC TIMING: Track real-time sync timing per episode to prevent refresh conflicts
     private var episodeLastRealTimeSyncTime: [String: Double] = [:]
+
+    // Coalesce overlapping Core Data writes without delaying the first save request.
+    private let coreDataSaveLock = NSLock()
+    private let emergencyBackupQueue = DispatchQueue(label: "com.streamradios.episodeEmergencyBackup", qos: .utility)
+    private var pendingCoreDataStateKeys: Set<String> = []
+    private var pendingFullCoreDataSave = false
+    private var isCoreDataSaveScheduled = false
     
     // CLOUDKIT PRIORITY MODE: When enabled, Core Data takes precedence over EpisodeStateManager
     // Used during pull-to-refresh and episode list loading to ensure CloudKit data is immediately visible
     private var cloudKitPriorityMode: Bool = false
-    private let cloudKitPriorityQueue = DispatchQueue(label: "com.streamradios.cloudkitPriority", attributes: .concurrent)
+    private let cloudKitPriorityLock = NSLock()
     
     // SYNC RESUMPTION: Track CloudKit sync progress
     private var cloudKitSyncProgress: CloudKitSyncProgress?
@@ -182,11 +206,12 @@ class EpisodeStateManager: ObservableObject {
     
     // Track if we just restored from backup to prevent overwriting
     private var didRestoreFromBackup: Bool = false
+    private var isUpgradeLaunch = false
     
     // DATA INTEGRITY: Track integrity check timing and results
     private var lastIntegrityCheckTime: Date?
     private var integrityCheckTimer: Timer?
-    private let integrityCheckInterval: TimeInterval = 300 // Check every 5 minutes
+    private let integrityCheckInterval: TimeInterval = 6 * 60 * 60
     private var integrityIssuesFound: Int = 0
     private var integrityChecksPerformed: Int = 0
     
@@ -217,8 +242,6 @@ class EpisodeStateManager: ObservableObject {
         Task.detached(priority: .userInitiated) {
             await self.loadSavedStatesAsync()
         }
-        
-        setupDebugLogging()
         
         // Mark successful initialization
         userDefaults.set(Date().timeIntervalSince1970, forKey: lastSuccessfulInitKey)
@@ -324,23 +347,6 @@ class EpisodeStateManager: ObservableObject {
     /// Perform comprehensive data integrity check across all storage layers
     /// Compares Core Data, local memory, and validates CloudKit sync status
     func performDataIntegrityCheck(reason: String) {
-        // FRESH INSTALL GUARD: Skip integrity checks if there are no episodes
-        // This prevents noise on fresh installs where CloudKit may have orphaned data
-        let checkContext = CoreDataStack.shared.newBackgroundContext()
-        let countRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        countRequest.fetchLimit = 1
-        
-        do {
-            let episodeCount = try checkContext.count(for: countRequest)
-            if episodeCount == 0 {
-                return // Silently skip - no episodes to check
-            }
-        } catch {
-            // Continue if we can't determine episode count
-        }
-        
-        print("🔍 DATA INTEGRITY CHECK: Starting verification (reason: \(reason))")
-        
         integrityChecksPerformed += 1
         lastIntegrityCheckTime = Date()
         
@@ -357,13 +363,18 @@ class EpisodeStateManager: ObservableObject {
             
             var issuesFound = 0
             var totalEpisodesChecked = 0
-            var discrepancies: [String: IntegrityDiscrepancy] = [:]
+            var discrepancies: [IntegrityDiscrepancy] = []
             
             do {
                 // Load all episodes from Core Data
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 let coreDataEpisodes = try context.fetch(fetchRequest)
-                
+
+                guard !coreDataEpisodes.isEmpty else {
+                    print("ℹ️ DATA INTEGRITY: No episodes in Core Data, skipping check")
+                    return
+                }
+
                 print("🔍 DATA INTEGRITY: Checking \(coreDataEpisodes.count) Core Data episodes against local memory")
                 
                 // DIAGNOSTIC: Check for episodes with states in Core Data
@@ -378,84 +389,96 @@ class EpisodeStateManager: ObservableObject {
                 }
                 
                 for episode in coreDataEpisodes {
-                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    guard let episodeId = episode.id,
+                          !episodeId.isEmpty,
+                          let feedId = episode.feedId,
+                          !feedId.isEmpty else { continue }
+                      let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
                     
                     totalEpisodesChecked += 1
                     
                     // Compare progress
                     let coreDataProgress = Double(episode.progress)
-                    let memoryProgress = self.episodeProgress[episodeId] ?? 0.0
-                    
-                    if abs(coreDataProgress - memoryProgress) > 0.01 { // Allow 1% tolerance
+                          if let memoryProgress = self.episodeProgress[stateKey],
+                              abs(coreDataProgress - memoryProgress) > 0.01 { // Allow 1% tolerance
                         issuesFound += 1
-                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                        discrepancies.append(IntegrityDiscrepancy(
                             episodeId: episodeId,
+                            feedId: feedId,
                             type: .progressMismatch,
                             coreDataValue: coreDataProgress,
                             memoryValue: memoryProgress,
                             fieldName: "progress"
-                        )
+                        ))
                         print("⚠️ INTEGRITY ISSUE: Progress mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataProgress), Memory: \(memoryProgress)")
                     }
                     
                     // Compare played state
                     let coreDataPlayed = episode.isPlayed
-                    let memoryState = self.episodeStates[episodeId]
-                    let memoryPlayed = (memoryState == .played)
-                    
-                    if coreDataPlayed != memoryPlayed {
+                    if let memoryState = self.episodeStates[stateKey],
+                       coreDataPlayed != (memoryState == .played) {
+                        let memoryPlayed = memoryState == .played
                         issuesFound += 1
-                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                        discrepancies.append(IntegrityDiscrepancy(
                             episodeId: episodeId,
+                            feedId: feedId,
                             type: .playedStateMismatch,
                             coreDataValue: coreDataPlayed,
                             memoryValue: memoryPlayed,
                             fieldName: "isPlayed"
-                        )
+                        ))
                         print("⚠️ INTEGRITY ISSUE: Played state mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataPlayed), Memory: \(memoryPlayed)")
                     }
                     
                     // Compare favorite status
                     let coreDataFavorite = episode.isFavorite
-                    let memoryFavorite = self.episodeFavorites[episodeId] ?? false
-                    
-                    if coreDataFavorite != memoryFavorite {
+                          if let memoryFavorite = self.episodeFavorites[stateKey],
+                              coreDataFavorite != memoryFavorite {
                         issuesFound += 1
-                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                        discrepancies.append(IntegrityDiscrepancy(
                             episodeId: episodeId,
+                            feedId: feedId,
                             type: .favoriteMismatch,
                             coreDataValue: coreDataFavorite,
                             memoryValue: memoryFavorite,
                             fieldName: "isFavorite"
-                        )
+                        ))
                         print("⚠️ INTEGRITY ISSUE: Favorite mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataFavorite), Memory: \(memoryFavorite)")
                     }
                     
                     // Compare download status
                     let coreDataDownloaded = episode.isDownloaded
-                    let memoryDownloaded = self.episodeDownloads[episodeId] ?? false
-                    
-                    if coreDataDownloaded != memoryDownloaded {
+                          if let memoryDownloaded = self.episodeDownloads[stateKey],
+                              coreDataDownloaded != memoryDownloaded {
                         issuesFound += 1
-                        discrepancies[episodeId] = IntegrityDiscrepancy(
+                        discrepancies.append(IntegrityDiscrepancy(
                             episodeId: episodeId,
+                            feedId: feedId,
                             type: .downloadMismatch,
                             coreDataValue: coreDataDownloaded,
                             memoryValue: memoryDownloaded,
                             fieldName: "isDownloaded"
-                        )
+                        ))
                         print("⚠️ INTEGRITY ISSUE: Download mismatch for \(episodeId.prefix(8)) - CoreData: \(coreDataDownloaded), Memory: \(memoryDownloaded)")
                     }
                 }
                 
                 // Check for episodes in memory that don't exist in Core Data
-                let coreDataEpisodeIds = Set(coreDataEpisodes.compactMap { $0.id })
+                let episodeIdCounts = Dictionary(grouping: coreDataEpisodes.compactMap(\.id), by: { $0 }).mapValues(\.count)
+                var coreDataStateKeys = Set<String>()
+                for episode in coreDataEpisodes {
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    coreDataStateKeys.insert(Self.stateKey(episodeId: episodeId, feedId: episode.feedId))
+                    if episodeIdCounts[episodeId] == 1 {
+                        coreDataStateKeys.insert(episodeId)
+                    }
+                }
                 let memoryEpisodeIds = Set(self.episodeStates.keys)
                     .union(Set(self.episodeProgress.keys))
                     .union(Set(self.episodeFavorites.keys))
                     .union(Set(self.episodeDownloads.keys))
                 
-                let orphanedMemoryEpisodes = memoryEpisodeIds.subtracting(coreDataEpisodeIds)
+                let orphanedMemoryEpisodes = memoryEpisodeIds.subtracting(coreDataStateKeys)
                 if !orphanedMemoryEpisodes.isEmpty {
                     issuesFound += orphanedMemoryEpisodes.count
                     print("⚠️ INTEGRITY ISSUE: Found \(orphanedMemoryEpisodes.count) episodes in memory but not in Core Data")
@@ -492,17 +515,21 @@ class EpisodeStateManager: ObservableObject {
     /// Reconcile data inconsistencies by applying the "source of truth" rule
     /// Memory is considered the source of truth, Core Data is updated to match
     @MainActor
-    private func reconcileDataInconsistencies(discrepancies: [String: IntegrityDiscrepancy]) {
+    private func reconcileDataInconsistencies(discrepancies: [IntegrityDiscrepancy]) {
         print("🔧 RECONCILIATION: Fixing \(discrepancies.count) data inconsistencies")
         
         var fixedCount = 0
         let context = CoreDataStack.shared.newBackgroundContext()
         
         context.perform {
-            for (episodeId, discrepancy) in discrepancies {
+            for discrepancy in discrepancies {
+                let episodeId = discrepancy.episodeId
                 do {
                     let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                    fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                    fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                        NSPredicate(format: "feedId == %@", discrepancy.feedId),
+                        NSPredicate(format: "id == %@", episodeId)
+                    ])
                     fetchRequest.fetchLimit = 1
                     
                     guard let episode = try context.fetch(fetchRequest).first else {
@@ -554,9 +581,16 @@ class EpisodeStateManager: ObservableObject {
                     
                     // Sync fixed data to CloudKit
                     Task { @MainActor in
-                        for (episodeId, _) in discrepancies.prefix(10) {
+                        let uniqueEpisodes = Dictionary(
+                            grouping: discrepancies.prefix(10),
+                            by: { "\($0.feedId)\u{1F}\($0.episodeId)" }
+                        ).compactMap { $0.value.first }
+                        for discrepancy in uniqueEpisodes {
                             // Sync the fixed episode to CloudKit
-                            self.syncEpisodeStateToCloudKit(episodeId: episodeId)
+                            self.syncEpisodeStateToCloudKit(
+                                episodeId: discrepancy.episodeId,
+                                feedId: discrepancy.feedId
+                            )
                         }
                     }
                 } catch {
@@ -567,16 +601,16 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Sync a single episode's state to CloudKit after reconciliation
-    private func syncEpisodeStateToCloudKit(episodeId: String) {
-        guard let feedId = getFeedId(for: episodeId) else {
+    private func syncEpisodeStateToCloudKit(episodeId: String, feedId providedFeedId: String? = nil) {
+        guard let feedId = providedFeedId ?? getFeedId(for: episodeId) else {
             print("⚠️ CLOUDKIT SYNC: Cannot sync \(episodeId.prefix(8)) - feedId not found")
             return
         }
-        
-        let progress = episodeProgress[episodeId] ?? 0.0
-        let state = episodeStates[episodeId]
-        let isFavorite = episodeFavorites[episodeId] ?? false
-        let isDownloaded = episodeDownloads[episodeId] ?? false
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        let progress = episodeProgress[stateKey] ?? 0.0
+        let state = episodeStates[stateKey]
+        let isFavorite = episodeFavorites[stateKey] ?? false
+        let isDownloaded = episodeDownloads[stateKey] ?? false
         let isPlayed = (state == .played)
         
         // Sync complete episode state to CloudKit
@@ -597,6 +631,7 @@ class EpisodeStateManager: ObservableObject {
     /// Helper struct to track integrity discrepancies
     private struct IntegrityDiscrepancy {
         let episodeId: String
+        let feedId: String
         let type: DiscrepancyType
         let coreDataValue: Any
         let memoryValue: Any
@@ -660,52 +695,48 @@ class EpisodeStateManager: ObservableObject {
     
     /// Create emergency backup of CRITICAL data only to prevent CFPreferences overflow
     private func createEmergencyBackup() {
-        // EMERGENCY PERFORMANCE: Move backup creation to background queue to prevent main thread hangs
-        Task.detached(priority: .background) {
+        let captureAndSave = { [weak self] in
+            guard let self else { return }
             let timestamp = Date().timeIntervalSince1970
-            
-            var emergencyData: [String: Any] = [:]
-            
-            // CRITICAL FIX: Only backup ESSENTIAL data to prevent CFPreferences 4MB limit
-            // Do NOT backup episodeStates or episodeProgress (can be 3829+ episodes = 4MB+)
-            // These are already in Core Data and will be restored from there
             let favoritesSnapshot = self.episodeFavorites
             let downloadsSnapshot = self.episodeDownloads
             let playingSnapshot = self.currentlyPlayingEpisodeId
-            
-            // Only backup critical data that's hard to recover
-            emergencyData["episodeFavorites"] = favoritesSnapshot
-            emergencyData["episodeDownloads"] = downloadsSnapshot
-            emergencyData["currentlyPlaying"] = playingSnapshot
-            emergencyData["timestamp"] = timestamp
-            emergencyData["version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-            
-            // Store emergency backup
-            if let emergencyBackupData = try? JSONSerialization.data(withJSONObject: emergencyData) {
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+
+            self.emergencyBackupQueue.async {
+                var emergencyData: [String: Any] = [
+                    "episodeFavorites": favoritesSnapshot,
+                    "episodeDownloads": downloadsSnapshot,
+                    "timestamp": timestamp
+                ]
+                emergencyData["currentlyPlaying"] = playingSnapshot
+                emergencyData["version"] = version
+
+                guard let emergencyBackupData = try? JSONSerialization.data(withJSONObject: emergencyData) else {
+                    return
+                }
                 let backupSize = emergencyBackupData.count
-                
-                // SAFETY CHECK: Only store if under 1MB to avoid CFPreferences overflow
+
                 guard backupSize < 1_000_000 else {
                     print("⚠️ EpisodeStateManager: Emergency backup too large (\(backupSize) bytes), skipping to prevent CFPreferences overflow")
                     return
                 }
-                
-                // FIXED KEY ONLY: Use single fixed key (overwrites previous backup)
-                // This prevents accumulation of timestamped keys that can cause overflow
+
                 self.userDefaults.set(emergencyBackupData, forKey: "CoreDataEmergencyBackup")
-                
-                // Tertiary backup in iCloud key-value storage if available
-                if let iCloudStore = NSUbiquitousKeyValueStore.default as NSUbiquitousKeyValueStore? {
-                    iCloudStore.set(emergencyBackupData, forKey: "StreamRadios_EpisodeStates_Emergency")
-                    iCloudStore.synchronize()
-                }
-                
+
+                let iCloudStore = NSUbiquitousKeyValueStore.default
+                iCloudStore.set(emergencyBackupData, forKey: "StreamRadios_EpisodeStates_Emergency")
+                iCloudStore.synchronize()
+
                 print("💾 EpisodeStateManager: Created emergency backup (\(backupSize) bytes) with \(favoritesSnapshot.count) favorites, \(downloadsSnapshot.count) downloads")
-                
-                // CLEANUP: Remove old timestamped emergency backups to prevent accumulation
-                // Keep only the fixed "CoreDataEmergencyBackup" key and remove all timestamped ones
                 self.cleanupOldEmergencyBackups()
             }
+        }
+
+        if Thread.isMainThread {
+            captureAndSave()
+        } else {
+            DispatchQueue.main.async(execute: captureAndSave)
         }
     }
     
@@ -892,6 +923,7 @@ class EpisodeStateManager: ObservableObject {
             
             // Check if this is actually an upgrade (has existing episode data)
             if hasExistingEpisodeData() {
+                isUpgradeLaunch = true
                 print("🔄 EpisodeStateManager: Detected upgrade scenario - preserving existing data")
                 performUpgradeMigration(from: storedVersion, to: currentVersion)
                 
@@ -902,6 +934,7 @@ class EpisodeStateManager: ObservableObject {
             }
         } else if storedVersion != currentVersion {
             // App version changed - this is an upgrade
+            isUpgradeLaunch = true
             print("🔄 EpisodeStateManager: App upgraded from \(storedVersion ?? "unknown") to \(currentVersion)")
             performUpgradeMigration(from: storedVersion, to: currentVersion)
             
@@ -1153,19 +1186,7 @@ class EpisodeStateManager: ObservableObject {
     
     /// Check if this is a definite upgrade scenario (not fresh install)
     func isUpgradeScenario() -> Bool {
-        // Multiple indicators that this is an upgrade:
-        // 1. Has existing episode data
-        // 2. Has app version stored (ran before)
-        // 3. Has successful initialization timestamp
-        // 4. Has Core Data with episodes
-        
-        let hasStoredVersion = userDefaults.string(forKey: appVersionKey) != nil
-        let hasInitTimestamp = userDefaults.object(forKey: lastSuccessfulInitKey) != nil
-        let hasEpisodeData = hasExistingEpisodeData()
-        
-        let isUpgrade = hasStoredVersion || hasInitTimestamp || hasEpisodeData
-        
-        return isUpgrade
+        return isUpgradeLaunch
     }
     
     // MARK: - CloudKit Priority Mode Methods
@@ -1173,24 +1194,24 @@ class EpisodeStateManager: ObservableObject {
     /// Enable CloudKit priority mode - Core Data takes precedence over EpisodeStateManager
     /// Used during pull-to-refresh and episode list loading
     func enableCloudKitPriorityMode() {
-        cloudKitPriorityQueue.async(flags: .barrier) {
-            self.cloudKitPriorityMode = true
-            print("☁️ 🔄 CLOUDKIT PRIORITY: Enabled - Core Data will take precedence during episode loading")
-        }
+        cloudKitPriorityLock.lock()
+        cloudKitPriorityMode = true
+        cloudKitPriorityLock.unlock()
+        print("☁️ 🔄 CLOUDKIT PRIORITY: Enabled - Core Data will take precedence during episode loading")
     }
     
     /// Disable CloudKit priority mode - return to normal EpisodeStateManager priority
     func disableCloudKitPriorityMode() {
-        cloudKitPriorityQueue.async(flags: .barrier) {
-            self.cloudKitPriorityMode = false
-        }
+        cloudKitPriorityLock.lock()
+        cloudKitPriorityMode = false
+        cloudKitPriorityLock.unlock()
     }
     
     /// Check if CloudKit priority mode is enabled (thread-safe)
     func isCloudKitPriorityMode() -> Bool {
-        return cloudKitPriorityQueue.sync {
-            return cloudKitPriorityMode
-        }
+        cloudKitPriorityLock.lock()
+        defer { cloudKitPriorityLock.unlock() }
+        return cloudKitPriorityMode
     }
     
     // MARK: - Public Methods
@@ -1227,7 +1248,7 @@ class EpisodeStateManager: ObservableObject {
     /// Load episode states from Core Data asynchronously (performance optimized)
     /// PERFORMANCE: Async loading prevents blocking app startup with large episode counts
     private func loadFromCoreDataAsync() async {
-        let context = CoreDataStack.shared.context
+        let context = await CoreDataStack.shared.newBackgroundContextAfterStoreLoad()
         
         var loadedProgress: [String: Double] = [:]
         var loadedFavorites: [String: Bool] = [:]
@@ -1244,6 +1265,7 @@ class EpisodeStateManager: ObservableObject {
                 // Remove the restrictive predicate to load all episodes
                 
                 let episodes = try context.fetch(fetchRequest)
+                let episodeIdCounts = Dictionary(grouping: episodes.compactMap { $0.id }, by: { $0 }).mapValues(\.count)
                 
                 var progressCount = 0
                 var favoritesCount = 0
@@ -1254,35 +1276,49 @@ class EpisodeStateManager: ObservableObject {
                     guard let episodeId = episode.id, !episodeId.isEmpty else { 
                         continue 
                     }
+                    let qualifiedKey = Self.stateKey(episodeId: episodeId, feedId: episode.feedId)
+                    let stateKeys = episodeIdCounts[episodeId] == 1 ? [qualifiedKey, episodeId] : [qualifiedKey]
                     
                     // Load progress (check for any progress > 0)
                     if episode.progress > 0 {
-                        loadedProgress[episodeId] = Double(episode.progress)
+                        for stateKey in stateKeys {
+                            loadedProgress[stateKey] = Double(episode.progress)
+                        }
                         progressCount += 1
                     }
                     
                     // Load favorites
                     if episode.isFavorite {
-                        loadedFavorites[episodeId] = true
+                        for stateKey in stateKeys {
+                            loadedFavorites[stateKey] = true
+                        }
                         favoritesCount += 1
                     }
                     
                     // Load downloads
                     if episode.isDownloaded {
-                        loadedDownloads[episodeId] = true
+                        for stateKey in stateKeys {
+                            loadedDownloads[stateKey] = true
+                        }
                         downloadsCount += 1
                     }
                     
                     // Load played state - prioritize explicit isPlayed over progress calculation
                     if episode.isPlayed {
-                        loadedStates[episodeId] = .played
+                        for stateKey in stateKeys {
+                            loadedStates[stateKey] = .played
+                        }
                         playedCount += 1
-                    } else if episode.progress >= 1.0 {
+                    } else if episode.progress >= Self.completionProgressThreshold {
                         // Episode completed but not explicitly marked as played - mark it
-                        loadedStates[episodeId] = .played
+                        for stateKey in stateKeys {
+                            loadedStates[stateKey] = .played
+                        }
                         playedCount += 1
                     } else if episode.progress > 0 {
-                        loadedStates[episodeId] = .inProgress
+                        for stateKey in stateKeys {
+                            loadedStates[stateKey] = .inProgress
+                        }
                     }
                 }
                 
@@ -1320,35 +1356,42 @@ class EpisodeStateManager: ObservableObject {
     private func cleanupOrphanedStates() async {
         let context = CoreDataStack.shared.newBackgroundContext()
         
-        var validEpisodeIds = Set<String>()
+        var validStateKeys = Set<String>()
         await context.perform {
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.propertiesToFetch = ["id"]
+            fetchRequest.propertiesToFetch = ["id", "feedId"]
             
             do {
                 let episodes = try context.fetch(fetchRequest)
-                validEpisodeIds = Set(episodes.compactMap { $0.id })
+                let episodeIdCounts = Dictionary(grouping: episodes.compactMap { $0.id }, by: { $0 }).mapValues(\.count)
+                for episode in episodes {
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    validStateKeys.insert(Self.stateKey(episodeId: episodeId, feedId: episode.feedId))
+                    if episodeIdCounts[episodeId] == 1 {
+                        validStateKeys.insert(episodeId)
+                    }
+                }
             } catch {
                 print("❌ ORPHAN CLEANUP: Failed to fetch episode IDs: \(error)")
             }
         }
         
         // An empty store means Core Data was reset, not that every episode is an orphan.
-        guard !validEpisodeIds.isEmpty else {
+        guard !validStateKeys.isEmpty else {
             print("⚠️ ORPHAN CLEANUP: No episodes in Core Data - skipping to avoid wiping recoverable state")
             return
         }
         
-        print("🧹 ORPHAN CLEANUP: Found \(validEpisodeIds.count) valid episodes in Core Data")
+        print("🧹 ORPHAN CLEANUP: Found \(validStateKeys.count) valid episode state keys in Core Data")
         
         await MainActor.run {
             // Keep anything the user actually did - the episode may come back on a later refresh.
-            let isOrphan: (String) -> Bool = { episodeId in
-                guard !validEpisodeIds.contains(episodeId) else { return false }
-                let hasProgress = (self.episodeProgress[episodeId] ?? 0) > 0
-                let isFavorite = self.episodeFavorites[episodeId] ?? false
-                let isDownloaded = self.episodeDownloads[episodeId] ?? false
-                let wasPlayed = self.episodeStates[episodeId] == .played
+            let isOrphan: (String) -> Bool = { stateKey in
+                guard !validStateKeys.contains(stateKey) else { return false }
+                let hasProgress = (self.episodeProgress[stateKey] ?? 0) > 0
+                let isFavorite = self.episodeFavorites[stateKey] ?? false
+                let isDownloaded = self.episodeDownloads[stateKey] ?? false
+                let wasPlayed = self.episodeStates[stateKey] == .played
                 return !hasProgress && !isFavorite && !isDownloaded && !wasPlayed
             }
             
@@ -1385,27 +1428,30 @@ class EpisodeStateManager: ObservableObject {
             do {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 let episodes = try context.fetch(fetchRequest)
+                let episodeIdCounts = Dictionary(grouping: episodes.compactMap { $0.id }, by: { $0 }).mapValues(\.count)
                 print("💾 MERGE LOAD: Found \(episodes.count) episodes in Core Data to merge")
                 
                 for episode in episodes {
                     guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    let qualifiedKey = Self.stateKey(episodeId: episodeId, feedId: episode.feedId)
+                    let stateKeys = episodeIdCounts[episodeId] == 1 ? [qualifiedKey, episodeId] : [qualifiedKey]
                     
                     // Collect Core Data values
                     if episode.progress > 0 {
-                        coreDataProgress[episodeId] = Double(episode.progress)
+                        for stateKey in stateKeys { coreDataProgress[stateKey] = Double(episode.progress) }
                     }
                     if episode.isFavorite {
-                        coreDataFavorites[episodeId] = true
+                        for stateKey in stateKeys { coreDataFavorites[stateKey] = true }
                     }
                     if episode.isDownloaded {
-                        coreDataDownloads[episodeId] = true
+                        for stateKey in stateKeys { coreDataDownloads[stateKey] = true }
                     }
                     if episode.isPlayed {
-                        coreDataStates[episodeId] = .played
-                    } else if episode.progress >= 1.0 {
-                        coreDataStates[episodeId] = .played
+                        for stateKey in stateKeys { coreDataStates[stateKey] = .played }
+                    } else if episode.progress >= Self.completionProgressThreshold {
+                        for stateKey in stateKeys { coreDataStates[stateKey] = .played }
                     } else if episode.progress > 0 {
-                        coreDataStates[episodeId] = .inProgress
+                        for stateKey in stateKeys { coreDataStates[stateKey] = .inProgress }
                     }
                 }
             } catch {
@@ -1457,7 +1503,7 @@ class EpisodeStateManager: ObservableObject {
     /// Async version: Load episode states from Core Data and MERGE with existing restored backup data
     /// Used after backup restoration to avoid overwriting restored data
     private func loadFromCoreDataAndMergeAsync() async {
-        let context = CoreDataStack.shared.context
+        let context = await CoreDataStack.shared.newBackgroundContextAfterStoreLoad()
         
         var coreDataProgress: [String: Double] = [:]
         var coreDataFavorites: [String: Bool] = [:]
@@ -1468,27 +1514,30 @@ class EpisodeStateManager: ObservableObject {
             do {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 let episodes = try context.fetch(fetchRequest)
+                let episodeIdCounts = Dictionary(grouping: episodes.compactMap { $0.id }, by: { $0 }).mapValues(\.count)
                 print("💾 MERGE LOAD: Found \(episodes.count) episodes in Core Data to merge")
                 
                 for episode in episodes {
                     guard let episodeId = episode.id, !episodeId.isEmpty else { continue }
+                    let qualifiedKey = Self.stateKey(episodeId: episodeId, feedId: episode.feedId)
+                    let stateKeys = episodeIdCounts[episodeId] == 1 ? [qualifiedKey, episodeId] : [qualifiedKey]
                     
                     // Collect Core Data values
                     if episode.progress > 0 {
-                        coreDataProgress[episodeId] = Double(episode.progress)
+                        for stateKey in stateKeys { coreDataProgress[stateKey] = Double(episode.progress) }
                     }
                     if episode.isFavorite {
-                        coreDataFavorites[episodeId] = true
+                        for stateKey in stateKeys { coreDataFavorites[stateKey] = true }
                     }
                     if episode.isDownloaded {
-                        coreDataDownloads[episodeId] = true
+                        for stateKey in stateKeys { coreDataDownloads[stateKey] = true }
                     }
                     if episode.isPlayed {
-                        coreDataStates[episodeId] = .played
-                    } else if episode.progress >= 1.0 {
-                        coreDataStates[episodeId] = .played
+                        for stateKey in stateKeys { coreDataStates[stateKey] = .played }
+                    } else if episode.progress >= Self.completionProgressThreshold {
+                        for stateKey in stateKeys { coreDataStates[stateKey] = .played }
                     } else if episode.progress > 0 {
-                        coreDataStates[episodeId] = .inProgress
+                        for stateKey in stateKeys { coreDataStates[stateKey] = .inProgress }
                     }
                 }
             } catch {
@@ -1585,9 +1634,9 @@ class EpisodeStateManager: ObservableObject {
         }
     }
     
-    private func saveCurrentStates() {
+    private func saveCurrentStates(for stateKeys: Set<String>? = nil) {
         // CRITICAL FIX: Save to Core Data instead of UserDefaults to prevent CFPreferences overflow
-        saveToCoreData()
+        saveToCoreData(stateKeys: stateKeys)
         
         // Save currently playing episode to UserDefaults (small data, safe)
         if let playingId = currentlyPlayingEpisodeId {
@@ -1598,13 +1647,6 @@ class EpisodeStateManager: ObservableObject {
         
         // CRITICAL: Create emergency backup periodically to survive Core Data recreation
         createPeriodicEmergencyBackup()
-        
-        // DATA INTEGRITY: Perform integrity check every 100 saves
-        if periodicBackupCounter % 100 == 0 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.performDataIntegrityCheck(reason: "after_100_saves")
-            }
-        }
         
         // Send throttled notification about state changes
         sendThrottledUpdate()
@@ -1640,17 +1682,26 @@ class EpisodeStateManager: ObservableObject {
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
             fetchRequest.propertiesToFetch = ["feedId", "feed"] // Fetch feedId and relationship
-            fetchRequest.fetchLimit = 1
+            fetchRequest.fetchLimit = 2
             
             do {
-                if let episode = try context.fetch(fetchRequest).first {
+                let matchingEpisodes = try context.fetch(fetchRequest)
+                let directFeedIds: Set<String> = Set(matchingEpisodes.compactMap { episode -> String? in
+                    guard let feedId = episode.feedId, !feedId.isEmpty else { return nil }
+                    return feedId
+                })
+
+                if directFeedIds.count > 1 {
+                    print("📡 ❌ FEEDID LOOKUP AMBIGUOUS: Episode \(episodeId) belongs to multiple feeds; explicit feedId required")
+                    return
+                }
+
+                if let directFeedId = directFeedIds.first {
+                    result = directFeedId
+                    print("📡 ✅ CORE DATA LOOKUP: Found feedId \(directFeedId) for episode \(episodeId)")
+                } else if let episode = matchingEpisodes.first {
                     // First try to get feedId from the stored property
-                    if let directFeedId = episode.feedId, !directFeedId.isEmpty {
-                        result = directFeedId
-                        print("📡 ✅ CORE DATA LOOKUP: Found feedId \(directFeedId) for episode \(episodeId)")
-                    } 
-                    // If no direct feedId, try to get from feed relationship
-                    else if let feedRelation = episode.feed, let relationFeedId = feedRelation.id, !relationFeedId.isEmpty {
+                    if let feedRelation = episode.feed, let relationFeedId = feedRelation.id, !relationFeedId.isEmpty {
                         result = relationFeedId
                         print("📡 🔧 RELATIONSHIP LOOKUP: Found feedId \(relationFeedId) via relationship for episode \(episodeId)")
                         
@@ -1807,7 +1858,7 @@ class EpisodeStateManager: ObservableObject {
     /// Set progress with real-time sync and known feedId (more efficient)
     func setProgressWithRealTimeSync(for episodeId: String, progress: Double, reason: String, feedId: String?) {
         // Update local progress first
-        setProgress(for: episodeId, progress: progress)
+        setProgress(for: episodeId, progress: progress, feedId: feedId)
         
         // REAL-TIME SYNC: Instantly sync progress changes for allowed conditions
         let allowedReasons = ["episode_paused", "app_background", "app_closed", "app_resign_active_force_close_protection", "app_did_enter_background_potential_force_close"]
@@ -1828,37 +1879,52 @@ class EpisodeStateManager: ObservableObject {
         }
     }
     
-    /// Save episode states to Core Data instead of UserDefaults
-    /// Thread-safe: Uses background context to prevent concurrent access issues
-    /// silentMode: When true, saves asynchronously (for CloudKit syncs). When false, saves synchronously (for user actions)
-    private func saveToCoreData(silentMode: Bool = false) {
-        let context = CoreDataStack.shared.newBackgroundContext()
-        
-        // CRITICAL FIX: Use synchronous save for user actions to ensure immediate persistence
-        // Use async save only for silent modes (bulk CloudKit sync) to avoid blocking UI
-        let performBlock = {
-            self.saveToCoreDataImpl(context: context)
-        }
-        
-        if silentMode {
-            // Async save for bulk operations (CloudKit sync)
-            context.perform(performBlock)
+    /// Save episode states to Core Data instead of UserDefaults.
+    /// All writes are scheduled on the context queue so callers never block a Swift concurrency executor.
+    private func saveToCoreData(silentMode _: Bool = false, stateKeys: Set<String>? = nil) {
+        coreDataSaveLock.lock()
+        if let stateKeys, !pendingFullCoreDataSave {
+            pendingCoreDataStateKeys.formUnion(stateKeys)
         } else {
-            // Sync save for user actions (favorite, download) - ensures data is saved before app can close
-            context.performAndWait(performBlock)
+            pendingFullCoreDataSave = true
+            pendingCoreDataStateKeys.removeAll()
+        }
+
+        guard !isCoreDataSaveScheduled else {
+            coreDataSaveLock.unlock()
+            return
+        }
+        isCoreDataSaveScheduled = true
+        coreDataSaveLock.unlock()
+
+        let context = CoreDataStack.shared.newBackgroundContext()
+
+        context.perform {
+            self.coreDataSaveLock.lock()
+            let pendingKeys = self.pendingFullCoreDataSave ? nil : self.pendingCoreDataStateKeys
+            self.pendingCoreDataStateKeys.removeAll()
+            self.pendingFullCoreDataSave = false
+            self.isCoreDataSaveScheduled = false
+            self.coreDataSaveLock.unlock()
+
+            self.saveToCoreDataImpl(context: context, stateKeys: pendingKeys)
         }
     }
     
     /// Internal implementation of Core Data save
-    private func saveToCoreDataImpl(context: NSManagedObjectContext) {
+    private func saveToCoreDataImpl(context: NSManagedObjectContext, stateKeys: Set<String>? = nil) {
             var savedCount = 0
             var errorCount = 0
             
             // Get all episodes that have state changes
-            let episodesToUpdate = Set(self.episodeStates.keys)
+            let episodesToUpdate = stateKeys ?? Set(self.episodeStates.keys)
                 .union(Set(self.episodeProgress.keys))
                 .union(Set(self.episodeFavorites.keys))
                 .union(Set(self.episodeDownloads.keys))
+            let qualifiedEpisodeIds = Set(episodesToUpdate.compactMap { key -> String? in
+                let identity = Self.parseStateKey(key)
+                return identity.feedId == nil ? nil : identity.episodeId
+            })
             
             // FRESH INSTALL FIX: Check if there are ANY episodes in Core Data first
             // This prevents hundreds of "Episode not found" warnings on fresh installs
@@ -1879,17 +1945,37 @@ class EpisodeStateManager: ObservableObject {
             
             print("💾 CORE DATA SAVE: Attempting to update \(episodesToUpdate.count) episodes")
             
-            for episodeId in episodesToUpdate {
+            for stateKey in episodesToUpdate {
+                let identity = Self.parseStateKey(stateKey)
+                let episodeId = identity.episodeId
+                if identity.feedId == nil && qualifiedEpisodeIds.contains(episodeId) {
+                    continue
+                }
+
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
-                fetchRequest.fetchLimit = 1
+                if let feedId = identity.feedId {
+                    fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                        NSPredicate(format: "id == %@", episodeId),
+                        NSPredicate(format: "feedId == %@", feedId)
+                    ])
+                    fetchRequest.fetchLimit = 1
+                } else {
+                    fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                    fetchRequest.fetchLimit = 2
+                }
                 
                 do {
-                    if let episode = try context.fetch(fetchRequest).first {
+                    let matches = try context.fetch(fetchRequest)
+                    if identity.feedId == nil && matches.count > 1 {
+                        print("⚠️ CORE DATA SAVE: Skipping ambiguous legacy state for episode \(episodeId.prefix(8))")
+                        continue
+                    }
+
+                    if let episode = matches.first {
                         var hasChanges = false
                         
                         // Update progress
-                        if let progress = self.episodeProgress[episodeId] {
+                        if let progress = self.episodeProgress[stateKey] {
                             let newProgress = Float(progress)
                             if abs(Double(episode.progress) - progress) > 0.001 { // Use epsilon comparison for floating point
                                 episode.progress = Double(newProgress)
@@ -1898,7 +1984,7 @@ class EpisodeStateManager: ObservableObject {
                         }
                         
                         // Update played status from episodeStates (preserves explicit played state)
-                        if let episodeState = self.episodeStates[episodeId] {
+                        if let episodeState = self.episodeStates[stateKey] {
                             let shouldBePlayed = (episodeState == .played)
                             if episode.isPlayed != shouldBePlayed {
                                 episode.isPlayed = shouldBePlayed
@@ -1910,8 +1996,8 @@ class EpisodeStateManager: ObservableObject {
                             }
                         } else {
                             // Fallback: If no explicit state, derive from progress
-                            let progress = self.episodeProgress[episodeId] ?? 0.0
-                            let derivedPlayed = progress >= 1.0
+                            let progress = self.episodeProgress[stateKey] ?? 0.0
+                            let derivedPlayed = progress >= Self.completionProgressThreshold
                             if episode.isPlayed != derivedPlayed {
                                 episode.isPlayed = derivedPlayed
                                 hasChanges = true
@@ -1923,7 +2009,7 @@ class EpisodeStateManager: ObservableObject {
                         }
                         
                         // Update favorite status
-                        if let isFavorite = self.episodeFavorites[episodeId] {
+                        if let isFavorite = self.episodeFavorites[stateKey] {
                             if episode.isFavorite != isFavorite {
                                 episode.isFavorite = isFavorite
                                 hasChanges = true
@@ -1931,7 +2017,7 @@ class EpisodeStateManager: ObservableObject {
                         }
                         
                         // Update download status
-                        if let isDownloaded = self.episodeDownloads[episodeId] {
+                        if let isDownloaded = self.episodeDownloads[stateKey] {
                             if episode.isDownloaded != isDownloaded {
                                 episode.isDownloaded = isDownloaded
                                 hasChanges = true
@@ -1943,8 +2029,11 @@ class EpisodeStateManager: ObservableObject {
                             
                         }
                     } else {
-                        print("⚠️ CORE DATA SAVE: Episode not found in Core Data: \(episodeId.prefix(8))")
-                        errorCount += 1
+                        // Remote state can outlive the local RSS retention window. Keep it in memory
+                        // in case the episode returns, but there is no local row to persist yet.
+                        if self.isVerboseLoggingEnabled {
+                            print("ℹ️ CORE DATA SAVE: Skipping state for non-local episode: \(episodeId.prefix(8))")
+                        }
                     }
                 } catch {
                     print("❌ EpisodeStateManager: Failed to fetch episode \(episodeId): \(error)")
@@ -2166,12 +2255,12 @@ class EpisodeStateManager: ObservableObject {
     private var lastUpdateTime = Date()
     private let updateThrottleInterval: TimeInterval = 3.0 // 3 seconds between updates
     
-    func getState(for episodeId: String) -> EpisodePlaybackState {
-        return episodeStates[episodeId] ?? .new
+    func getState(for episodeId: String, feedId: String? = nil) -> EpisodePlaybackState {
+        return episodeStates[Self.stateKey(episodeId: episodeId, feedId: feedId)] ?? .new
     }
     
-    func getProgress(for episodeId: String) -> Double {
-        let progress = episodeProgress[episodeId] ?? 0.0
+    func getProgress(for episodeId: String, feedId: String? = nil) -> Double {
+        let progress = episodeProgress[Self.stateKey(episodeId: episodeId, feedId: feedId)] ?? 0.0
         return progress
     }
     
@@ -2204,7 +2293,7 @@ class EpisodeStateManager: ObservableObject {
             
             // Determine state from progress
             let state: EpisodePlaybackState
-            if progress >= 0.99 {
+            if progress >= Self.completionProgressThreshold {
                 state = .played
             } else if progress > 0 {
                 state = .inProgress
@@ -2229,7 +2318,9 @@ class EpisodeStateManager: ObservableObject {
         return currentTime
     }
     
-    func startPlaying(episodeId: String) {
+    func startPlaying(episodeId: String, feedId: String) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+
         // If there's a currently playing episode, mark it as "In Progress" before switching
         if let currentPlayingId = currentlyPlayingEpisodeId, currentPlayingId != episodeId {
             let currentProgress = episodeProgress[currentPlayingId] ?? 0.0
@@ -2237,8 +2328,7 @@ class EpisodeStateManager: ObservableObject {
                 let currentState = episodeStates[currentPlayingId] ?? .new
                 if currentState != .played {
                     // Only update to inProgress if it wasn't already marked as played
-                    // FIXED: Use 1.0 (100%) instead of 0.99 (99%) to ensure complete playback
-                    if currentProgress >= 1.0 {
+                    if currentProgress >= Self.completionProgressThreshold {
                         episodeStates[currentPlayingId] = .played
                     } else {
                         episodeStates[currentPlayingId] = .inProgress
@@ -2247,34 +2337,39 @@ class EpisodeStateManager: ObservableObject {
             }
         }
         
-        episodeStates[episodeId] = .playing
+        episodeStates.removeValue(forKey: episodeId)
+        episodeStates[stateKey] = .playing
         currentlyPlayingEpisodeId = episodeId
-        saveCurrentStates()
+        saveCurrentStates(for: [stateKey])
         
         // CRITICAL: Send immediate update for playing state changes to prevent UI lag
         sendImmediateUpdate()
         sendThrottledUpdate()
     }
     
-    func pausePlayback(episodeId: String, progress: Double) {
-        episodeProgress[episodeId] = progress
+    func pausePlayback(episodeId: String, progress: Double, feedId: String? = nil) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        if feedId != nil {
+            episodeStates.removeValue(forKey: episodeId)
+        }
+        episodeProgress[stateKey] = progress
         
         // CRITICAL FIX: Set state based on progress, ensuring .inProgress is set for paused episodes
-        let wasCompleted = progress >= 1.0
+        let wasCompleted = progress >= Self.completionProgressThreshold
         if wasCompleted {
-            episodeStates[episodeId] = .played
+            episodeStates[stateKey] = .played
         } else if progress > 0 {
-            episodeStates[episodeId] = .inProgress
+            episodeStates[stateKey] = .inProgress
         } else {
             // Even if progress is 0, if we're pausing, it should be .new (not .inProgress)
-            episodeStates[episodeId] = .new
+            episodeStates[stateKey] = .new
         }
         
         if currentlyPlayingEpisodeId == episodeId {
             currentlyPlayingEpisodeId = nil
         }
         
-        saveCurrentStates()
+        saveCurrentStates(for: [stateKey])
         
         // CRITICAL: Send immediate update for pause state changes to prevent UI lag
         sendImmediateUpdate()
@@ -2284,6 +2379,7 @@ class EpisodeStateManager: ObservableObject {
             Task.detached(priority: .userInitiated) {
                 await PodcastCloudKitManager.shared.syncPodcastPlayedInstantly(
                     episodeId: episodeId,
+                    feedId: feedId,
                     isPlayed: true
                 )
                 print("☁️ PAUSE COMPLETION: Synced played state to CloudKit for completed episode: \(episodeId)")
@@ -2295,20 +2391,22 @@ class EpisodeStateManager: ObservableObject {
             NotificationCenter.default.post(
                 name: .init("EpisodeProgressChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "progress": progress]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "progress": progress]
             )
             
             // Also send state change notification for real-time status updates
-            let newState: EpisodePlaybackState = progress >= 1.0 ? .played : (progress > 0 ? .inProgress : .new)
+            let newState: EpisodePlaybackState = progress >= Self.completionProgressThreshold ? .played : (progress > 0 ? .inProgress : .new)
             NotificationCenter.default.post(
                 name: .init("EpisodeStateChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "state": newState.rawValue]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "state": newState.rawValue]
             )
         }
     }
     
-    func switchToEpisode(newEpisodeId: String, previousEpisodeId: String, previousProgress: Double) {
+    func switchToEpisode(newEpisodeId: String, newFeedId: String, previousEpisodeId: String, previousFeedId: String, previousProgress: Double) {
+        let newStateKey = Self.stateKey(episodeId: newEpisodeId, feedId: newFeedId)
+        let previousStateKey = Self.stateKey(episodeId: previousEpisodeId, feedId: previousFeedId)
         // CRITICAL: Immediately stop the previous episode from showing as playing
         if currentlyPlayingEpisodeId == previousEpisodeId {
             currentlyPlayingEpisodeId = nil
@@ -2316,62 +2414,64 @@ class EpisodeStateManager: ObservableObject {
         
         // Mark previous episode as "In Progress" only if it wasn't already marked as "Played"
         if previousProgress > 0 {
-            let currentState = episodeStates[previousEpisodeId] ?? .new
+            let currentState = episodeStates[previousStateKey] ?? .new
             if currentState != .played {
                 // Only update to inProgress if it wasn't already marked as played
-                // FIXED: Use 1.0 (100%) instead of 0.99 (99%) to ensure complete playback
-                if previousProgress >= 1.0 {
-                    episodeStates[previousEpisodeId] = .played
+                if previousProgress >= Self.completionProgressThreshold {
+                    episodeStates[previousStateKey] = .played
                 } else {
-                    episodeStates[previousEpisodeId] = .inProgress
+                    episodeStates[previousStateKey] = .inProgress
                 }
             }
-            episodeProgress[previousEpisodeId] = previousProgress
+            episodeProgress[previousStateKey] = previousProgress
         }
         
         // Start playing new episode
-        episodeStates[newEpisodeId] = .playing
+        episodeStates[newStateKey] = .playing
         currentlyPlayingEpisodeId = newEpisodeId
         
-        saveCurrentStates()
+        saveCurrentStates(for: [newStateKey, previousStateKey])
         
         // CRITICAL: Send immediate update to refresh UI immediately, then follow with throttled update
         sendImmediateUpdate()
         sendThrottledUpdate()
     }
     
-    func completeEpisode(episodeId: String) {
+    func completeEpisode(episodeId: String, feedId: String) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         print("✅ Episode \(episodeId.prefix(8)) completed")
-        episodeStates[episodeId] = .played
-        episodeProgress[episodeId] = 1.0
+        episodeStates[stateKey] = .played
+        episodeProgress[stateKey] = 1.0
         
         if currentlyPlayingEpisodeId == episodeId {
             currentlyPlayingEpisodeId = nil
         }
         
-        saveCurrentStates()
+        saveCurrentStates(for: [stateKey])
         sendImmediateUpdate() // Use immediate update for completion
         
-        // CRITICAL FIX: Trigger CloudKit sync for played state when episode completes
-        setPlayed(episodeId, isPlayed: true)
+        // Trigger one consolidated CloudKit sync for the completed state.
+        performRealTimeSyncForEpisode(episodeId, reason: "episode_completed", feedId: feedId)
         
         // Send immediate notification for UI updates
         DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .init("EpisodeStateChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "state": EpisodePlaybackState.played.rawValue]
+                userInfo: ["episodeId": episodeId, "feedId": feedId, "state": EpisodePlaybackState.played.rawValue]
             )
             
             NotificationCenter.default.post(
                 name: .init("EpisodePlayedChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "isPlayed": true]
+                userInfo: ["episodeId": episodeId, "feedId": feedId, "isPlayed": true]
             )
         }
     }
     
-    func rewindAndPlay(episodeId: String) {
+    func rewindAndPlay(episodeId: String, feedId: String) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+
         // Stop any currently playing episode first
         if let currentPlayingId = currentlyPlayingEpisodeId, currentPlayingId != episodeId {
             let currentProgress = episodeProgress[currentPlayingId] ?? 0.0
@@ -2379,8 +2479,7 @@ class EpisodeStateManager: ObservableObject {
                 let currentState = episodeStates[currentPlayingId] ?? .new
                 if currentState != .played {
                     // Only update to inProgress if it wasn't already marked as played
-                    // FIXED: Use 1.0 (100%) instead of 0.99 (99%) to ensure complete playback
-                    if currentProgress >= 1.0 {
+                    if currentProgress >= Self.completionProgressThreshold {
                         episodeStates[currentPlayingId] = .played
                     } else {
                         episodeStates[currentPlayingId] = .inProgress
@@ -2391,26 +2490,29 @@ class EpisodeStateManager: ObservableObject {
         
         // CRITICAL FIX: Reset the episode to beginning and clear any previous played state
         // This ensures the episode can play from beginning without immediately completing
-        episodeStates[episodeId] = .playing
-        episodeProgress[episodeId] = 0.0
+        episodeStates.removeValue(forKey: episodeId)
+        episodeProgress.removeValue(forKey: episodeId)
+        episodeStates[stateKey] = .playing
+        episodeProgress[stateKey] = 0.0
         currentlyPlayingEpisodeId = episodeId
         
         // REWIND FIX: Clear any existing completion flags that might cause immediate completion
         // Remove any stale progress data that could interfere with playback
-        episodeCurrentTime[episodeId] = 0.0
+        episodeCurrentTime[stateKey] = 0.0
         
         print("🔄 REWIND AND PLAY: Reset episode \(episodeId) to playing state with 0.0 progress")
         
-        saveCurrentStates()
+        saveCurrentStates(for: [stateKey])
         sendThrottledUpdate()
     }
     
-    func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool, currentTime: Double? = nil) {
+    func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool, currentTime: Double? = nil, feedId: String? = nil) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         let newState: EpisodePlaybackState
         
         // Prevent overwriting existing progress with 0.0 unless it's a genuine reset
-        let existingProgress = episodeProgress[episodeId] ?? 0.0
-        let existingState = episodeStates[episodeId] ?? .new
+        let existingProgress = episodeProgress[stateKey] ?? 0.0
+        let existingState = episodeStates[stateKey] ?? .new
         let shouldUpdateProgress: Bool
         
         
@@ -2427,9 +2529,12 @@ class EpisodeStateManager: ObservableObject {
                     print("🔄 UPDATE REWIND PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - rewind override")
                 }
                 shouldUpdateProgress = true
-                // Ensure UI updates happen on main thread
-                DispatchQueue.main.async {
-                    self.episodeProgress[episodeId] = progress
+                if Thread.isMainThread {
+                    episodeProgress[stateKey] = progress
+                } else {
+                    DispatchQueue.main.async {
+                        self.episodeProgress[stateKey] = progress
+                    }
                 }
             } else {
                 print("🛡️ UPDATE PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress))")
@@ -2438,17 +2543,23 @@ class EpisodeStateManager: ObservableObject {
         } else if existingProgress == 0.0 {
             // Update to 0.0 only if there's no existing progress
             shouldUpdateProgress = true
-            // Ensure UI updates happen on main thread
-            DispatchQueue.main.async {
-                self.episodeProgress[episodeId] = progress
+            if Thread.isMainThread {
+                episodeProgress[stateKey] = progress
+            } else {
+                DispatchQueue.main.async {
+                    self.episodeProgress[stateKey] = progress
+                }
             }
         } else if currentTime != nil {
             // Update if we have explicit currentTime (from episode switch) - but still protect against backwards progress
             if progress >= existingProgress || progress == 0.0 {
                 shouldUpdateProgress = true
-                // Ensure UI updates happen on main thread
-                DispatchQueue.main.async {
-                    self.episodeProgress[episodeId] = progress
+                if Thread.isMainThread {
+                    episodeProgress[stateKey] = progress
+                } else {
+                    DispatchQueue.main.async {
+                        self.episodeProgress[stateKey] = progress
+                    }
                 }
             } else {
                 print("🛡️ SWITCH PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress))")
@@ -2464,7 +2575,7 @@ class EpisodeStateManager: ObservableObject {
         
         // Store current time if provided
         if let currentTime = currentTime {
-            episodeCurrentTime[episodeId] = currentTime
+            episodeCurrentTime[stateKey] = currentTime
         }
         
         // Use the actual progress value for state determination
@@ -2473,12 +2584,12 @@ class EpisodeStateManager: ObservableObject {
         if isPlaying {
             newState = .playing
             currentlyPlayingEpisodeId = episodeId
-        } else if existingState == .played && effectiveProgress < 1.0 {
-            // REWIND FIX: If episode was played but progress is now < 1.0, allow state change
+        } else if existingState == .played && effectiveProgress < Self.completionProgressThreshold {
+            // REWIND FIX: If episode was played but progress drops below completion, allow state change
             // This happens when an episode is rewound from a completed state
             if effectiveProgress > 0 {
                 newState = .inProgress
-                print("🔄 REWIND PROGRESS: Episode \(episodeId) was played but progress < 1.0, changing to inProgress")
+                print("🔄 REWIND PROGRESS: Episode \(episodeId) was played but progress dropped below completion, changing to inProgress")
             } else {
                 newState = .new
                 print("🔄 REWIND PROGRESS: Episode \(episodeId) was played but progress = 0.0, changing to new")
@@ -2495,7 +2606,7 @@ class EpisodeStateManager: ObservableObject {
                     newState = .playing
                     currentlyPlayingEpisodeId = episodeId
                     print("🔄 REWIND PROTECTION: Episode now playing during rewind period")
-                } else if effectiveProgress >= 1.0 {
+                } else if effectiveProgress >= Self.completionProgressThreshold {
                     newState = .played
                     currentlyPlayingEpisodeId = nil
                     print("🔄 REWIND PROTECTION: Episode completed during rewind period")
@@ -2514,7 +2625,7 @@ class EpisodeStateManager: ObservableObject {
                 currentlyPlayingEpisodeId = nil
                 print("💾 PLAYED STATE: Preserving existing played state for episode \(episodeId) (not in rewind protection)")
             }
-        } else if effectiveProgress >= 1.0 {
+        } else if effectiveProgress >= Self.completionProgressThreshold {
             newState = .played
             currentlyPlayingEpisodeId = nil
         } else if effectiveProgress > 0 {
@@ -2527,12 +2638,17 @@ class EpisodeStateManager: ObservableObject {
             newState = .new
         }
         
-        if episodeStates[episodeId] != newState || shouldUpdateProgress || currentTime != nil {
-            // Ensure UI updates happen on main thread
-            DispatchQueue.main.async {
-                self.episodeStates[episodeId] = newState
+        let stateChanged = existingState != newState
+        let progressChanged = shouldUpdateProgress && abs(effectiveProgress - existingProgress) > 0.000_001
+        if stateChanged || progressChanged {
+            if Thread.isMainThread {
+                episodeStates[stateKey] = newState
+            } else {
+                DispatchQueue.main.async {
+                    self.episodeStates[stateKey] = newState
+                }
             }
-            saveCurrentStates()
+            saveCurrentStates(for: [stateKey])
             
             // CRITICAL: Use immediate update for pause operations (when isPlaying is false)
             // This ensures progress labels update instantly when episodes are paused
@@ -2543,19 +2659,19 @@ class EpisodeStateManager: ObservableObject {
             }
             
             // Send immediate notification for state changes
-            if episodeStates[episodeId] != existingState {
+            if stateChanged {
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(
                         name: .init("EpisodeStateChangedInstantly"),
                         object: nil,
-                        userInfo: ["episodeId": episodeId, "state": newState.rawValue]
+                        userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "state": newState.rawValue]
                     )
                     
                     if newState == .played {
                         NotificationCenter.default.post(
                             name: .init("EpisodePlayedChangedInstantly"),
                             object: nil,
-                            userInfo: ["episodeId": episodeId, "isPlayed": true]
+                            userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "isPlayed": true]
                         )
                     }
                 }
@@ -2565,6 +2681,7 @@ class EpisodeStateManager: ObservableObject {
                     Task.detached(priority: .userInitiated) {
                         await PodcastCloudKitManager.shared.syncPodcastPlayedInstantly(
                             episodeId: episodeId,
+                            feedId: feedId,
                             isPlayed: true
                         )
                         print("☁️ UPDATE PROGRESS COMPLETION: Synced played state to CloudKit for completed episode: \(episodeId)")
@@ -2578,7 +2695,7 @@ class EpisodeStateManager: ObservableObject {
                     NotificationCenter.default.post(
                         name: .init("EpisodeProgressChangedInstantly"),
                         object: nil,
-                        userInfo: ["episodeId": episodeId, "progress": self.episodeProgress[episodeId] ?? 0.0]
+                        userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "progress": self.episodeProgress[stateKey] ?? 0.0]
                     )
                 }
             }
@@ -2590,7 +2707,8 @@ class EpisodeStateManager: ObservableObject {
         }
     }
     
-    func setProgress(for episodeId: String, progress: Double) {
+    func setProgress(for episodeId: String, progress: Double, feedId: String? = nil) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
         let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
         
@@ -2598,7 +2716,7 @@ class EpisodeStateManager: ObservableObject {
         let isRewindProtected = PodcastPlayer.shared.isInRewindProtectionPeriod()
         
         // PROGRESS PROTECTION: Never allow progress to go backwards, unless in chapter or rewind protection
-        let existingProgress = episodeProgress[episodeId] ?? 0.0
+        let existingProgress = episodeProgress[stateKey] ?? 0.0
         let finalProgress: Double
         
         // ENHANCED PROTECTION: Critical check for accidental reset to 0
@@ -2617,14 +2735,17 @@ class EpisodeStateManager: ObservableObject {
             finalProgress = progress // Allow forward progress, same value, chapter backward progress, or intentional rewind
         }
         
-        // Ensure UI updates happen on main thread
-        DispatchQueue.main.async {
-            self.episodeProgress[episodeId] = finalProgress
+        if Thread.isMainThread {
+            episodeProgress[stateKey] = finalProgress
+        } else {
+            DispatchQueue.main.async {
+                self.episodeProgress[stateKey] = finalProgress
+            }
         }
         
         // Update state based on final progress
         let newState: EpisodePlaybackState
-        if finalProgress >= 1.0 {
+        if finalProgress >= Self.completionProgressThreshold {
             newState = .played
         } else if finalProgress > 0 {
             newState = .inProgress
@@ -2632,11 +2753,18 @@ class EpisodeStateManager: ObservableObject {
             newState = .new
         }
         
-        // Ensure UI updates happen on main thread
-        DispatchQueue.main.async {
-            self.episodeStates[episodeId] = newState
+        let stateChanged = episodeStates[stateKey] != newState
+        let progressChanged = abs(finalProgress - existingProgress) > 0.000_001
+        if Thread.isMainThread {
+            episodeStates[stateKey] = newState
+        } else {
+            DispatchQueue.main.async {
+                self.episodeStates[stateKey] = newState
+            }
         }
-        saveCurrentStates()
+        if stateChanged || progressChanged {
+            saveCurrentStates(for: [stateKey])
+        }
         
         // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         
@@ -2648,7 +2776,7 @@ class EpisodeStateManager: ObservableObject {
             NotificationCenter.default.post(
                 name: .init("EpisodeProgressChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "progress": finalProgress]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "progress": finalProgress]
             )
         }
         
@@ -2706,8 +2834,8 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Get favorite state for an episode
-    func isFavorite(_ episodeId: String) -> Bool {
-        return episodeFavorites[episodeId] ?? false
+    func isFavorite(_ episodeId: String, feedId: String? = nil) -> Bool {
+        return episodeFavorites[Self.stateKey(episodeId: episodeId, feedId: feedId)] ?? false
     }
     
     /// Set favorite state for an episode with real-time CloudKit sync
@@ -2717,6 +2845,12 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set favorite state for an episode with real-time CloudKit sync and known feedId
     func setFavorite(_ episodeId: String, isFavorite: Bool, feedId: String?) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        guard episodeFavorites[stateKey] != isFavorite else {
+            print("📡 ⏭️ FAVORITE UPDATE SKIPPED: Episode \(episodeId) already has favorite=\(isFavorite)")
+            return
+        }
+
         // Get episode title for banner display
         let episodeTitle = getEpisodeTitle(for: episodeId)
         let favoriteValue = isFavorite ? "❤️" : "♡"
@@ -2732,8 +2866,8 @@ class EpisodeStateManager: ObservableObject {
         
         // CRITICAL FIX: Set favorite state SYNCHRONOUSLY before CloudKit sync
         // This prevents race condition where CloudKit sync reads old state
-        episodeFavorites[episodeId] = isFavorite
-        saveCurrentStates()
+        episodeFavorites[stateKey] = isFavorite
+        saveCurrentStates(for: [stateKey])
         // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time UI
         print("🔍 EpisodeStateManager: Set favorite for \(episodeId): \(isFavorite)")
@@ -2753,7 +2887,7 @@ class EpisodeStateManager: ObservableObject {
             NotificationCenter.default.post(
                 name: .init("EpisodeFavoriteChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "isFavorite": isFavorite]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "isFavorite": isFavorite]
             )
         }
         
@@ -2761,20 +2895,30 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Get download state for an episode
-    func isDownloaded(_ episodeId: String) -> Bool {
-        return episodeDownloads[episodeId] ?? false
+    func isDownloaded(_ episodeId: String, feedId: String? = nil) -> Bool {
+        return episodeDownloads[Self.stateKey(episodeId: episodeId, feedId: feedId)] ?? false
+    }
+
+    func downloadedEpisodeIds(for feedId: String) -> Set<String> {
+        Set(episodeDownloads.compactMap { key, isDownloaded in
+            guard isDownloaded else { return nil }
+            let identity = Self.parseStateKey(key)
+            guard identity.feedId == nil || identity.feedId == feedId else { return nil }
+            return identity.episodeId
+        })
     }
     
     /// Get played state for an episode from Core Data
     /// Thread-safe: Uses background context to prevent concurrent access issues
-    func getIsPlayed(_ episodeId: String) -> Bool {
+    func getIsPlayed(_ episodeId: String, feedId: String? = nil) -> Bool {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         // CRITICAL: Check in-memory episodeStates first (most accurate and up-to-date)
-        if let episodeState = episodeStates[episodeId] {
-            let isPlayedFromState = (episodeState == .played)
+        if let episodeState = episodeStates[stateKey] {
+            let isPlayedFromState = episodeState == .played
             if isPlayedFromState {
                 print("💾 PLAYED CHECK: Episode \(episodeId) is played (from episodeStates)")
-                return true
             }
+            return isPlayedFromState
         }
         
         // Fallback to Core Data
@@ -2783,11 +2927,23 @@ class EpisodeStateManager: ObservableObject {
         
         context.performAndWait {
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
-            fetchRequest.fetchLimit = 1
+            if let feedId, !feedId.isEmpty {
+                fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "id == %@", episodeId),
+                    NSPredicate(format: "feedId == %@", feedId)
+                ])
+            } else {
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+            }
+            fetchRequest.fetchLimit = feedId == nil ? 2 : 1
             
             do {
-                if let episode = try context.fetch(fetchRequest).first {
+                let matches = try context.fetch(fetchRequest)
+                if feedId == nil && matches.count > 1 {
+                    print("💾 PLAYED CHECK: Ambiguous episode \(episodeId); explicit feedId required")
+                    return
+                }
+                if let episode = matches.first {
                     result = episode.isPlayed
                     if result {
                         print("💾 PLAYED CHECK: Episode \(episodeId) is played (from Core Data)")
@@ -2800,8 +2956,8 @@ class EpisodeStateManager: ObservableObject {
         
         // Final fallback to progress calculation if Core Data doesn't have the episode
         if !result {
-            let progress = getProgress(for: episodeId)
-            result = progress >= 1.0
+            let progress = getProgress(for: episodeId, feedId: feedId)
+            result = progress >= Self.completionProgressThreshold
             if result {
                 print("💾 PLAYED CHECK: Episode \(episodeId) is played (from progress 100%: \(progress))")
             }
@@ -2811,7 +2967,8 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Set played state for an episode with real-time CloudKit sync
-    func setPlayed(_ episodeId: String, isPlayed: Bool) {
+    func setPlayed(_ episodeId: String, isPlayed: Bool, feedId: String? = nil) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         // Get episode title for banner display
         let episodeTitle = getEpisodeTitle(for: episodeId)
         let playedValue = isPlayed ? "✅ Completed" : "🔄 Reset"
@@ -2827,48 +2984,24 @@ class EpisodeStateManager: ObservableObject {
         
         // Update local state tracking
         if isPlayed {
-            episodeStates[episodeId] = .played
-        } else if episodeStates[episodeId] == .played {
+            episodeStates[stateKey] = .played
+        } else if episodeStates[stateKey] == .played {
             // Only change from played to not played, preserve other states
-            let currentProgress = getProgress(for: episodeId)
+            let currentProgress = getProgress(for: episodeId, feedId: feedId)
             if currentProgress > 0 {
-                episodeStates[episodeId] = .inProgress
+                episodeStates[stateKey] = .inProgress
             } else {
-                episodeStates[episodeId] = .new
+                episodeStates[stateKey] = .new
             }
         }
         
-        saveCurrentStates()
+        saveCurrentStates(for: [stateKey])
         sendImmediateUpdate() // Use immediate update for real-time UI
         
-        // REAL-TIME SYNC: Instantly sync played state changes across devices
-        let currentProgress = getProgress(for: episodeId)
-        let currentFavorite = isFavorite(episodeId)
-        let currentDownloaded = isDownloaded(episodeId)
-        
-        Task.detached(priority: .userInitiated) {
-            // Instant sync for real-time updates - use dedicated played sync method
-            await PodcastCloudKitManager.shared.syncPodcastPlayedInstantly(
-                episodeId: episodeId,
-                isPlayed: isPlayed
-            )
-            
-            // Also sync progress for completeness
-            await PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
-                episodeId: episodeId,
-                progress: currentProgress
-            )
-            
-            // Persistent sync to CloudKit records
-            await PodcastCloudKitManager.shared.saveEpisodeState(
-                episodeId: episodeId,
-                feedId: self.getFeedId(for: episodeId) ?? "",
-                progress: currentProgress,
-                isFavorite: currentFavorite,
-                isDownloaded: currentDownloaded,
-                isPlayed: isPlayed
-            )
-            print("☁️ EpisodeStateManager: Real-time synced played state to CloudKit: \(episodeId)")
+        if let feedId {
+            performRealTimeSyncForEpisode(episodeId, reason: "played_action", feedId: feedId)
+        } else {
+            performRealTimeSyncForEpisode(episodeId, reason: "played_action")
         }
         
         // REAL-TIME NOTIFICATION: Send immediate notification for played state changes
@@ -2876,7 +3009,7 @@ class EpisodeStateManager: ObservableObject {
             NotificationCenter.default.post(
                 name: .init("EpisodePlayedChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "isPlayed": isPlayed]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "isPlayed": isPlayed]
             )
         }
     }
@@ -2888,6 +3021,12 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set download state for an episode with real-time CloudKit sync and known feedId
     func setDownloaded(_ episodeId: String, isDownloaded: Bool, feedId: String?) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        guard episodeDownloads[stateKey] != isDownloaded else {
+            print("📡 ⏭️ DOWNLOAD UPDATE SKIPPED: Episode \(episodeId) already has downloaded=\(isDownloaded)")
+            return
+        }
+
         // Get episode title for banner display
         let episodeTitle = getEpisodeTitle(for: episodeId)
         let downloadValue = isDownloaded ? "⬇️ Downloaded" : "❌ Removed"
@@ -2903,8 +3042,8 @@ class EpisodeStateManager: ObservableObject {
         
         // CRITICAL FIX: Set download state SYNCHRONOUSLY before CloudKit sync
         // This prevents race condition where CloudKit sync reads old state
-        episodeDownloads[episodeId] = isDownloaded
-        saveCurrentStates()
+        episodeDownloads[stateKey] = isDownloaded
+        saveCurrentStates(for: [stateKey])
         // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time UI
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded)")
@@ -2924,7 +3063,7 @@ class EpisodeStateManager: ObservableObject {
             NotificationCenter.default.post(
                 name: .init("EpisodeDownloadChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "isDownloaded": isDownloaded]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "isDownloaded": isDownloaded]
             )
         }
         
@@ -2932,8 +3071,13 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// UPGRADE PROTECTION: Enhanced download state setting with backup
-    func setDownloadedWithProtection(_ episodeId: String, isDownloaded: Bool, reason: String = "normal") {
-        let previousState = episodeDownloads[episodeId] ?? false
+    func setDownloadedWithProtection(_ episodeId: String, isDownloaded: Bool, feedId: String? = nil, reason: String = "normal") {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        let previousState = episodeDownloads[stateKey] ?? false
+
+        guard previousState != isDownloaded else {
+            return
+        }
         
         // If we're setting to false but it was true, check if this is during an upgrade
         if previousState && !isDownloaded && isUpgradeScenario() {
@@ -2942,8 +3086,8 @@ class EpisodeStateManager: ObservableObject {
             return
         }
         
-        episodeDownloads[episodeId] = isDownloaded
-        saveCurrentStates()
+        episodeDownloads[stateKey] = isDownloaded
+        saveCurrentStates(for: [stateKey])
         // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendThrottledUpdate()
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded) (reason: \(reason))")
@@ -3113,7 +3257,7 @@ class EpisodeStateManager: ObservableObject {
     /// UPGRADE PROTECTION: Enhanced to prevent download state loss during upgrades
     private func syncDownloadStatesFromCoreData() {
         DispatchQueue.global(qos: .utility).async {
-            let context = CoreDataStack.shared.context
+            let context = CoreDataStack.shared.newBackgroundContext()
             context.perform {
                 do {
                     // Get all downloaded episodes from Core Data
@@ -3124,23 +3268,35 @@ class EpisodeStateManager: ObservableObject {
                     
                     var syncedCount = 0
                     var cleanedCount = 0
+                    var recoveredCount = 0
                     let isUpgrade = EpisodeStateManager.shared.isUpgradeScenario()
                     
                     print("🔄 EpisodeStateManager: Syncing \(downloadedEpisodes.count) downloaded episodes from Core Data (upgrade: \(isUpgrade))")
                     
                     for managedEpisode in downloadedEpisodes {
                         guard let episodeId = managedEpisode.id else { continue }
+                        let feedId = managedEpisode.feedId
                         
                         // Verify file still exists
                         var fileExists = false
                         if let localPath = managedEpisode.localFilePath, !localPath.isEmpty {
                             fileExists = FileManager.default.fileExists(atPath: localPath)
+
+                            if !fileExists,
+                               let recoveredPath = PodcastModel.recoverDownloadedFilePath(
+                                   for: episodeId,
+                                   originalPath: localPath
+                               ) {
+                                managedEpisode.localFilePath = recoveredPath
+                                fileExists = true
+                                recoveredCount += 1
+                            }
                         }
                         
                         if fileExists {
                             // File exists, ensure EpisodeStateManager knows about it
                             DispatchQueue.main.async {
-                                EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, reason: "core_data_sync")
+                                EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, feedId: feedId, reason: "core_data_sync")
                             }
                             syncedCount += 1
                         } else {
@@ -3159,11 +3315,11 @@ class EpisodeStateManager: ObservableObject {
                                     EpisodeStateManager.shared.clearEpisodeBackup(episodeId)  // Clear backup to prevent recovery
                                     
                                     // CRITICAL: Sync the download state change to CloudKit
-                                    if let feedId = managedEpisode.feedId, !feedId.isEmpty {
+                                    if let feedId, !feedId.isEmpty {
                                         Task.detached(priority: .utility) {
-                                            let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
-                                            let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
-                                            let currentPlayed = EpisodeStateManager.shared.getIsPlayed(episodeId)
+                                            let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId, feedId: feedId)
+                                            let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId, feedId: feedId)
+                                            let currentPlayed = EpisodeStateManager.shared.getIsPlayed(episodeId, feedId: feedId)
                                             await PodcastCloudKitManager.shared.saveEpisodeState(
                                                 episodeId: episodeId,
                                                 feedId: feedId,
@@ -3182,11 +3338,11 @@ class EpisodeStateManager: ObservableObject {
                     }
                     
                     // Save Core Data changes if needed
-                    if cleanedCount > 0 {
+                    if cleanedCount > 0 || recoveredCount > 0 {
                         try context.save()
                     }
                     
-                    print("🔄 EpisodeStateManager startup sync: \(syncedCount) downloads synced, \(cleanedCount) cleaned up")
+                    print("🔄 EpisodeStateManager startup sync: \(syncedCount) downloads synced, \(recoveredCount) paths recovered, \(cleanedCount) cleaned up")
                     
                 } catch {
                     print("❌ EpisodeStateManager startup sync error: \(error)")
@@ -3274,10 +3430,10 @@ extension EpisodeStateManager {
     private func syncEpisodeToCloudKit(episodeId: String) {
         guard let feedId = getFeedId(for: episodeId), !feedId.isEmpty else { return }
         
-        let currentProgress = getProgress(for: episodeId)
-        let currentFavorite = isFavorite(episodeId)
-        let currentDownloaded = isDownloaded(episodeId)
-        let currentPlayed = getIsPlayed(episodeId)
+        let currentProgress = getProgress(for: episodeId, feedId: feedId)
+        let currentFavorite = isFavorite(episodeId, feedId: feedId)
+        let currentDownloaded = isDownloaded(episodeId, feedId: feedId)
+        let currentPlayed = getIsPlayed(episodeId, feedId: feedId)
         
         Task.detached(priority: .userInitiated) {
             await PodcastCloudKitManager.shared.saveEpisodeState(
@@ -3293,9 +3449,9 @@ extension EpisodeStateManager {
     }
     
     /// Save current states silently without triggering CloudKit sync (for incoming CloudKit updates)
-    private func saveCurrentStatesSilently() {
+    private func saveCurrentStatesSilently(for stateKeys: Set<String>? = nil) {
         // CRITICAL FIX: Save to Core Data instead of UserDefaults to prevent CFPreferences overflow
-        saveToCoreData(silentMode: true) // Silent mode prevents CloudKit sync loop
+        saveToCoreData(silentMode: true, stateKeys: stateKeys) // Silent mode prevents CloudKit sync loop
         
         // Save currently playing episode to UserDefaults (small data, safe)
         if let playingId = currentlyPlayingEpisodeId {
@@ -3313,9 +3469,30 @@ extension EpisodeStateManager {
     }
     
     // MARK: - Silent Update Methods (No CloudKit Sync)
+
+    func applyStateSilently(
+        for episodeId: String,
+        progress: Double,
+        isFavorite: Bool,
+        isDownloaded: Bool,
+        isPlayed: Bool,
+        feedId: String? = nil,
+        persistImmediately: Bool = true
+    ) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        setProgressSilently(for: episodeId, progress: progress, feedId: feedId, persistImmediately: false)
+        setFavoriteSilently(episodeId, isFavorite: isFavorite, feedId: feedId, persistImmediately: false)
+        setDownloadedSilently(episodeId, isDownloaded: isDownloaded, feedId: feedId, persistImmediately: false)
+        setPlayedSilently(episodeId, isPlayed: isPlayed, feedId: feedId, persistImmediately: false)
+
+        if persistImmediately {
+            saveCurrentStatesSilently(for: [stateKey])
+        }
+    }
     
     /// Set progress silently without triggering CloudKit sync (for incoming CloudKit updates)
-    func setProgressSilently(for episodeId: String, progress: Double) {
+    func setProgressSilently(for episodeId: String, progress: Double, feedId: String? = nil, persistImmediately: Bool = true) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
         let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
         
@@ -3323,7 +3500,7 @@ extension EpisodeStateManager {
         let isRewindProtected = PodcastPlayer.shared.isInRewindProtectionPeriod()
         
         // PROGRESS PROTECTION: Never allow progress to go backwards, even from CloudKit, unless in chapter or rewind protection
-        let existingProgress = episodeProgress[episodeId] ?? 0.0
+        let existingProgress = episodeProgress[stateKey] ?? 0.0
         let finalProgress: Double
         
         // ENHANCED CLOUDKIT PROTECTION: Critical check for accidental reset to 0 from CloudKit
@@ -3341,22 +3518,27 @@ extension EpisodeStateManager {
             }
             finalProgress = progress // Allow forward progress, same value, chapter backward progress, or intentional rewind
         }
-        
-        episodeProgress[episodeId] = finalProgress
-        
+
         // CRITICAL FIX: Update episode state based on final progress (just like setProgress does)
         // This ensures "NEW" changes to "IN PROGRESS" immediately when synced from other devices
         let newState: EpisodePlaybackState
-        if finalProgress >= 1.0 {
+        if finalProgress >= Self.completionProgressThreshold {
             newState = .played
         } else if finalProgress > 0 {
             newState = .inProgress
         } else {
             newState = .new
         }
-        
-        episodeStates[episodeId] = newState
-        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
+
+        guard abs(existingProgress - finalProgress) >= 0.0001 || (episodeStates[stateKey] ?? .new) != newState else {
+            return
+        }
+
+        episodeProgress[stateKey] = finalProgress
+        episodeStates[stateKey] = newState
+        if persistImmediately {
+            saveCurrentStatesSilently(for: [stateKey]) // Use silent save to prevent CloudKit sync loop
+        }
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
         // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
@@ -3366,14 +3548,14 @@ extension EpisodeStateManager {
             NotificationCenter.default.post(
                 name: .init("EpisodeProgressChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "progress": finalProgress]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "progress": finalProgress]
             )
             
             // Also send state change notification for real-time status updates
             NotificationCenter.default.post(
                 name: .init("EpisodeStateChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "state": newState.rawValue]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "state": newState.rawValue]
             )
         }
         
@@ -3381,71 +3563,78 @@ extension EpisodeStateManager {
     }
     
     /// Set favorite state silently without triggering CloudKit sync
-    func setFavoriteSilently(_ episodeId: String, isFavorite: Bool) {
-        // Ensure UI updates happen on main thread
-        DispatchQueue.main.async {
-            self.episodeFavorites[episodeId] = isFavorite
-        }
-        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
-        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
-        sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
-        
-        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
-        
-        // REAL-TIME NOTIFICATION: Send immediate notification for cross-device favorite updates
-        DispatchQueue.main.async {
+    func setFavoriteSilently(_ episodeId: String, isFavorite: Bool, feedId: String? = nil, persistImmediately: Bool = true) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        let applyUpdate = {
+            guard (self.episodeFavorites[stateKey] ?? false) != isFavorite else { return }
+            self.episodeFavorites[stateKey] = isFavorite
+            if persistImmediately {
+                self.saveCurrentStatesSilently(for: [stateKey])
+            }
+            self.sendImmediateUpdate()
             NotificationCenter.default.post(
                 name: .init("EpisodeFavoriteChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "isFavorite": isFavorite]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "isFavorite": isFavorite]
             )
         }
-        
+
+        if Thread.isMainThread {
+            applyUpdate()
+        } else {
+            DispatchQueue.main.async(execute: applyUpdate)
+        }
     }
     
     /// Set download state silently without triggering CloudKit sync
-    func setDownloadedSilently(_ episodeId: String, isDownloaded: Bool) {
-        // Ensure UI updates happen on main thread
-        DispatchQueue.main.async {
-            self.episodeDownloads[episodeId] = isDownloaded
-        }
-        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
-        // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
-        sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
-        
-        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
-        
-        // REAL-TIME NOTIFICATION: Send immediate notification for cross-device download updates
-        DispatchQueue.main.async {
+    func setDownloadedSilently(_ episodeId: String, isDownloaded: Bool, feedId: String? = nil, persistImmediately: Bool = true) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        let applyUpdate = {
+            guard (self.episodeDownloads[stateKey] ?? false) != isDownloaded else { return }
+            self.episodeDownloads[stateKey] = isDownloaded
+            if persistImmediately {
+                self.saveCurrentStatesSilently(for: [stateKey])
+            }
+            self.sendImmediateUpdate()
             NotificationCenter.default.post(
                 name: .init("EpisodeDownloadChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "isDownloaded": isDownloaded]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "isDownloaded": isDownloaded]
             )
+            print("🔄 EpisodeStateManager: Set downloaded silently for \(episodeId): \(isDownloaded)")
         }
-        
-        print("🔄 EpisodeStateManager: Set downloaded silently for \(episodeId): \(isDownloaded)")
+
+        if Thread.isMainThread {
+            applyUpdate()
+        } else {
+            DispatchQueue.main.async(execute: applyUpdate)
+        }
     }
     
     /// Set played state silently without triggering CloudKit sync
-    func setPlayedSilently(_ episodeId: String, isPlayed: Bool) {
+    func setPlayedSilently(_ episodeId: String, isPlayed: Bool, feedId: String? = nil, persistImmediately: Bool = true) {
+        let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        guard (episodeStates[stateKey] == .played) != isPlayed else { return }
+
         // Update local state tracking
         if isPlayed {
-            episodeStates[episodeId] = .played
+            episodeStates[stateKey] = .played
             print("💾 PLAYED STATE: Set episode \(episodeId) as played silently")
-        } else if episodeStates[episodeId] == .played {
+        } else if episodeStates[stateKey] == .played {
             // Only change from played to not played, preserve other states
-            let currentProgress = getProgress(for: episodeId)
+            let currentProgress = getProgress(for: episodeId, feedId: feedId)
             if currentProgress > 0 {
-                episodeStates[episodeId] = .inProgress
+                episodeStates[stateKey] = .inProgress
                 print("💾 PLAYED STATE: Reverted episode \(episodeId) from played to inProgress")
             } else {
-                episodeStates[episodeId] = .new
+                episodeStates[stateKey] = .new
                 print("💾 PLAYED STATE: Reverted episode \(episodeId) from played to new")
             }
         }
         
-        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
+        if persistImmediately {
+            saveCurrentStatesSilently(for: [stateKey]) // Use silent save to prevent CloudKit sync loop
+        }
         // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
@@ -3456,15 +3645,15 @@ extension EpisodeStateManager {
             NotificationCenter.default.post(
                 name: .init("EpisodePlayedChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "isPlayed": isPlayed]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "isPlayed": isPlayed]
             )
             
             // Also send state change notification for real-time status updates
-            let newState: EpisodePlaybackState = isPlayed ? .played : (self.getProgress(for: episodeId) > 0 ? .inProgress : .new)
+            let newState: EpisodePlaybackState = isPlayed ? .played : (self.getProgress(for: episodeId, feedId: feedId) > 0 ? .inProgress : .new)
             NotificationCenter.default.post(
                 name: .init("EpisodeStateChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "state": newState.rawValue]
+                userInfo: ["episodeId": episodeId, "feedId": feedId ?? "", "state": newState.rawValue]
             )
         }
         
@@ -3580,11 +3769,11 @@ extension EpisodeStateManager {
 extension EpisodeStateManager {
     
     /// Check if an episode was recently synced to prevent duplicates
-    private func wasRecentlySynced(_ episodeId: String) -> Bool {
+    private func wasRecentlySynced(_ episodeId: String, fingerprint: String) -> Bool {
         let currentTime = Date().timeIntervalSince1970
-        if let lastSyncTime = recentSyncs[episodeId] {
-            let timeSinceLastSync = currentTime - lastSyncTime
-            if timeSinceLastSync < syncDeduplicationWindow {
+        if let recentSync = recentSyncs[episodeId] {
+            let timeSinceLastSync = currentTime - recentSync.timestamp
+            if timeSinceLastSync < syncDeduplicationWindow && recentSync.fingerprint == fingerprint {
                 print("📡 🔄 SYNC DEDUPLICATION: Skipping duplicate sync for \(episodeId) (last sync: \(String(format: "%.1f", timeSinceLastSync))s ago)")
                 return true
             }
@@ -3593,12 +3782,12 @@ extension EpisodeStateManager {
     }
     
     /// Mark an episode as recently synced
-    private func markAsRecentlySynced(_ episodeId: String) {
+    private func markAsRecentlySynced(_ episodeId: String, fingerprint: String) {
         let currentTime = Date().timeIntervalSince1970
-        recentSyncs[episodeId] = currentTime
+        recentSyncs[episodeId] = (timestamp: currentTime, fingerprint: fingerprint)
         
         // Clean up old entries to prevent memory bloat
-        recentSyncs = recentSyncs.filter { currentTime - $0.value < syncDeduplicationWindow * 2 }
+        recentSyncs = recentSyncs.filter { currentTime - $0.value.timestamp < syncDeduplicationWindow * 2 }
     }
     
     /// Mark episode real-time sync timing for UI refresh protection
@@ -3624,14 +3813,6 @@ extension EpisodeStateManager {
     func performRealTimeSyncForEpisode(_ episodeId: String, reason: String) {
         print("📡 🔄 REAL-TIME SYNC ENTRY: Called for \(episodeId) with reason: \(reason)")
         
-        // SYNC DEDUPLICATION: Prevent duplicate syncs within short time window
-        if wasRecentlySynced(episodeId) {
-            print("📡 ⏭️ REAL-TIME SYNC SKIPPED: Episode \(episodeId) was recently synced (deduplication)")
-            return
-        }
-        
-        print("📡 ✅ REAL-TIME SYNC DEDUP: Episode \(episodeId) passed deduplication check")
-        
         guard let feedId = getFeedId(for: episodeId), !feedId.isEmpty else {
             print("⚠️ REAL-TIME SYNC FAILED: Could not find feedId for episode \(episodeId), skipping CloudKit sync")
             return
@@ -3646,9 +3827,16 @@ extension EpisodeStateManager {
     /// Perform real-time CloudKit sync with known feedId (more efficient)
     func performRealTimeSyncForEpisode(_ episodeId: String, reason: String, feedId: String) {
         print("📡 🔄 REAL-TIME SYNC ENTRY: Called for \(episodeId) with reason: \(reason) and feedId: \(feedId)")
-        
-        // SYNC DEDUPLICATION: Prevent duplicate syncs within short time window
-        if wasRecentlySynced(episodeId) {
+        let syncKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+
+        let currentProgress = getProgress(for: episodeId, feedId: feedId)
+        let currentFavorite = isFavorite(episodeId, feedId: feedId)
+        let currentDownloaded = isDownloaded(episodeId, feedId: feedId)
+        let currentPlayed = getIsPlayed(episodeId, feedId: feedId)
+        let fingerprint = "\(currentProgress)|\(currentFavorite)|\(currentDownloaded)|\(currentPlayed)"
+
+        // Suppress repeated writes only when every state field is unchanged.
+        if wasRecentlySynced(syncKey, fingerprint: fingerprint) {
             print("📡 ⏭️ REAL-TIME SYNC SKIPPED: Episode \(episodeId) was recently synced (deduplication)")
             return
         }
@@ -3656,43 +3844,45 @@ extension EpisodeStateManager {
         print("📡 ✅ REAL-TIME SYNC DEDUP: Episode \(episodeId) passed deduplication check")
         
         // Mark as recently synced before starting sync
-        markAsRecentlySynced(episodeId)
+        markAsRecentlySynced(syncKey, fingerprint: fingerprint)
         
         // Mark episode-specific real-time sync timing
         markEpisodeRealTimeSyncTime(episodeId)
         
-        let currentProgress = getProgress(for: episodeId)
-        let currentFavorite = isFavorite(episodeId)
-        let currentDownloaded = isDownloaded(episodeId)
-        let currentPlayed = getIsPlayed(episodeId)
-        
         print("📡 ⚡ REAL-TIME SYNC: Instantly syncing \(episodeId) to CloudKit (reason: \(reason))")
         print("📡 📊 REAL-TIME SYNC STATE: progress=\(currentProgress), favorite=\(currentFavorite), downloaded=\(currentDownloaded), played=\(currentPlayed)")
         
-        // Perform both instant sync and persistent sync for real-time updates
+        // NSUbiquitousKeyValueStore performs internal synchronous work. Keep these
+        // immediate updates outside a Swift concurrency task to avoid unsafeForcedSync.
+        PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+            episodeId: episodeId,
+            feedId: feedId,
+            progress: currentProgress,
+            persistToCloudKit: false
+        )
+
+        PodcastCloudKitManager.shared.syncPodcastFavoriteInstantly(
+            episodeId: episodeId,
+            feedId: feedId,
+            isFavorite: currentFavorite,
+            persistToCloudKit: false
+        )
+
+        PodcastCloudKitManager.shared.syncPodcastDownloadInstantly(
+            episodeId: episodeId,
+            feedId: feedId,
+            isDownloaded: currentDownloaded,
+            persistToCloudKit: false
+        )
+
+        PodcastCloudKitManager.shared.syncPodcastPlayedInstantly(
+            episodeId: episodeId,
+            feedId: feedId,
+            isPlayed: currentPlayed,
+            persistToCloudKit: false
+        )
+
         Task.detached(priority: .userInitiated) {
-            // Step 1: Instant sync for real-time cross-device updates
-            await PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
-                episodeId: episodeId,
-                progress: currentProgress
-            )
-            
-            await PodcastCloudKitManager.shared.syncPodcastFavoriteInstantly(
-                episodeId: episodeId,
-                isFavorite: currentFavorite
-            )
-            
-            await PodcastCloudKitManager.shared.syncPodcastDownloadInstantly(
-                episodeId: episodeId,
-                isDownloaded: currentDownloaded
-            )
-            
-            await PodcastCloudKitManager.shared.syncPodcastPlayedInstantly(
-                episodeId: episodeId,
-                isPlayed: currentPlayed
-            )
-            
-            // Step 2: Persistent sync to CloudKit records
             await PodcastCloudKitManager.shared.saveEpisodeState(
                 episodeId: episodeId,
                 feedId: feedId,

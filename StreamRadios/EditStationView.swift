@@ -33,7 +33,7 @@ struct EditStationView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
     @EnvironmentObject var permissionManager: PermissionManager
     var station: RadioStation
-    @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var podcastViewModel = PodcastViewModel.shared
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     @StateObject private var radioPlayer = RadioPlayer.shared
     @State private var selectedPodcast: PodcastFeed?

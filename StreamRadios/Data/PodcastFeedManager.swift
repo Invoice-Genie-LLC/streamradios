@@ -488,6 +488,20 @@ class PodcastFeedManager {
         updatedFeed: PodcastFeed,
         newEpisodes: [PodcastEpisode]
     ) async throws -> (PodcastFeed, [PodcastEpisode]) {
+        try await EpisodeWriteCoordinator.shared.perform(for: existingFeed.id) {
+            try await self.updateFeedWithNewEpisodesWhileHoldingLock(
+                existingFeed: existingFeed,
+                updatedFeed: updatedFeed,
+                newEpisodes: newEpisodes
+            )
+        }
+    }
+
+    private func updateFeedWithNewEpisodesWhileHoldingLock(
+        existingFeed: PodcastFeed,
+        updatedFeed: PodcastFeed,
+        newEpisodes: [PodcastEpisode]
+    ) async throws -> (PodcastFeed, [PodcastEpisode]) {
         
         return try await withCheckedThrowingContinuation { continuation in
             let backgroundContext = CoreDataStack.shared.newBackgroundContext()
@@ -521,7 +535,7 @@ class PodcastFeedManager {
                     }
                     
                     // Clean up any duplicates that might have been created during the refresh
-                    try self.cleanupDuplicateEpisodes(in: backgroundContext)
+                    try self.cleanupDuplicateEpisodes(for: existingFeed.id, in: backgroundContext)
                     
                     try backgroundContext.save()
                     
@@ -567,7 +581,7 @@ class PodcastFeedManager {
         
         // Get all existing episode IDs in one batch query (much faster than individual queries)
         let episodeIds = episodes.map { $0.id }
-        let existingEpisodeIds = try getExistingEpisodeIdsBatch(episodeIds, in: context)
+        let existingEpisodeIds = try getExistingEpisodeIdsBatch(episodeIds, feedId: feedId, in: context)
         
         // Separate new and existing episodes
         let newEpisodes = episodes.filter { !existingEpisodeIds.contains($0.id) }
@@ -597,7 +611,7 @@ class PodcastFeedManager {
         // CRITICAL FIX: Double-check for duplicates before batch insert
         // This prevents the duplicate issue that causes crashes
         let episodeIds = episodes.map { $0.id }
-        let existingIds = try getExistingEpisodeIdsBatch(episodeIds, in: context)
+        let existingIds = try getExistingEpisodeIdsBatch(episodeIds, feedId: feedId, in: context)
         let trulyNewEpisodes = episodes.filter { !existingIds.contains($0.id) }
         
         guard !trulyNewEpisodes.isEmpty else {
@@ -622,8 +636,8 @@ class PodcastFeedManager {
                     return false
                 }
                 
-                // ADDITIONAL SAFETY: Ensure episode's feedId matches if it has one
-                if !episode.feedId.isEmpty && episode.feedId != feedId {
+                // ADDITIONAL SAFETY: Ensure episode's feedId exactly matches
+                if episode.feedId != feedId {
                     print("🚨 EPISODE FEED MISMATCH: Episode feedId=\(episode.feedId) but inserting into feed=\(feedId)")
                     insertIndex += 1
                     return false
@@ -670,7 +684,10 @@ class PodcastFeedManager {
         // Fetch existing episodes in one batch query
         let episodeIds = episodes.map { $0.id }
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
+        fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "feedId == %@", feedId),
+            NSPredicate(format: "id IN %@", episodeIds)
+        ])
         
         let existingEpisodes = try context.fetch(fetchRequest)
         
@@ -699,6 +716,11 @@ class PodcastFeedManager {
         // Update episodes while preserving download data
         for episode in episodes {
             guard let managedEpisode = existingEpisodesById[episode.id] else { continue }
+
+            guard episode.feedId == feedId else {
+                print("🚫 UPDATE REJECTED: Episode ID \(episode.id) belongs to feed \(episode.feedId), expected \(feedId)")
+                continue
+            }
             
             // 🚨 VALIDATION: Don't update to an empty title
             let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -707,17 +729,16 @@ class PodcastFeedManager {
                 continue // Skip this corrupted episode update
             }
             
-            var episodeWithFeedId = episode
-            episodeWithFeedId.feedId = feedId
-            managedEpisode.updateMetadata(from: episodeWithFeedId)
+            managedEpisode.updateMetadata(from: episode)
         }
         
         os_log("🔄 Updated %d existing episodes", log: log, type: .info, episodes.count)
     }
     
     /// Clean up duplicate episodes in Core Data (removes all but the most recent for each ID)
-    private func cleanupDuplicateEpisodes(in context: NSManagedObjectContext) throws {
+    private func cleanupDuplicateEpisodes(for feedId: String, in context: NSManagedObjectContext) throws {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
         
         let allEpisodes = try context.fetch(fetchRequest)
@@ -750,10 +771,14 @@ class PodcastFeedManager {
     /// Get existing episode IDs in a single batch query
     private func getExistingEpisodeIdsBatch(
         _ episodeIds: [String],
+        feedId: String,
         in context: NSManagedObjectContext
     ) throws -> Set<String> {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
+        fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "feedId == %@", feedId),
+            NSPredicate(format: "id IN %@", episodeIds)
+        ])
         fetchRequest.propertiesToFetch = ["id"]
         fetchRequest.resultType = .managedObjectResultType
         
@@ -778,13 +803,13 @@ class PodcastFeedManager {
                 for episode in batch {
                     // Check if episode already exists to preserve download data
                     let existingRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                    existingRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+                    existingRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                        NSPredicate(format: "feedId == %@", feed.id ?? ""),
+                        NSPredicate(format: "id == %@", episode.id)
+                    ])
                     existingRequest.fetchLimit = 1
                     
-                    let managedEpisode: PodcastModel
                     if let existingEpisode = try? context.fetch(existingRequest).first {
-                        managedEpisode = existingEpisode
-                        
                         // 🚨 VALIDATION: Don't update to an empty title
                         let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
                         if trimmedTitle.isEmpty {
@@ -799,18 +824,13 @@ class PodcastFeedManager {
                         }
                         
                         // SAFETY CHECK: Ensure episode belongs to this feed
-                        if !episode.feedId.isEmpty && episode.feedId != feedId {
+                        if episode.feedId != feedId {
                             print("🚨 EPISODE UPDATE CONTAMINATION: Episode feedId=\(episode.feedId) but updating for feed=\(feedId)")
                             continue
                         }
                         
-                        var episodeWithFeedId = episode
-                        episodeWithFeedId.feedId = feedId  // CRITICAL: Always use the correct feedId
-                        managedEpisode.updateMetadata(from: episodeWithFeedId)
+                        existingEpisode.updateMetadata(from: episode)
                     } else {
-                        // Create new episode
-                        managedEpisode = PodcastModel(context: context)
-                        
                         // 🚨 VALIDATION: Reject episodes with empty titles to prevent corruption
                         let trimmedTitle = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
                         if trimmedTitle.isEmpty {
@@ -826,7 +846,7 @@ class PodcastFeedManager {
                         
                         // CRITICAL SAFETY CHECK: Prevent cross-feed contamination
                         // This happens when RSS feeds mistakenly include episodes from other feeds
-                        if !episode.feedId.isEmpty && episode.feedId != feedId {
+                        if episode.feedId != feedId {
                             print("🚨 CROSS-FEED CONTAMINATION BLOCKED:")
                             print("   📝 Episode: '\(episode.title)'")
                             print("   ❌ Wrong feedId: \(episode.feedId)")
@@ -835,9 +855,8 @@ class PodcastFeedManager {
                             continue // Skip this contaminated episode
                         }
                         
-                        var episodeWithFeedId = episode
-                        episodeWithFeedId.feedId = feedId  // CRITICAL: Always use the correct feedId
-                        managedEpisode.update(from: episodeWithFeedId)
+                        let managedEpisode = PodcastModel(context: context)
+                        managedEpisode.update(from: episode)
                         managedEpisode.feed = feed
                     }
                 }

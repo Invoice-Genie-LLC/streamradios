@@ -35,7 +35,7 @@ struct AddStationView: View {
     @StateObject private var subscriptionManager = SubscriptionManager.shared
     @Binding var isEditingStation: RadioStation?
     @Binding var presentedSheet: ActiveSheet?
-    @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var podcastViewModel = PodcastViewModel.shared
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?

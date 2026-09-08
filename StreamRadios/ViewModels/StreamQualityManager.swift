@@ -347,11 +347,8 @@ class StreamQualityManager: ObservableObject {
         
         // Apply settings gradually to avoid interruptions
         let settingsApplication = {
-            // Set preferred peak bitrate (advisory, not forced)
-            if force || abs(playerItem.preferredPeakBitRate - quality.bitrate) > 32_000 {
-                playerItem.preferredPeakBitRate = quality.bitrate
-            }
-            
+            // Progressive radio streams have a fixed source bitrate. Capping network throughput to
+            // that nominal bitrate leaves no room for transport overhead and can starve playback.
             // Adjust buffer preferences
             self.setBufferPreferences(for: playerItem, quality: quality)
             
@@ -375,8 +372,9 @@ class StreamQualityManager: ObservableObject {
     }
     
     private func setBufferPreferences(for playerItem: AVPlayerItem, quality: NetworkQuality) {
-        // Adjust buffer duration based on quality and network conditions
-        playerItem.preferredForwardBufferDuration = quality.bufferDuration
+        // Progressive live-radio streams should begin after a small synchronization buffer. Large
+        // values here can leave AVPlayer silent for tens of seconds before playback starts.
+        playerItem.preferredForwardBufferDuration = min(quality.bufferDuration, 3.0)
         
         // Configure maximum buffer size to prevent excessive memory usage
         let maxBufferDuration = min(quality.bufferDuration * 2, 60.0)

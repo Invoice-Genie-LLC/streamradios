@@ -1029,11 +1029,11 @@ struct PodcastPlayerSheetView: View {
     
     // MARK: - Helper Properties
     private var isDownloaded: Bool {
-        EpisodeStateManager.shared.isDownloaded(episode.id)
+        EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
     }
     
     private var isFavorite: Bool {
-        EpisodeStateManager.shared.isFavorite(episode.id)
+        EpisodeStateManager.shared.isFavorite(episode.id, feedId: episode.feedId)
     }
     
     // Computed property for checking download state
@@ -1100,7 +1100,7 @@ struct PodcastPlayerSheetView: View {
     private func deleteDownload() {
         print("🗑️ Starting download deletion for episode: \(episode.title)")
         print("🗑️ Episode ID: \(episode.id)")
-        print("🗑️ Current download state: \(EpisodeStateManager.shared.isDownloaded(episode.id))")
+        print("🗑️ Current download state: \(EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId))")
         
         // Clear any download progress state immediately on main thread
         viewModel.downloadProgress.removeValue(forKey: episode.id)
@@ -1122,7 +1122,7 @@ struct PodcastPlayerSheetView: View {
         
         // Verify state and do additional refresh if needed
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            let currentDownloadState = EpisodeStateManager.shared.isDownloaded(self.episode.id)
+            let currentDownloadState = EpisodeStateManager.shared.isDownloaded(self.episode.id, feedId: self.episode.feedId)
             let hasProgress = self.viewModel.downloadProgress[self.episode.id] != nil
             
             print("🗑️ Download deletion verification - isDownloaded: \(currentDownloadState), hasProgress: \(hasProgress)")
@@ -1150,7 +1150,7 @@ struct PodcastPlayerSheetView: View {
     
     private func toggleFavorite() {
         let currentState = isFavorite
-        let episodeStateManagerState = EpisodeStateManager.shared.isFavorite(episode.id)
+        let episodeStateManagerState = EpisodeStateManager.shared.isFavorite(episode.id, feedId: episode.feedId)
         
         print("❤️ BEFORE TOGGLE:")
         print("   Episode: \(episode.title)")
@@ -1176,12 +1176,12 @@ struct PodcastPlayerSheetView: View {
         
         // Check state immediately and after delay
         DispatchQueue.main.async {
-            let immediateState = EpisodeStateManager.shared.isFavorite(self.episode.id)
+            let immediateState = EpisodeStateManager.shared.isFavorite(self.episode.id, feedId: self.episode.feedId)
             print("❤️ IMMEDIATE AFTER TOGGLE: \(immediateState)")
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let delayedState = EpisodeStateManager.shared.isFavorite(self.episode.id)
+            let delayedState = EpisodeStateManager.shared.isFavorite(self.episode.id, feedId: self.episode.feedId)
             let computedState = self.isFavorite
             print("❤️ AFTER 0.5s DELAY:")
             print("   EpisodeStateManager state: \(delayedState)")
@@ -1561,7 +1561,10 @@ extension PodcastPlayerSheetView {
         let context = CoreDataStack.shared.context
         context.perform {
             let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            request.predicate = NSPredicate(format: "id == %@", episode.id)
+            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "id == %@", episode.id),
+                NSPredicate(format: "feedId == %@", episode.feedId)
+            ])
             request.fetchLimit = 1
             if let model = try? context.fetch(request).first {
                 if let data = try? JSONEncoder().encode(chapters) {

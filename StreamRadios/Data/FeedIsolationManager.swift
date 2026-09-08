@@ -30,39 +30,43 @@ class FeedIsolationManager: ObservableObject {
                 return _episodes.filter { $0.feedId == feedId }
             }
         }
-        
-        /// Safely add episodes with absolute validation
-        mutating func addEpisodes(_ newEpisodes: [PodcastEpisode]) {
-            isolationLock.lock()
-            defer { isolationLock.unlock() }
-            
-            let validEpisodes = newEpisodes.compactMap { episode -> PodcastEpisode? in
-                var validatedEpisode = episode
-                
-                // CRITICAL FIX: Only update feedId if it's empty or wrong, preserve existing episode IDs
-                if validatedEpisode.feedId.isEmpty || validatedEpisode.feedId != feedId {
-                    validatedEpisode.feedId = feedId
-                }
-                
-                // CRITICAL FIX: Only regenerate episode ID if it's completely empty
-                // Preserve existing IDs to maintain EpisodeStateManager connections
+
+        private func validatedUniqueEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+            var seenIds = Set<String>()
+            var validatedEpisodes: [PodcastEpisode] = []
+
+            for var episode in episodes {
+                guard episode.feedId == feedId else { continue }
+
                 if episode.id.isEmpty {
-                    validatedEpisode.id = generateIsolatedEpisodeId(
+                    episode.id = generateIsolatedEpisodeId(
                         title: episode.title,
                         audioUrl: episode.audioUrl,
                         publicationDate: episode.publicationDate,
                         feedId: feedId
                     )
                 }
-                
-                return validatedEpisode
+
+                guard seenIds.insert(episode.id).inserted else { continue }
+                validatedEpisodes.append(episode)
             }
+
+            return validatedEpisodes
+        }
+
+        /// Safely add episodes with absolute validation
+        mutating func addEpisodes(_ newEpisodes: [PodcastEpisode]) {
+            isolationLock.lock()
+            defer { isolationLock.unlock() }
+
+            let existingEpisodes = validatedUniqueEpisodes(_episodes)
+            let validEpisodes = validatedUniqueEpisodes(newEpisodes)
             
             // Remove duplicates and merge with existing episodes
-            let existingIds = Set(_episodes.map { $0.id })
+            let existingIds = Set(existingEpisodes.map { $0.id })
             let newValidEpisodes = validEpisodes.filter { !existingIds.contains($0.id) }
             
-            _episodes.append(contentsOf: newValidEpisodes)
+            _episodes = existingEpisodes + newValidEpisodes
             
         }
         
@@ -71,29 +75,7 @@ class FeedIsolationManager: ObservableObject {
             isolationLock.lock()
             defer { isolationLock.unlock() }
             
-            let validEpisodes = newEpisodes.compactMap { episode -> PodcastEpisode? in
-                var validatedEpisode = episode
-                
-                // CRITICAL FIX: Only update feedId if it's empty or wrong, preserve existing episode IDs
-                if validatedEpisode.feedId.isEmpty || validatedEpisode.feedId != feedId {
-                    validatedEpisode.feedId = feedId
-                }
-                
-                // CRITICAL FIX: Only regenerate episode ID if it's completely empty
-                // Preserve existing IDs to maintain EpisodeStateManager connections
-                if episode.id.isEmpty {
-                    validatedEpisode.id = generateIsolatedEpisodeId(
-                        title: episode.title,
-                        audioUrl: episode.audioUrl,
-                        publicationDate: episode.publicationDate,
-                        feedId: feedId
-                    )
-                }
-                
-                return validatedEpisode
-            }
-            
-            _episodes = validEpisodes
+            _episodes = validatedUniqueEpisodes(newEpisodes)
         }
         
         /// Clear all episodes

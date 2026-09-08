@@ -18,12 +18,11 @@ enum ActivePlayer: String {
 class PlaybackManager: ObservableObject {
     static let shared = PlaybackManager()
     
-    /// `.allowBluetooth` is the HFP (call) profile and is rejected with OSStatus -50 on the
-    /// `.playback` category. A2DP is what Bluetooth audio streaming actually uses.
-    static let playbackCategoryOptions: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothA2DP]
+    /// The playback category already supports AirPlay and Bluetooth A2DP output routes.
+    /// Supplying those play-and-record-oriented options causes OSStatus -50 on some devices.
+    static let playbackCategoryOptions: AVAudioSession.CategoryOptions = []
     
     @Published var activePlayer: ActivePlayer = .none
-    private var audioSessionConfigured = false
     private var backgroundInterruptionTimer: Timer?
     // State tracking for logging optimization
     private var lastLoggedActivePlayer: ActivePlayer?
@@ -31,8 +30,10 @@ class PlaybackManager: ObservableObject {
     
     // PHONE CALL FIX: Prevent concurrent audio session activations causing OSStatus -50
     private var isActivatingAudioSession = false
+    private var pendingAudioSessionActivations: [(player: ActivePlayer, completion: ((Bool) -> Void)?)] = []
     private var audioSessionRetryCount = 0
     private let maxAudioSessionRetries = 3
+    private let audioSessionQueue = DispatchQueue(label: "com.streamradios.audioSession", qos: .userInitiated)
     
     // Interruption state tracking
     // PHONE CALL FIX: Made internal so individual players can coordinate state
@@ -40,17 +41,19 @@ class PlaybackManager: ObservableObject {
     internal var podcastWasPlayingBeforeInterruption = false
     
     private init() {
-        setupCentralizedAudioSession()
         setupAudioInterruptionHandling()
     }
     
-    func setActivePlayer(_ player: ActivePlayer, shouldActivateSession: Bool = false) {
+    func setActivePlayer(
+        _ player: ActivePlayer,
+        shouldActivateSession: Bool = false,
+        activationCompletion: ((Bool) -> Void)? = nil
+    ) {
         let previousPlayer = activePlayer
         activePlayer = player
         
         // Save the last active player to UserDefaults for app restart restoration
         UserDefaults.standard.set(player.rawValue, forKey: "LastActivePlayer")
-        UserDefaults.standard.synchronize() // Force immediate save
         
         // FIRST-TIME PLAYBACK TRACKING: Mark that content has been played for TabView hiding behavior
         if player != .none && !hasEverPlayedContent() {
@@ -62,7 +65,9 @@ class PlaybackManager: ObservableObject {
         // Only activate audio session if requested (i.e., when actually starting playback)
         // Don't activate during startup restoration to avoid conflicts
         if shouldActivateSession {
-            activateAudioSessionForPlayer(player)
+            activateAudioSessionForPlayer(player, completion: activationCompletion)
+        } else {
+            activationCompletion?(true)
         }
     }
     
@@ -87,209 +92,154 @@ class PlaybackManager: ObservableObject {
     /// Mark that content has been played for the first time
     private func markContentAsPlayed() {
         UserDefaults.standard.set(true, forKey: "HasEverPlayedContent")
-        UserDefaults.standard.synchronize()
         print("🎵 PlaybackManager: Marked content as played - TabView hiding on scroll now enabled")
     }
     
-    private func setupCentralizedAudioSession() {
-        // Configure audio session synchronously on main thread to prevent startup race conditions
-        // This ensures the session is configured before any player tries to use it
-        let audioSession = AVAudioSession.sharedInstance()
-        
-        // Check if audio session is already configured by another component
-        // SHAZAM FIX: Don't interfere if another component needs .playAndRecord (like Shazam)
-        if audioSession.category == .playAndRecord {
-            print("🎤 PlaybackManager: Audio session is .playAndRecord (likely Shazam recording) - skipping configuration")
-            self.audioSessionConfigured = true
-            return
-        }
-        
-        // Check if already configured with .playback category
-        let desiredOptions = PlaybackManager.playbackCategoryOptions
-        let isAlreadyPlayback = audioSession.category == .playback
-        let hasCorrectOptions = audioSession.categoryOptions.contains(desiredOptions)
-        
-        if isAlreadyPlayback && hasCorrectOptions {
-            print("✅ PlaybackManager: Audio session already configured with .playback and correct options")
-            self.audioSessionConfigured = true
-            return
-        }
-        
-        // Need to configure or update the audio session
-        do {
-            // If session is active and we need to change it, deactivate first to avoid error -50
-            if audioSession.isOtherAudioPlaying || (isAlreadyPlayback && !hasCorrectOptions) {
-                // Try to deactivate first, but don't fail if it's in use
-                try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+    func activateAudioSessionForPlayer(_ player: ActivePlayer, completion: ((Bool) -> Void)? = nil) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.activateAudioSessionForPlayer(player, completion: completion)
             }
-            
-            // Use optimized audio session configuration for background stability
-            // This configuration is essential for preventing app termination during lock screen playback
-            // CRITICAL: NO mixing options to ensure phone calls completely interrupt our audio
-            // PHONE CALL FIX: Explicitly exclude .mixWithOthers and .duckOthers to prevent audio mixing
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: desiredOptions)
-            
-            // Set preferred buffer duration for better background performance
-            try audioSession.setPreferredIOBufferDuration(0.1) // 100ms buffer for stability
-            
-            print("✅ PlaybackManager: Centralized audio session configured for background stability")
-            self.audioSessionConfigured = true
-            
-        } catch let error as NSError {
-            // If we get error -50, it means parameters are invalid or session is in use
-            // Try a gentler approach without deactivating
-            if error.code == -50 {
-                print("⚠️ PlaybackManager: Audio session in use (error -50), will configure on first activation")
-                // Don't try to force it during init - wait until actual activation
-                self.audioSessionConfigured = true
-                return
-            }
-            
-            print("❌ PlaybackManager: Failed to configure centralized audio session: \(error)")
-            DebugLogger.logError("Audio session configuration failed: \(error.localizedDescription)", category: "AudioSession")
-            
-            // Log additional context for debugging
-            DebugLogger.logInfo("Audio session failure context - Category: \(audioSession.category.rawValue), Options: \(audioSession.categoryOptions.rawValue), Active: \(audioSession.isOtherAudioPlaying)", category: "AudioSession")
-            
-            // Mark as configured even on error to prevent repeated attempts
-            self.audioSessionConfigured = true
-        }
-    }
-    
-    func activateAudioSessionForPlayer(_ player: ActivePlayer) {
-        guard audioSessionConfigured else {
-            setupCentralizedAudioSession()
             return
         }
-        
-        // CRITICAL: Prevent concurrent audio session activations
+
+        // CarPlay route changes can overlap a station tap. Dropping the second request leaves the
+        // UI in a playing state without ever starting its AVPlayer, so complete it after the shared
+        // playback session finishes activating instead.
         guard !isActivatingAudioSession else {
-            print("🔒 PlaybackManager: Audio session activation already in progress, skipping duplicate request for \(player)")
+            let superseded = pendingAudioSessionActivations.filter { $0.player == player }
+            pendingAudioSessionActivations.removeAll { $0.player == player }
+            superseded.forEach { $0.completion?(false) }
+            pendingAudioSessionActivations.append((player, completion))
+            print("🔒 PlaybackManager: Audio session activation already in progress, queued request for \(player)")
             return
         }
         
-        // CRITICAL: Use a more robust activation flag that persists through async operations
         isActivatingAudioSession = true
-        
-        // Ensure flag is reset after a maximum timeout to prevent permanent blocking
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.isActivatingAudioSession = false
-        }
-        
+
         // Rate limit audio session activation logging - only log once per 3 seconds per player
         let now = Date()
         let shouldLog = lastAudioSessionActivation == nil || 
                        lastAudioSessionActivation!.0 != player || 
                        now.timeIntervalSince(lastAudioSessionActivation!.1) > 3.0
-        
-        do {
+
+        let activationDelay = CarPlayManager.shared.isCarPlayConnected ? 0.2 : 0
+        audioSessionQueue.asyncAfter(deadline: .now() + activationDelay) { [weak self] in
+            guard let self else { return }
+
             let audioSession = AVAudioSession.sharedInstance()
-            
-            // For CarPlay scenarios, implement a more robust waiting mechanism
-            if CarPlayManager.shared.isCarPlayConnected {
-                print("🚗 PlaybackManager: CarPlay detected - implementing careful audio session handover")
-                
-                // Don't reset flag here - let the timeout handle it
-                
-                // Use a more patient approach with multiple attempts
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.attemptCarPlayAudioSessionActivation(for: player, attempt: 1)
-                }
-                return // Exit early to avoid immediate activation
-            }
-            
-            // Ensure audio session has correct configuration before activating
-            let desiredOptions = PlaybackManager.playbackCategoryOptions
-            if audioSession.category != .playback || !audioSession.categoryOptions.contains(desiredOptions) {
-                // Need to reconfigure before activating
-                try audioSession.setCategory(.playback, 
-                                           mode: .default, 
-                                           options: desiredOptions)
-            }
-            
-            // Activate the audio session
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            
-            // Reset retry count on successful activation
-            audioSessionRetryCount = 0
-            // Reset activation flag on success
-            isActivatingAudioSession = false
-            
-            // Only log if enough time has passed or player changed
-            if shouldLog {
-                print("✅ PlaybackManager: Audio session activated for \(player)")
-                lastAudioSessionActivation = (player, now)
-            }
-            
-            // CRITICAL: Only clear Now Playing info when explicitly switching between different players
-            // Don't clear during CarPlay transitions, interruption resume, or when reactivating the same player
-            let currentRoute = audioSession.currentRoute
-            let hasCarPlayRoute = currentRoute.outputs.contains { $0.portType == .carAudio }
-            
-            // Check if we're in an interruption resume scenario
-            let isInterruptionResume = radioWasPlayingBeforeInterruption || podcastWasPlayingBeforeInterruption ||
-                                     RadioPlayer.shared.wasPlayingBeforeInterruption || PodcastPlayer.shared.wasPlayingBeforeInterruption
-            
-            // Only clear Now Playing if we're not in a CarPlay transition, not resuming from interruption, and the player actually changed
-            if !hasCarPlayRoute && !CarPlayManager.shared.isCarPlayConnected && !isInterruptionResume {
-                print("🔄 PlaybackManager: Clearing Now Playing info for player switch")
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-            } else if isInterruptionResume {
-                print("🎵 PlaybackManager: Preserving Now Playing info during interruption resume")
-            } else {
-                print("🚗 PlaybackManager: Preserving Now Playing info during CarPlay transition")
-            }
-            
-        } catch {
-            print("❌ PlaybackManager: Failed to activate audio session for \(player): \(error)")
-            
-            // Don't reset the activation flag immediately - let the timeout handle it to prevent rapid retries
-            
-            // Retry with a brief delay if the error is related to conflicts, but limit retries
-            if let nsError = error as NSError?, nsError.code == -50 {
-                audioSessionRetryCount += 1
-                if audioSessionRetryCount <= maxAudioSessionRetries {
-                    print("🔄 PlaybackManager: Retrying audio session activation after conflict... (attempt \(audioSessionRetryCount)/\(maxAudioSessionRetries))")
-                    
-                    // Use longer delays for CarPlay scenarios to allow proper audio session handover
-                    let isCarPlayActive = CarPlayManager.shared.isCarPlayConnected
-                    let baseDelay = isCarPlayActive ? 1.0 : 0.5  // Increased delays to prevent conflicts
-                    let retryDelay = baseDelay * Double(audioSessionRetryCount)
-                    
-                    if isCarPlayActive {
-                        print("🚗 PlaybackManager: Using extended CarPlay retry delay: \(retryDelay)s")
+            do {
+                let desiredOptions = PlaybackManager.playbackCategoryOptions
+                if audioSession.category != .playback || audioSession.categoryOptions != desiredOptions {
+                    try audioSession.setCategory(.playback, mode: .default, options: desiredOptions)
+                    do {
+                        try audioSession.setPreferredIOBufferDuration(0.1)
+                    } catch {
+                        print("⚠️ PlaybackManager: Preferred buffer duration unavailable; continuing activation: \(error)")
                     }
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
-                        // Reset the flag before retry to allow the retry attempt
+                }
+
+                try audioSession.setActive(true, options: [])
+                let hasCarPlayRoute = audioSession.currentRoute.outputs.contains { $0.portType == .carAudio }
+
+                DispatchQueue.main.async {
+                    self.audioSessionRetryCount = 0
+                    self.isActivatingAudioSession = false
+
+                    if shouldLog {
+                        print("✅ PlaybackManager: Audio session activated for \(player)")
+                        self.lastAudioSessionActivation = (player, now)
+                    }
+
+                    let isInterruptionResume = self.radioWasPlayingBeforeInterruption || self.podcastWasPlayingBeforeInterruption ||
+                        RadioPlayer.shared.wasPlayingBeforeInterruption || PodcastPlayer.shared.wasPlayingBeforeInterruption
+
+                    if !hasCarPlayRoute && !CarPlayManager.shared.isCarPlayConnected && !isInterruptionResume {
+                        print("🔄 PlaybackManager: Clearing Now Playing info for player switch")
+                        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+                    } else if isInterruptionResume {
+                        print("🎵 PlaybackManager: Preserving Now Playing info during interruption resume")
+                    } else {
+                        print("🚗 PlaybackManager: Preserving Now Playing info during CarPlay transition")
+                    }
+
+                    let hasNewerRequest = self.pendingAudioSessionActivations.contains { $0.player == player }
+                    completion?(self.activePlayer == player && !hasNewerRequest)
+                    self.completePendingAudioSessionActivations(success: true)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("❌ PlaybackManager: Failed to activate audio session for \(player): \(error)")
+
+                    let nsError = error as NSError
+                    if nsError.code == -50 {
+                        self.audioSessionRetryCount += 1
+                        if self.audioSessionRetryCount <= self.maxAudioSessionRetries {
+                            print("🔄 PlaybackManager: Retrying audio session activation after conflict... (attempt \(self.audioSessionRetryCount)/\(self.maxAudioSessionRetries))")
+                            let baseDelay = CarPlayManager.shared.isCarPlayConnected ? 1.0 : 0.5
+                            let retryDelay = baseDelay * Double(self.audioSessionRetryCount)
+                            self.isActivatingAudioSession = false
+                            DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                                self.activateAudioSessionForPlayer(player, completion: completion)
+                            }
+                        } else {
+                            print("❌ PlaybackManager: Max audio session retry attempts reached (\(self.maxAudioSessionRetries)). Stopping retries to prevent infinite loop.")
+                            self.audioSessionRetryCount = 0
+                            self.isActivatingAudioSession = false
+                            completion?(false)
+                            self.completePendingAudioSessionActivations(success: false)
+                        }
+                    } else {
+                        self.audioSessionRetryCount = 0
                         self.isActivatingAudioSession = false
-                        self.activateAudioSessionForPlayer(player)
+                        completion?(false)
+                        self.completePendingAudioSessionActivations(success: false)
                     }
-                } else {
-                    print("❌ PlaybackManager: Max audio session retry attempts reached (\(maxAudioSessionRetries)). Stopping retries to prevent infinite loop.")
-                    audioSessionRetryCount = 0 // Reset for next time
-                    isActivatingAudioSession = false // Reset flag when giving up
                 }
-            } else {
-                // For non -50 errors, also reset retry count and flag
-                audioSessionRetryCount = 0
-                isActivatingAudioSession = false
             }
+        }
+    }
+
+    private func completePendingAudioSessionActivations(success: Bool) {
+        let pending = pendingAudioSessionActivations
+        pendingAudioSessionActivations.removeAll()
+
+        for request in pending {
+            request.completion?(success && request.player == activePlayer)
         }
     }
     
     func deactivateAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            print("✅ PlaybackManager: Audio session deactivated")
-            
-            // Clear Now Playing info when deactivating
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-            
-        } catch {
-            print("❌ PlaybackManager: Failed to deactivate audio session: \(error)")
+        audioSessionQueue.async {
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                print("✅ PlaybackManager: Audio session deactivated")
+
+                DispatchQueue.main.async {
+                    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+                }
+            } catch {
+                print("❌ PlaybackManager: Failed to deactivate audio session: \(error)")
+            }
+        }
+    }
+
+    private func resumeAfterInterruption(
+        _ player: ActivePlayer,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        setActivePlayer(player, shouldActivateSession: true) { activated in
+            guard activated else {
+                completion?(false)
+                return
+            }
+
+            if player == .radio {
+                RadioPlayer.shared.resumeAfterInterruption(audioSessionActivated: true)
+            } else if player == .podcast {
+                PodcastPlayer.shared.resumeAfterInterruption(audioSessionActivated: true)
+            }
+            completion?(true)
         }
     }
     
@@ -360,13 +310,13 @@ class PlaybackManager: ObservableObject {
             
             // CRITICAL: Immediately deactivate audio session to prevent ANY mixing with phone calls
             if radioWasPlaying || podcastWasPlaying {
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    try audioSession.setActive(false, options: [])
-                    print("✅ PlaybackManager: Audio session immediately deactivated to prevent phone call mixing")
-                } catch {
-                    print("⚠️ PlaybackManager: Could not deactivate audio session: \(error)")
-                    // Players are still paused above, so audio should be stopped
+                audioSessionQueue.async {
+                    do {
+                        try AVAudioSession.sharedInstance().setActive(false, options: [])
+                        print("✅ PlaybackManager: Audio session deactivated for interruption")
+                    } catch {
+                        print("⚠️ PlaybackManager: Could not deactivate audio session: \(error)")
+                    }
                 }
             }
             
@@ -441,39 +391,24 @@ class PlaybackManager: ObservableObject {
             } else if shouldResume || shouldAttemptRadioResume || shouldAttemptPodcastResume {
                 print("🌅 PlaybackManager: Foreground interruption end - attempting resume")
                 
-                // Reactivate audio session first
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    // PHONE CALL FIX: Ensure proper category and options for resume
-                    try audioSession.setCategory(.playback, 
-                                               mode: .default, 
-                                               options: PlaybackManager.playbackCategoryOptions)
-                    try audioSession.setActive(true, options: [])
-                    print("✅ PlaybackManager: Audio session reactivated for foreground resume")
-                } catch {
-                    print("❌ PlaybackManager: Failed to reactivate audio session: \(error)")
-                }
-                
                 // Resume with delay to ensure audio session is ready
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     // PHONE CALL FIX: Resume whichever player was actually playing, regardless of activePlayer
                     if shouldAttemptRadioResume {
                         print("✅ PlaybackManager: Resuming radio playback after phone call")
-                        PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
-                        RadioPlayer.shared.resumeAfterInterruption()
-                        
-                        // Reset interruption state after successful resume attempt
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.resetInterruptionState()
+                        self.resumeAfterInterruption(.radio) { activated in
+                            guard activated else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                self.resetInterruptionState()
+                            }
                         }
                     } else if shouldAttemptPodcastResume {
                         print("✅ PlaybackManager: Resuming podcast playback after phone call")
-                        PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
-                        PodcastPlayer.shared.resumeAfterInterruption()
-                        
-                        // Reset interruption state after successful resume attempt
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.resetInterruptionState()
+                        self.resumeAfterInterruption(.podcast) { activated in
+                            guard activated else { return }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                self.resetInterruptionState()
+                            }
                         }
                     } else {
                         // No resume needed, reset state immediately
@@ -526,52 +461,38 @@ class PlaybackManager: ObservableObject {
                 print("⚠️ PlaybackManager: Background resume task expired")
             }
             
-            // Use background queue to avoid main thread issues
-            DispatchQueue.global(qos: .userInitiated).async {
-                // Reactivate audio session aggressively
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    // PHONE CALL FIX: Ensure proper category for background resume after phone calls
-                    try audioSession.setCategory(.playback, 
-                                               mode: .default, 
-                                               options: PlaybackManager.playbackCategoryOptions)
-                    try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-                    print("✅ PlaybackManager: Background audio session reactivated after phone call")
-                } catch {
-                    print("❌ PlaybackManager: Background audio session reactivation failed: \(error)")
-                }
-                
-                // Resume playback with longer delay for background scenarios
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    print("🔄 PlaybackManager: Background resume attempt for activePlayer: \(self.activePlayer)")
-                    // PHONE CALL FIX: Resume whichever player was actually playing, regardless of activePlayer
-                    if radioNeedsBackgroundResume {
-                        print("✅ PlaybackManager: Background resuming radio playback after phone call")
-                        PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
-                        RadioPlayer.shared.resumeAfterInterruption()
-                        
-                        // Reset interruption state after background resume
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                            self.resetInterruptionState()
-                        }
-                    } else if podcastNeedsBackgroundResume {
-                        print("✅ PlaybackManager: Background resuming podcast playback after phone call")
-                        PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
-                        PodcastPlayer.shared.resumeAfterInterruption()
-                        
-                        // Reset interruption state after background resume
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                            self.resetInterruptionState()
-                        }
+            // Resume playback with longer delay for background scenarios. The active-player
+            // transition owns the single serialized audio-session activation.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                print("🔄 PlaybackManager: Background resume attempt for activePlayer: \(self.activePlayer)")
+                if radioNeedsBackgroundResume {
+                    print("✅ PlaybackManager: Background resuming radio playback after phone call")
+                    self.resumeAfterInterruption(.radio) { activated in
+                        self.finishBackgroundResumeAttempt(backgroundTaskID, activated: activated)
                     }
-                    
-                    // End background task
-                    if backgroundTaskID != .invalid {
-                        UIApplication.shared.endBackgroundTask(backgroundTaskID)
-                        print("✅ PlaybackManager: Background resume task completed")
+                } else if podcastNeedsBackgroundResume {
+                    print("✅ PlaybackManager: Background resuming podcast playback after phone call")
+                    self.resumeAfterInterruption(.podcast) { activated in
+                        self.finishBackgroundResumeAttempt(backgroundTaskID, activated: activated)
                     }
+                } else if backgroundTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                    print("✅ PlaybackManager: Background resume task completed")
                 }
             }
+        }
+    }
+
+    private func finishBackgroundResumeAttempt(_ backgroundTaskID: UIBackgroundTaskIdentifier, activated: Bool) {
+        if activated {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.resetInterruptionState()
+            }
+        }
+
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            print("✅ PlaybackManager: Background resume task completed")
         }
     }
     
@@ -592,26 +513,12 @@ class PlaybackManager: ObservableObject {
                                  !PodcastPlayer.shared.isPlaying
         
         if shouldResumeRadio || shouldResumePodcast {
-            // Reactivate audio session first
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                // PHONE CALL FIX: Ensure proper category for app active resume after phone calls
-                try audioSession.setCategory(.playback, 
-                                           mode: .default, 
-                                           options: PlaybackManager.playbackCategoryOptions)
-                try audioSession.setActive(true, options: [])
-            } catch {
-                print("❌ PlaybackManager: Failed to reactivate audio session: \(error)")
-            }
-            
             // Resume with delay to ensure audio session is ready
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if shouldResumeRadio {
-                    PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
-                    RadioPlayer.shared.resumeAfterInterruption()
+                    self.resumeAfterInterruption(.radio)
                 } else if shouldResumePodcast {
-                    PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
-                    PodcastPlayer.shared.resumeAfterInterruption()
+                    self.resumeAfterInterruption(.podcast)
                 }
             }
         }
@@ -703,15 +610,11 @@ class PlaybackManager: ObservableObject {
             print("⏰ PlaybackManager: Timer - checking audio session availability")
             
             DispatchQueue.main.async {
-                // PHONE CALL FIX: Prevent concurrent audio session activations
                 if self.isActivatingAudioSession {
                     print("⏰ PlaybackManager: Timer - audio session activation in progress, skipping")
                     return
                 }
-                
-                self.isActivatingAudioSession = true
-                defer { self.isActivatingAudioSession = false }
-                
+
                 // Check if other audio is still playing by examining the audio session
                 let audioSession = AVAudioSession.sharedInstance()
                 
@@ -735,65 +638,36 @@ class PlaybackManager: ObservableObject {
                     print("⏰ PlaybackManager: Timer - other audio detected, waiting for session release...")
                     return
                 }
-                
-                // Even when isOtherAudioPlaying is false, Apple Music may still hold the session
-                // Try progressively more aggressive session activation approaches
-                var sessionActivated = false
-                
-                // GPS FIX: Simplified approach to prevent GPS interference
-                // Only attempt gentle activation to avoid system resource conflicts
-                do {
-                    try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
-                    try audioSession.setActive(true, options: [])
-                    print("⏰ PlaybackManager: Timer - GPS-safe audio session activation succeeded")
-                    sessionActivated = true
-                } catch let error as NSError {
-                    if error.code == -50 {
-                        print("⏰ PlaybackManager: Timer - session conflict detected, will retry in next cycle (GPS-safe mode)")
-                        return
-                    } else {
-                        print("⏰ PlaybackManager: Timer - session error: \(error)")
-                        return
-                    }
-                }
-                
-                if !sessionActivated {
-                    print("⏰ PlaybackManager: Timer - failed to activate audio session, skipping resume attempt")
-                    return
-                }
-                
-                // Only attempt resume if we successfully got the audio session
+
                 print("⏰ PlaybackManager: Timer - audio session available, attempting resume")
                 
                 // PHONE CALL FIX: Resume whichever player was actually playing
                 if radioStillNeedsResume {
                     print("📻 PlaybackManager: Timer resuming radio playback after phone call")
-                    PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
-                    RadioPlayer.shared.resumeAfterInterruption()
-                    
-                    // Check if resume was successful after a short delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        if RadioPlayer.shared.isPlaying {
-                            print("✅ PlaybackManager: Timer - radio resume successful, stopping timer")
-                            timer.invalidate()
-                            self.backgroundInterruptionTimer = nil
-                        } else {
-                            print("❌ PlaybackManager: Timer - radio resume failed, will retry")
+                    self.resumeAfterInterruption(.radio) { activated in
+                        guard activated else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            if RadioPlayer.shared.isPlaying {
+                                print("✅ PlaybackManager: Timer - radio resume successful, stopping timer")
+                                timer.invalidate()
+                                self.backgroundInterruptionTimer = nil
+                            } else {
+                                print("❌ PlaybackManager: Timer - radio resume failed, will retry")
+                            }
                         }
                     }
                 } else if podcastStillNeedsResume {
                     print("🎧 PlaybackManager: Timer resuming podcast playback after phone call")
-                    PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
-                    PodcastPlayer.shared.resumeAfterInterruption()
-                    
-                    // Check if resume was successful after a short delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        if PodcastPlayer.shared.isPlaying {
-                            print("✅ PlaybackManager: Timer - podcast resume successful, stopping timer")
-                            timer.invalidate()
-                            self.backgroundInterruptionTimer = nil
-                        } else {
-                            print("❌ PlaybackManager: Timer - podcast resume failed, will retry")
+                    self.resumeAfterInterruption(.podcast) { activated in
+                        guard activated else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            if PodcastPlayer.shared.isPlaying {
+                                print("✅ PlaybackManager: Timer - podcast resume successful, stopping timer")
+                                timer.invalidate()
+                                self.backgroundInterruptionTimer = nil
+                            } else {
+                                print("❌ PlaybackManager: Timer - podcast resume failed, will retry")
+                            }
                         }
                     }
                 }
@@ -805,30 +679,6 @@ class PlaybackManager: ObservableObject {
     private func stopBackgroundInterruptionTimer() {
         backgroundInterruptionTimer?.invalidate()
         backgroundInterruptionTimer = nil
-    }
-    
-    private func reactivateAudioSessionWithoutClearing() {
-        guard audioSessionConfigured else {
-            setupCentralizedAudioSession()
-            return
-        }
-        
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            
-            // MAIN THREAD FIX: Always set category to avoid IPC delays from category check
-            // Checking audioSession.category on main thread causes non-deterministic delays
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: PlaybackManager.playbackCategoryOptions)
-            
-            // Reactivate without clearing Now Playing info during CarPlay transitions
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            print("✅ PlaybackManager: Audio session reactivated without clearing Now Playing")
-            
-        } catch {
-            print("❌ PlaybackManager: Failed to reactivate audio session: \(error)")
-        }
     }
     
     /// Handles audio session route changes for immediate resume detection
@@ -872,15 +722,11 @@ class PlaybackManager: ObservableObject {
         
         print("⚡ PlaybackManager: Attempting immediate resume after audio session change")
         
-        // PHONE CALL FIX: Prevent concurrent audio session activations
         if isActivatingAudioSession {
             print("⚡ PlaybackManager: Audio session activation in progress, skipping immediate resume")
             return
         }
-        
-        isActivatingAudioSession = true
-        defer { isActivatingAudioSession = false }
-        
+
         let audioSession = AVAudioSession.sharedInstance()
         let otherAudioPlaying = audioSession.isOtherAudioPlaying
         
@@ -893,31 +739,21 @@ class PlaybackManager: ObservableObject {
         }
         
         if !otherAudioPlaying {
-            // Try immediate session activation
-            do {
-                try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
-                try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-                
-                print("⚡ PlaybackManager: Immediate session activation successful - resuming playback")
-                
-                // PHONE CALL FIX: Add small delay to prevent race conditions with individual players
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    // Resume whichever player was actually playing
-                    if radioNeedsImmediateResume {
-                        PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
-                        RadioPlayer.shared.resumeAfterInterruption()
-                        
-                        // Stop the background timer since we successfully resumed
+            print("⚡ PlaybackManager: Audio session available - resuming through activation coordinator")
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if radioNeedsImmediateResume {
+                    self.resumeAfterInterruption(.radio) { activated in
+                        guard activated else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                             if RadioPlayer.shared.isPlaying {
                                 self.stopBackgroundInterruptionTimer()
                             }
                         }
-                    } else if podcastNeedsImmediateResume {
-                        PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
-                        PodcastPlayer.shared.resumeAfterInterruption()
-                        
-                        // Stop the background timer since we successfully resumed
+                    }
+                } else if podcastNeedsImmediateResume {
+                    self.resumeAfterInterruption(.podcast) { activated in
+                        guard activated else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                             if PodcastPlayer.shared.isPlaying {
                                 self.stopBackgroundInterruptionTimer()
@@ -925,9 +761,6 @@ class PlaybackManager: ObservableObject {
                         }
                     }
                 }
-                
-            } catch {
-                print("⚡ PlaybackManager: Immediate session activation failed: \(error)")
             }
         }
     }
@@ -981,46 +814,31 @@ class PlaybackManager: ObservableObject {
             return
         }
         
-        let audioSession = AVAudioSession.sharedInstance()
-        
-        // Try a single gentle activation attempt
-        do {
-            try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
-            try audioSession.setActive(true, options: [])
-            
-            print("✅ PlaybackManager: Delayed resume successful - Apple Music released session")
-            
-            // Clear conflict flag
-            UserDefaults.standard.removeObject(forKey: "AppleMusicConflictActive")
-            
-            // PHONE CALL FIX: Attempt resume for whichever player was actually playing
-            if radioNeedsDelayedResume {
-                PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
-                RadioPlayer.shared.resumeAfterInterruption()
-                
-                // Reset interruption state after delayed resume
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.resetInterruptionState()
-                }
-            } else if podcastNeedsDelayedResume {
-                PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
-                PodcastPlayer.shared.resumeAfterInterruption()
-                
-                // Reset interruption state after delayed resume
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.resetInterruptionState()
-                }
+        let player: ActivePlayer = radioNeedsDelayedResume ? .radio : .podcast
+        setActivePlayer(player, shouldActivateSession: true) { [weak self] activated in
+            guard let self else { return }
+            guard activated else {
+                print("🔄 PlaybackManager: Delayed resume failed - audio session unavailable")
+                return
             }
-            
-            // Notify UI that automatic resume worked
+
+            print("✅ PlaybackManager: Delayed resume successful - Apple Music released session")
+            UserDefaults.standard.removeObject(forKey: "AppleMusicConflictActive")
+
+            if player == .radio {
+                RadioPlayer.shared.resumeAfterInterruption(audioSessionActivated: true)
+            } else {
+                PodcastPlayer.shared.resumeAfterInterruption(audioSessionActivated: true)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.resetInterruptionState()
+            }
+
             NotificationCenter.default.post(
                 name: NSNotification.Name("AppleMusicConflictResolved"),
                 object: nil
             )
-            
-        } catch {
-            print("🔄 PlaybackManager: Delayed resume failed - Apple Music still holding session: \(error)")
-            // Keep the manual resume option available
         }
     }
     
@@ -1115,89 +933,41 @@ class PlaybackManager: ObservableObject {
     private func attemptSingleGentleResume() {
         print("🛰️ PlaybackManager: Attempting single gentle resume to protect GPS")
         
-        let audioSession = AVAudioSession.sharedInstance()
-        
-        // Single gentle attempt without retries
-        do {
-            try audioSession.setCategory(.playback, mode: .default, options: PlaybackManager.playbackCategoryOptions)
-            try audioSession.setActive(true, options: [])
-            
+        let radioNeedsResume = (radioWasPlayingBeforeInterruption || RadioPlayer.shared.wasPlayingBeforeInterruption) &&
+                              RadioPlayer.shared.userWantsToPlay &&
+                              !RadioPlayer.shared.wasManuallyPaused
+        let podcastNeedsResume = (podcastWasPlayingBeforeInterruption || PodcastPlayer.shared.wasPlayingBeforeInterruption) &&
+                                PodcastPlayer.shared.userWantsToPlay &&
+                                !PodcastPlayer.shared.wasManuallyPaused
+
+        guard radioNeedsResume || podcastNeedsResume else { return }
+
+        let player: ActivePlayer = radioNeedsResume ? .radio : .podcast
+        setActivePlayer(player, shouldActivateSession: true) { [weak self] activated in
+            guard let self else { return }
+            guard activated else {
+                print("🛰️ PlaybackManager: Single gentle resume failed - manual resume required")
+                UserDefaults.standard.set(true, forKey: "NetworkInterruptionActive")
+                return
+            }
+
             print("🛰️ PlaybackManager: Single gentle resume - audio session activated")
-            
-            // Determine which player needs resume
-            let radioNeedsResume = (radioWasPlayingBeforeInterruption || RadioPlayer.shared.wasPlayingBeforeInterruption) && 
-                                  RadioPlayer.shared.userWantsToPlay && 
-                                  !RadioPlayer.shared.wasManuallyPaused
-            let podcastNeedsResume = (podcastWasPlayingBeforeInterruption || PodcastPlayer.shared.wasPlayingBeforeInterruption) && 
-                                    PodcastPlayer.shared.userWantsToPlay && 
-                                    !PodcastPlayer.shared.wasManuallyPaused
-            
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if radioNeedsResume {
+                if player == .radio {
                     print("🛰️ PlaybackManager: Single gentle resume - attempting radio playback")
-                    PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true)
-                    RadioPlayer.shared.resumeAfterInterruption()
-                } else if podcastNeedsResume {
+                    RadioPlayer.shared.resumeAfterInterruption(audioSessionActivated: true)
+                } else {
                     print("🛰️ PlaybackManager: Single gentle resume - attempting podcast playback")
-                    PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
-                    PodcastPlayer.shared.resumeAfterInterruption()
+                    PodcastPlayer.shared.resumeAfterInterruption(audioSessionActivated: true)
                 }
-                
-                // Reset interruption state after single attempt
+
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     self.resetInterruptionState()
                 }
             }
-            
-        } catch {
-            print("🛰️ PlaybackManager: Single gentle resume failed: \(error) - manual resume required")
-            UserDefaults.standard.set(true, forKey: "NetworkInterruptionActive")
         }
     }
-    
-    /// CarPlay-specific audio session activation with careful handover detection
-    private func attemptCarPlayAudioSessionActivation(for player: ActivePlayer, attempt: Int) {
-        let maxAttempts = 5
-        
-        guard attempt <= maxAttempts else {
-            print("🚗 PlaybackManager: Max CarPlay audio session attempts reached (\(maxAttempts))")
-            return
-        }
-        
-        print("🚗 PlaybackManager: CarPlay audio session attempt \(attempt)/\(maxAttempts)")
-        
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            
-            // Test if we can configure the audio session
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: PlaybackManager.playbackCategoryOptions)
-            
-            print("🚗 PlaybackManager: CarPlay audio session category configured successfully")
-            
-            // Now try to activate
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            
-            print("✅ PlaybackManager: CarPlay audio session activated successfully for \(player)")
-            
-            // Reset retry count and update state
-            audioSessionRetryCount = 0
-            isActivatingAudioSession = false
-            lastAudioSessionActivation = (player, Date())
-            
-        } catch {
-            print("🚗 PlaybackManager: CarPlay audio session attempt \(attempt) failed: \(error)")
-            
-            // Calculate progressive delay: 0.3s, 0.6s, 1.0s, 1.5s, 2.0s
-            let delay = 0.3 + (0.3 * Double(attempt - 1))
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                self.attemptCarPlayAudioSessionActivation(for: player, attempt: attempt + 1)
-            }
-        }
-    }
-    
+
     deinit {
         NotificationCenter.default.removeObserver(self)
         backgroundInterruptionTimer?.invalidate()

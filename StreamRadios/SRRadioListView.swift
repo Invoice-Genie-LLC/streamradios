@@ -123,7 +123,10 @@ private struct SRRadioListContent: View {
             scheduleReload()
         }
         .onChange(of: selectedSubTab) { _, newValue in
-            if isEditing && newValue != .favorites { isEditing = false }
+            if isEditing && newValue != .favorites {
+                finishReordering()
+                return
+            }
             scheduleReload()
         }
         .onChange(of: searchText) { _, _ in scheduleReload(debounceMilliseconds: 220) }
@@ -191,6 +194,7 @@ private struct SRRadioListContent: View {
                 version: rowsVersion,
                 nowPlaying: nowPlaying,
                 isEditing: isEditing,
+                editMode: listEditMode,
                 canReorder: canReorder,
                 canEnterReorder: canEnterReorder,
                 favoriteErrorId: showFavoriteError ? radioPlayer.currentlyPlayingStation?.id : nil,
@@ -232,6 +236,7 @@ private struct SRRadioListContent: View {
     /// Rebuilds the snapshot instead of re-filtering in the body: the predicate runs in SQLite
     /// against the indexed `searchText` column, and the fetch happens off the main thread.
     private func scheduleReload(debounceMilliseconds: Int = 0) {
+        guard !isEditing else { return }
         reloadTask?.cancel()
 
         let predicate = self.predicate
@@ -357,7 +362,6 @@ private struct SRRadioListContent: View {
 
         radioPlayer.playStation(at: index, from: viewModel.stations)
         viewModel.updateLastPlayed(for: station)
-        viewModel.reportStationClick(for: station)
         scrollTargetId = id
     }
 
@@ -426,19 +430,45 @@ private struct SRRadioListContent: View {
     }
 
     private func moveStations(from source: IndexSet, to destination: Int) {
+        reloadTask?.cancel()
         rows.move(fromOffsets: source, toOffset: destination)
         rowsVersion &+= 1
-        viewModel.moveFavoriteStation(from: source, to: destination)
+        viewModel.setFavoriteStationOrder(rows.map(\.id))
     }
 
     // MARK: - Gestures
 
     private func enterReorder() {
         guard !isEditing, selectedTab == .radio, selectedSubTab == .favorites, !isSearching else { return }
+        reloadTask?.cancel()
         if radioPlayer.isPlaying { radioPlayer.pause() }
         if PodcastPlayer.shared.isPlaying { PodcastPlayer.shared.pause() }
         isEditing = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func finishReordering() {
+        guard isEditing else { return }
+        reloadTask?.cancel()
+        isEditing = false
+
+        // Let List finish its active move transaction before replacing its snapshot.
+        DispatchQueue.main.async {
+            scheduleReload()
+        }
+    }
+
+    private var listEditMode: Binding<EditMode> {
+        Binding(
+            get: { isEditing ? .active : .inactive },
+            set: { mode in
+                if mode.isEditing {
+                    if !isEditing { enterReorder() }
+                } else {
+                    finishReordering()
+                }
+            }
+        )
     }
 
     private var scrollTrackingGesture: some Gesture {
@@ -470,7 +500,7 @@ private struct SRRadioListContent: View {
                 .font(SRFont.rowSubtitle)
                 .foregroundStyle(SRColor.secondaryText)
             Spacer()
-            Button("Done") { isEditing = false }
+            Button("Done", action: finishReordering)
                 .buttonStyle(.glass)
                 .buttonBorderShape(.capsule)
         }
@@ -574,6 +604,7 @@ private struct SRStationListBody: View, Equatable {
     let version: Int
     let nowPlaying: SRNowPlaying?
     let isEditing: Bool
+    let editMode: Binding<EditMode>
     let canReorder: Bool
     let canEnterReorder: Bool
     let favoriteErrorId: String?
@@ -619,7 +650,7 @@ private struct SRStationListBody: View, Equatable {
         // Rows scroll through the home-indicator strip instead of stopping short of it, so the
         // list uses the full screen height whether or not the tab bar is showing.
         .ignoresSafeArea(.container, edges: .bottom)
-        .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+        .environment(\.editMode, editMode)
     }
 
     @ViewBuilder

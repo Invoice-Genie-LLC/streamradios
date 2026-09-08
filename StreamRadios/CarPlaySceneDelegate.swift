@@ -32,8 +32,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var pendingHighlightStationId: String?
     /// Same idea as `pendingHighlightStationId`, for podcast episodes.
     private var pendingHighlightEpisodeId: String?
+    private var artworkRequestedPlaybackStationId: String?
+    private var latestDownloadStates: [String: Bool] = [:]
+    private var dataInitializationTask: Task<Void, Never>?
+    private var podcastColdStartRetryTask: Task<Void, Never>?
+    private var podcastContentReconciliationTask: Task<Void, Never>?
     
     private var subscriptionObserver: AnyCancellable?
+    private var radioMetadataObserver: AnyCancellable?
+    private var radioStationObserver: AnyCancellable?
+    private var podcastDataObserver: AnyCancellable?
     
     // MARK: - Scene Delegate Methods
     
@@ -68,6 +76,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
         }
     }
+
+    private func startDataInitializationIfNeeded() {
+        guard dataInitializationTask == nil else { return }
+
+        dataInitializationTask = Task { [weak self] in
+            await self?.initializeCarPlayData()
+        }
+    }
     
     /// Initialize EpisodeStateManager to ensure it's properly set up for CarPlay
     private func initializeEpisodeStateManager() async {
@@ -82,14 +98,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     /// Load podcast data directly from Core Data for CarPlay
   
-    private func loadPodcastDataFromCoreData() async {
+    private func loadPodcastDataFromCoreData(
+        scheduleColdStartRetry: Bool = true,
+        attemptCloudRecovery: Bool = true
+    ) async {
         os_log("🚗 CarPlay: Loading podcast data from Core Data (independent mode)", log: log, type: .info)
         print("🚗 CarPlay: Loading podcast feeds independently from Core Data...")
         
-        // Use the main context and perform operations on its queue to avoid threading issues
-        let context = CoreDataStack.shared.context
+        // A cold CarPlay launch can reach this path before loadPersistentStores completes.
+        let context = await CoreDataStack.shared.newBackgroundContextAfterStoreLoad()
         
         var podcastFeeds: [PodcastFeed] = []
+        var orphanedEpisodeCount = 0
         
         // Perform Core Data operations on the context's queue to avoid threading violations
         await withCheckedContinuation { continuation in
@@ -97,10 +117,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 do {
                     // Load podcast feeds first (without episodes for performance)
                     let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    feedRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+                    feedRequest.sortDescriptors = [
+                        NSSortDescriptor(key: "sortOrder", ascending: true),
+                        NSSortDescriptor(key: "title", ascending: true)
+                    ]
                     
                     let managedFeeds = try context.fetch(feedRequest)
                     os_log("🚗 CarPlay: Found %d podcast feeds in Core Data", log: self.log, type: .info, managedFeeds.count)
+
+                    if managedFeeds.isEmpty {
+                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        orphanedEpisodeCount = try context.count(for: episodeRequest)
+                    }
                     
                     // Convert each managed feed to PodcastFeed (without loading episodes yet)
                     for managedFeed in managedFeeds {
@@ -134,49 +162,170 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 }
             }
         }
+
+        if podcastFeeds.isEmpty && scheduleColdStartRetry {
+            schedulePodcastColdStartRetries()
+        }
+
+        if podcastFeeds.isEmpty && orphanedEpisodeCount > 0 && attemptCloudRecovery {
+            do {
+                let recoveredFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
+                if !recoveredFeeds.isEmpty {
+                    try await persistRecoveredPodcastFeeds(recoveredFeeds)
+                    podcastFeeds = recoveredFeeds
+                    os_log(
+                        "🚗 CarPlay: Recovered %d feed records for %d orphaned episodes",
+                        log: log,
+                        type: .info,
+                        recoveredFeeds.count,
+                        orphanedEpisodeCount
+                    )
+                }
+            } catch {
+                os_log("🚗 CarPlay: Failed to recover missing podcast feeds: %@", log: log, type: .error, error.localizedDescription)
+            }
+        }
         
         // Configure CarPlayManager with the loaded podcast data on main actor
         await MainActor.run {
-            // Get the feed order from PodcastViewModel to maintain consistency
-            let feedOrder = PodcastViewModel.shared.podcastFeedOrder
+            let savedFeedOrder = UserDefaults.standard.stringArray(forKey: "PodcastFeedOrder") ?? []
+            let feedOrder = savedFeedOrder.isEmpty ? podcastFeeds.map(\.id) : savedFeedOrder
             
-            // CRITICAL FIX: Sync maxEpisodes from PodcastViewModel to ensure episode limits are respected
-            var feedsWithLimits = podcastFeeds
-            for i in 0..<feedsWithLimits.count {
-                let feedId = feedsWithLimits[i].id
-                if let viewModelFeed = PodcastViewModel.shared.podcastFeeds.first(where: { $0.id == feedId }),
-                   let maxEpisodes = viewModelFeed.maxEpisodes {
-                    feedsWithLimits[i].maxEpisodes = maxEpisodes
-                    os_log("🚗 CarPlay: Synced maxEpisodes=%d for feed '%@'", log: self.log, type: .debug, maxEpisodes, feedsWithLimits[i].title)
-                }
+            let carPlayManager = CarPlayManager.shared
+            if !podcastFeeds.isEmpty || carPlayManager.getPodcastFeeds().isEmpty {
+                carPlayManager.configurePodcastData(podcastFeeds, feedOrder: feedOrder)
+            } else {
+                os_log("🚗 CarPlay: Preserving existing podcast snapshot after empty Core Data read", log: self.log, type: .info)
             }
-            
-            CarPlayManager.shared.configurePodcastData(feedsWithLimits, feedOrder: feedOrder)
-            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, feedsWithLimits.count)
-            print("🚗 CarPlay: Configured with \(feedsWithLimits.count) podcast feeds in order")
+            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, podcastFeeds.count)
+            print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds in order")
             
             // CRITICAL FIX: Always refresh templates when feeds are loaded
             print("🚗 CarPlay: Refreshing CarPlay templates with loaded podcast feeds")
             self.refreshPodcastTabTemplate()
+            self.refreshDownloadsTabTemplate()
             
             // Also refresh current template if we're viewing a podcast
             self.refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
             
             print("🚗 CarPlay: Podcast data loading completed with \(podcastFeeds.count) feeds")
         }
+
+        if !podcastFeeds.isEmpty {
+            podcastColdStartRetryTask?.cancel()
+            podcastColdStartRetryTask = nil
+        }
+    }
+
+    private func schedulePodcastColdStartRetries() {
+        guard podcastColdStartRetryTask == nil else { return }
+
+        podcastColdStartRetryTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.podcastColdStartRetryTask = nil }
+
+            for delay in [1.0, 2.0, 4.0, 8.0] {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    return
+                }
+
+                guard !Task.isCancelled else { return }
+                await self.loadPodcastDataFromCoreData(
+                    scheduleColdStartRetry: false,
+                    attemptCloudRecovery: false
+                )
+
+                let hasFeeds = await MainActor.run {
+                    !CarPlayManager.shared.getPodcastFeeds().isEmpty
+                }
+                if hasFeeds {
+                    os_log("🚗 CarPlay: Cold-start podcast retry loaded feeds", log: self.log, type: .info)
+                    return
+                }
+            }
+
+            os_log("🚗 CarPlay: Cold-start podcast retries completed with no feeds", log: self.log, type: .info)
+        }
+    }
+
+    private func schedulePodcastContentReconciliation() {
+        podcastContentReconciliationTask?.cancel()
+        podcastContentReconciliationTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.podcastContentReconciliationTask = nil }
+
+            for delay in [0.5, 1.5, 3.0, 6.0] {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    return
+                }
+
+                guard !Task.isCancelled, self.interfaceController != nil else { return }
+                await MainActor.run {
+                    self.refreshPodcastTabTemplate()
+                    self.refreshDownloadsTabTemplate()
+                }
+            }
+        }
+    }
+
+    private func persistRecoveredPodcastFeeds(_ feeds: [PodcastFeed]) async throws {
+        let context = await CoreDataStack.shared.newBackgroundContextAfterStoreLoad()
+
+        try await context.perform {
+            for feed in feeds {
+                let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@ OR url == %@", feed.id, feed.url)
+                request.fetchLimit = 1
+
+                let managedFeed = try context.fetch(request).first ?? FeedModel(context: context)
+                managedFeed.update(from: feed)
+                managedFeed.sortOrder = Int16(feed.order)
+            }
+
+            if context.hasChanges {
+                try context.save()
+            }
+        }
     }
     
     /// Load radio stations data for CarPlay
     private func loadRadioStationsData() async {
         os_log("🚗 CarPlay: Loading radio stations data", log: log, type: .info)
-        
+
+        let context = await CoreDataStack.shared.newBackgroundContextAfterStoreLoad()
+        let stations: [RadioStation] = await context.perform {
+            let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            request.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)]
+
+            do {
+                return try context.fetch(request).map { station in
+                    RadioStation(
+                        id: station.id ?? UUID().uuidString,
+                        name: station.name ?? "Unknown",
+                        url: station.url ?? "http://default.url",
+                        iconData: station.iconData,
+                        country: station.country ?? "Unknown",
+                        isFavorite: station.isFavorite,
+                        favoritedAt: station.favoritedAt,
+                        favoriteOrder: station.favoriteOrder >= 0 ? Int(station.favoriteOrder) : nil,
+                        order: Int(station.order),
+                        lastPlayed: station.lastPlayed
+                    )
+                }
+            } catch {
+                os_log("🚗 CarPlay: Failed to load stations directly: %@", log: self.log, type: .error, error.localizedDescription)
+                return []
+            }
+        }
+
         await MainActor.run {
-            // Ensure RadioStationViewModel is initialized
-            let radioViewModel = RadioStationViewModel.shared
-            let stations = radioViewModel.stations
-            
-            // Update CarPlayManager with radio station data
-            CarPlayManager.shared.updateContent()
+            CarPlayManager.shared.configureRadioData(stations)
+            self.refreshStationsTemplate()
+            self.refreshRecentsTabTemplate()
             
             os_log("🚗 CarPlay: Loaded %d radio stations", log: self.log, type: .info, stations.count)
             print("🚗 CarPlay: Loaded \(stations.count) radio stations")
@@ -195,13 +344,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // The interface controller will be set up in templateApplicationScene:didConnect:
         // We'll initialize data in the background
         os_log("🚗 CarPlay: Starting background data initialization...", log: log, type: .info)
-        Task {
-            do {
-                await initializeCarPlayData()
-            } catch {
-                os_log("❌ CarPlay: Data initialization failed: %@", log: log, type: .error, error.localizedDescription)
-            }
-        }
+        startDataInitializationIfNeeded()
         
         // Set up real-time update listeners
         setupProgressUpdateListeners()
@@ -226,18 +369,33 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // CRITICAL: Save current playback state before disconnection
         // This helps restore state when app is killed and CarPlay reconnects
+        if CarPlayManager.shared.isCarPlayConnected {
+            PodcastPlayer.shared.persistCurrentProgress(reason: "CarPlay scene disconnected")
+        }
         savePlaybackStateForRestoration()
         
         // Clean up sync monitoring timer
         syncMonitoringTimer?.invalidate()
         syncMonitoringTimer = nil
+        dataInitializationTask?.cancel()
+        dataInitializationTask = nil
+        podcastColdStartRetryTask?.cancel()
+        podcastColdStartRetryTask = nil
+        podcastContentReconciliationTask?.cancel()
+        podcastContentReconciliationTask = nil
         os_log("🚗 CarPlay: Sync monitoring timer cleaned up", log: log, type: .info)
         
         subscriptionObserver?.cancel()
         subscriptionObserver = nil
+        radioMetadataObserver?.cancel()
+        radioMetadataObserver = nil
+        radioStationObserver?.cancel()
+        radioStationObserver = nil
+        podcastDataObserver?.cancel()
+        podcastDataObserver = nil
         
         // Clear CarPlay connection status for performance optimizations
-        CarPlayManager.shared.isCarPlayConnected = false
+        CarPlayManager.shared.setCarPlaySceneConnected(false)
         
         // Clean up notification observers
         NotificationCenter.default.removeObserver(self)
@@ -257,24 +415,44 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         print("🚗 CarPlay: Scene delegate didConnect called")
         
         // Set CarPlay connection status for performance optimizations
-        CarPlayManager.shared.isCarPlayConnected = true
+        CarPlayManager.shared.setCarPlaySceneConnected(true)
         
         // Store the interface controller
         self.interfaceController = interfaceController
+        startDataInitializationIfNeeded()
+
+        // Configure the system Now Playing template before the head unit exposes its controls.
+        configureSystemNowPlayingTemplate()
         
         observeSubscriptionStatus()
+        observeRadioListMetadata()
+        observePodcastData()
         
-        // The templates below are always built; only playback and restoration are gated, so an
-        // unsubscribed user can still browse and see why nothing plays.
-        withEntitlement {
-            self.restorePlaybackAfterConnect()
-        } otherwise: {
-            self.handleBlockedPlayback(reason: "CarPlay connected without an active subscription")
-        }
-        
-        // Setup the root template with a small delay to allow state restoration to complete
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.setupRootTemplate()
+        // Install the root before restoration. Until this completion fires, CarPlay discards taps
+        // on system affordances such as Now Playing while its template stack is transitioning.
+        setupRootTemplate { [weak self] in
+            guard let self else { return }
+
+            Task { [weak self] in
+                guard let self else { return }
+                await self.dataInitializationTask?.value
+                await MainActor.run {
+                    self.refreshRecentsTabTemplate()
+                    self.refreshStationsTemplate()
+                    self.refreshPodcastTabTemplate()
+                    self.refreshDownloadsTabTemplate()
+                }
+            }
+
+            self.schedulePodcastContentReconciliation()
+
+            // The templates are always available; only playback and restoration are gated, so an
+            // unsubscribed user can still browse and see why nothing plays.
+            self.withEntitlement {
+                self.restorePlaybackAfterConnect()
+            } otherwise: {
+                self.handleBlockedPlayback(reason: "CarPlay connected without an active subscription")
+            }
         }
         
         // Validate CarPlay implementation compliance
@@ -440,10 +618,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // CRITICAL: Don't interfere if podcast has content and is the active player
         if podcastHasContent && podcastIsActivePlayer {
             os_log("🚗 CarPlay: Podcast is active with content - not interfering with restoration", log: log, type: .info)
-            // Just update the Now Playing for the active podcast without changing players
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                podcastPlayer.updateNowPlayingInfo()
-            }
+            configurePodcastMiniPlayerControls()
+            podcastPlayer.updateNowPlayingInfo()
             return
         }
         
@@ -474,21 +650,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Skip audio session activation during CarPlay restoration to prevent -50 errors
         // Let the actual playback trigger audio session activation when needed
         
-        // Force update Now Playing info for radio with multiple attempts
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            radioPlayer.forceUpdateNowPlayingInfo()
-            os_log("🚗 CarPlay: First radio Now Playing info update attempt", log: self.log, type: .info)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            radioPlayer.forceUpdateNowPlayingInfo()
-            os_log("🚗 CarPlay: Second radio Now Playing info update attempt", log: self.log, type: .info)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            radioPlayer.forceUpdateNowPlayingInfo()
-            os_log("🚗 CarPlay: Final radio Now Playing info update attempt", log: self.log, type: .info)
-        }
+        radioPlayer.forceUpdateNowPlayingInfo()
     }
     
     private func restorePodcastPlayback(_ podcastPlayer: PodcastPlayer) {
@@ -499,32 +661,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Skip audio session activation during CarPlay restoration to prevent -50 errors
         // Let the actual playback trigger audio session activation when needed
         
-        // Force update Now Playing info for podcast with multiple attempts
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            podcastPlayer.updateNowPlayingInfo()
-            os_log("🚗 CarPlay: First podcast Now Playing info update attempt", log: self.log, type: .info)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            podcastPlayer.updateNowPlayingInfo()
-            
-            // Send playback state notification to refresh CarPlay UI
-            NotificationCenter.default.post(
-                name: NSNotification.Name("PodcastPlaybackStateChanged"),
-                object: nil,
-                userInfo: [
-                    "episodeId": currentEpisode.id,
-                    "isPlaying": true
-                ]
-            )
-            
-            os_log("🚗 CarPlay: Second podcast Now Playing info update and UI state restored", log: self.log, type: .info)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            podcastPlayer.updateNowPlayingInfo()
-            os_log("🚗 CarPlay: Final podcast Now Playing info update attempt", log: self.log, type: .info)
-        }
+        configurePodcastMiniPlayerControls()
+        podcastPlayer.updateNowPlayingInfo()
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PodcastPlaybackStateChanged"),
+            object: nil,
+            userInfo: [
+                "episodeId": currentEpisode.id,
+                "isPlaying": true
+            ]
+        )
     }
     
     private func attemptRestoreFromSavedState() {
@@ -601,18 +747,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Skip audio session activation during CarPlay restoration to prevent -50 errors
         // Let the actual playback trigger audio session activation when needed
         
-        // Force create Now Playing info for the restored station
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.forceRadioNowPlayingInfo(for: restoredStation)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.forceRadioNowPlayingInfo(for: restoredStation)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            self.forceRadioNowPlayingInfo(for: restoredStation)
-        }
+        forceRadioNowPlayingInfo(for: restoredStation)
     }
     
     private func attemptPodcastStateRestoration() {
@@ -624,9 +759,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         let userDefaults = UserDefaults.standard
-        guard let _ = userDefaults.string(forKey: "CarPlayLastEpisodeId"),
+          guard let episodeId = userDefaults.string(forKey: "CarPlayLastEpisodeId"),
               let episodeTitle = userDefaults.string(forKey: "CarPlayLastEpisodeTitle"),
-              let _ = userDefaults.string(forKey: "CarPlayLastEpisodeFeedId") else {
+              let feedId = userDefaults.string(forKey: "CarPlayLastEpisodeFeedId") else {
             os_log("🚗 CarPlay: Missing podcast restoration data", log: log, type: .error)
             return
         }
@@ -638,18 +773,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Skip audio session activation during CarPlay restoration to prevent -50 errors
         // Let the actual playbook trigger audio session activation when needed
         
-        // Force create Now Playing info for the restored episode
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.forcePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.forcePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            self.forcePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress)
-        }
+        createImmediatePodcastNowPlayingInfoSafe(
+            episodeTitle: episodeTitle,
+            progress: progress,
+            episodeId: episodeId,
+            feedId: feedId
+        )
     }
     
     private func checkForBackgroundAudioAndRestore() {
@@ -668,6 +797,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func forceRadioNowPlayingInfo(for station: RadioStation) {
+        if radioPlayerOwnsNowPlaying(for: station) {
+            RadioPlayer.shared.forceUpdateNowPlayingInfo()
+            return
+        }
+
         var nowPlayingInfo = [String: Any]()
         
         nowPlayingInfo[MPMediaItemPropertyTitle] = station.name
@@ -696,27 +830,6 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         os_log("🚗 CarPlay: Forced radio Now Playing info for restored station: %@", log: log, type: .info, station.name)
-    }
-    
-    private func forcePodcastNowPlayingInfo(episodeTitle: String, progress: Double) {
-        var nowPlayingInfo = [String: Any]()
-        
-        nowPlayingInfo[MPMediaItemPropertyTitle] = episodeTitle
-        nowPlayingInfo[MPMediaItemPropertyArtist] = "StreamRadios Podcast"
-        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "Podcast Episode"
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
-        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
-        
-        // Add progress if available
-        if progress > 0 {
-            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = progress
-        }
-        
-        // Don't add any artwork here to avoid green screen issue
-        // The regular podcast player will set proper artwork when it takes over
-        
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-        os_log("🚗 CarPlay: Forced podcast Now Playing info for restored episode: %@", log: log, type: .info, episodeTitle)
     }
     
     // MARK: - Independent CarPlay Restoration
@@ -835,12 +948,6 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Only update Now Playing info safely without triggering audio session changes
         createImmediateRadioNowPlayingInfoSafe(for: restoredStation)
         
-        // Set up gentle fallback updates that don't trigger audio session activation
-        for delay in [0.5, 1.0, 2.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                self.createImmediateRadioNowPlayingInfoSafe(for: restoredStation)
-            }
-        }
     }
     
     private func forceRestorePodcastState() {
@@ -860,15 +967,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Only update Now Playing info safely without triggering audio session changes
         createImmediatePodcastNowPlayingInfoSafe(episodeTitle: episodeTitle, progress: progress, episodeId: episodeId, feedId: feedId)
         
-        // Set up gentle fallback updates that don't trigger audio session activation
-        for delay in [0.5, 1.0, 2.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                self.createImmediatePodcastNowPlayingInfoSafe(episodeTitle: episodeTitle, progress: progress, episodeId: episodeId, feedId: feedId)
-            }
-        }
     }
     
     private func createImmediateRadioNowPlayingInfo(for station: RadioStation) {
+        if radioPlayerOwnsNowPlaying(for: station) {
+            RadioPlayer.shared.forceUpdateNowPlayingInfo()
+            return
+        }
+
         var nowPlayingInfo = [String: Any]()
         
         nowPlayingInfo[MPMediaItemPropertyTitle] = station.name
@@ -899,14 +1005,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         
-        // Also set up remote command center
-        setupRemoteCommandCenter()
+        configureSystemNowPlayingTemplate()
+        RadioPlayer.shared.configureRadioRemoteCommands()
         
         os_log("🚗 CarPlay: Created immediate radio Now Playing info for independent operation: %@", log: log, type: .info, station.name)
     }
     
     /// Safe version that doesn't trigger additional audio session activation
     private func createImmediateRadioNowPlayingInfoSafe(for station: RadioStation) {
+        if radioPlayerOwnsNowPlaying(for: station) {
+            RadioPlayer.shared.forceUpdateNowPlayingInfo()
+            return
+        }
+
         var nowPlayingInfo = [String: Any]()
         
         nowPlayingInfo[MPMediaItemPropertyTitle] = station.name
@@ -939,6 +1050,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Skip setupRemoteCommandCenter() to avoid triggering additional audio session activation
         
         os_log("🚗 CarPlay: Created safe radio Now Playing info (no audio session activation): %@", log: log, type: .info, station.name)
+    }
+
+    private func radioPlayerOwnsNowPlaying(for station: RadioStation) -> Bool {
+        guard PlaybackManager.shared.activePlayer == .radio,
+              RadioPlayer.shared.isPlaying,
+              let playingStation = RadioPlayer.shared.currentlyPlayingStation else {
+            return false
+        }
+
+        return playingStation.id == station.id || playingStation.url == station.url
     }
     
     private func createImmediatePodcastNowPlayingInfo(episodeTitle: String, progress: Double, episodeId: String, feedId: String) {
@@ -1023,7 +1144,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         
-        // SAFE VERSION: Skip setupRemoteCommandCenter() to avoid audio session activation
+        // Registering commands does not activate the audio session.
+        configurePodcastMiniPlayerControls()
         
         os_log("🚗 CarPlay: Created safe podcast Now Playing info (no audio session activation): %@", log: log, type: .info, episodeTitle)
     }
@@ -1038,6 +1160,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         commandCenter.togglePlayPauseCommand.isEnabled = true
         
         os_log("🚗 CarPlay: Remote command center configured for independent operation", log: log, type: .info)
+    }
+
+    /// The compact iOS 27 Now Playing pill is system-owned. Artwork comes from
+    /// MPNowPlayingInfoCenter and its playback actions come from MPRemoteCommandCenter.
+    private func configureSystemNowPlayingTemplate() {
+        let template = CPNowPlayingTemplate.shared
+
+        // Xcode 26.6 does not yet declare this documented iOS 27 beta property.
+        // Runtime detection keeps the app compatible with iOS 26 while opting in on iOS 27.
+        let miniPlayerSetter = NSSelectorFromString("setAllowsMiniPlayer:")
+        if template.responds(to: miniPlayerSetter) {
+            template.setValue(true, forKey: "allowsMiniPlayer")
+        }
+    }
+
+    private func configurePodcastMiniPlayerControls() {
+        configureSystemNowPlayingTemplate()
+        PodcastPlayer.shared.configurePodcastRemoteCommands()
     }
 
     private func attemptPlaybackStateRecovery() {
@@ -1110,10 +1250,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     // MARK: - CarPlay Interface Setup
     
-    private func setupRootTemplate() {
+    private func setupRootTemplate(completion: (() -> Void)? = nil) {
         guard let interfaceController = self.interfaceController else {
             os_log("❌ CarPlay interface controller not available", log: log, type: .error)
             print("❌ CarPlay: Interface controller is nil!")
+            completion?()
             return
         }
         
@@ -1139,14 +1280,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         print("🚗 CarPlay: Setting root template...")
         
         // Set as root template
-        interfaceController.setRootTemplate(tabBarTemplate, animated: true, completion: { success, error in
+        interfaceController.setRootTemplate(tabBarTemplate, animated: false, completion: { success, error in
             if success {
                 os_log("✅ CarPlay root template set successfully", log: self.log, type: .info)
                 print("✅ CarPlay: Root template set successfully!")
+                self.refreshPodcastTabTemplate()
+                self.refreshDownloadsTabTemplate()
             } else {
                 os_log("❌ Failed to set CarPlay root template: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
                 print("❌ CarPlay: Failed to set root template: \(error?.localizedDescription ?? "Unknown error")")
             }
+            completion?()
         })
     }
     
@@ -1319,22 +1463,35 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     // MARK: - Helper Methods for Downloads
     
     private func getDownloadedEpisodesForPodcast(_ podcast: PodcastFeed) -> [PodcastEpisode] {
-        let context = CoreDataStack.shared.context
+        let context = CoreDataStack.shared.newBackgroundContext()
         var downloadedEpisodes: [PodcastEpisode] = []
+        let restoredDownloadIds = EpisodeStateManager.shared.downloadedEpisodeIds(for: podcast.id)
+        let liveDownloadStates = latestDownloadStates
         
         context.performAndWait {
             do {
                 let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                episodeRequest.predicate = NSPredicate(format: "feedId == %@ AND isDownloaded == YES", podcast.id)
+                let newlyDownloadedEpisodeIds = liveDownloadStates.compactMap { episodeId, isDownloaded in
+                    isDownloaded ? episodeId : nil
+                }
+                let downloadedEpisodeIds = restoredDownloadIds.union(newlyDownloadedEpisodeIds)
+                episodeRequest.predicate = NSPredicate(
+                    format: "feedId == %@ AND (isDownloaded == YES OR id IN %@)",
+                    podcast.id,
+                    Array(downloadedEpisodeIds)
+                )
                 episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
                 
                 let managedEpisodes = try context.fetch(episodeRequest)
-                downloadedEpisodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                downloadedEpisodes = managedEpisodes.compactMap { managedEpisode -> PodcastEpisode? in
                     var episode = managedEpisode.toPodcastEpisode()
                     episode.state.isPlayed = managedEpisode.isPlayed
                     episode.state.progress = managedEpisode.progress
                     episode.state.isFavorite = managedEpisode.isFavorite
-                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    episode.state.isDownloaded = liveDownloadStates[episode.id]
+                        ?? restoredDownloadIds.contains(episode.id)
+                        || managedEpisode.isDownloaded
+                    guard episode.state.isDownloaded else { return nil }
                     return episode
                 }
                 
@@ -1382,9 +1539,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         let recentStationsSection = CPListSection(items: recentStationItems, header: "Recently Played Stations", sectionIndexTitle: nil)
-        sections.append(recentStationsSection)
         
-        // Get recent podcast episodes from CarPlayManager SECOND (after stations)
+        // Get recent podcast episodes from CarPlayManager
         let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
         
         var recentEpisodeItems: [CPListItem] = []
@@ -1415,24 +1571,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             // Try to get artwork using the new method that supports persisted data
             itemImage = carPlayManager.getPodcastArtworkByFeedId(episode.feedId)
+            let needsArtworkLoad = itemImage == nil
             
             if let image = itemImage {
                 print("CarPlay: Successfully loaded artwork for episode '\(episode.title)' (feedId: \(episode.feedId))")
-            } else {
-                print("CarPlay: No artwork available for episode '\(episode.title)' (feedId: \(episode.feedId))")
-                
-                // If we have an active feed, try loading from URL asynchronously
-                if let feed = podcastFeed, let artworkUrl = feed.artworkUrl {
-                    carPlayManager.loadPodcastArtworkFromURL(for: feed) { [weak self] loadedImage in
-                        DispatchQueue.main.async {
-                            if loadedImage != nil {
-                                // Refresh the CarPlay interface with the loaded artwork
-                                print("CarPlay: Artwork loaded from URL for '\(feed.title)', refreshing interface")
-                                self?.refreshCarPlayInterface()
-                            }
-                        }
-                    }
-                }
             }
             
             // Use microphone icon as fallback if no artwork found
@@ -1443,6 +1585,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             let item = CPListItem(text: episode.title,
                                  detailText: "\(duration)\(statusText)",
                                  image: itemImage)
+
+                if needsArtworkLoad,
+               let feed = podcastFeed,
+               feed.artworkUrl != nil {
+                print("CarPlay: No artwork available for episode '\(episode.title)' (feedId: \(episode.feedId))")
+                carPlayManager.loadPodcastArtworkFromURL(for: feed) { loadedImage in
+                    guard let loadedImage else { return }
+                    DispatchQueue.main.async {
+                        item.setImage(loadedImage)
+                        print("CarPlay: Artwork loaded from URL for '\(feed.title)' and applied in place")
+                    }
+                }
+            }
             
             // Set Apple standard highlighting for currently playing episode
             if #available(iOS 14.0, *) {
@@ -1463,7 +1618,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         let recentEpisodesSection = CPListSection(items: recentEpisodeItems, header: "Recently Played Episodes", sectionIndexTitle: nil)
-        sections.append(recentEpisodesSection)
+        sections.append(contentsOf: orderedRecentSections(
+            stations: recentStationsSection,
+            episodes: recentEpisodesSection,
+            recentStations: recentStations
+        ))
         
         let listTemplate = CPListTemplate(title: "Recent", sections: sections)
         listTemplate.tabTitle = "Recent"
@@ -1471,17 +1630,32 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         return listTemplate
     }
+
+    private func recentEpisodesShouldComeFirst(recentStations: [RadioStation]) -> Bool {
+        guard let latestEpisodeDate = CarPlayManager.shared.getMostRecentPodcastPlayedAt() else {
+            return false
+        }
+        guard let latestStationDate = recentStations.first?.lastPlayed else {
+            return true
+        }
+        return latestEpisodeDate > latestStationDate
+    }
+
+    private func orderedRecentSections(
+        stations stationSection: CPListSection,
+        episodes episodeSection: CPListSection,
+        recentStations: [RadioStation]
+    ) -> [CPListSection] {
+        if recentEpisodesShouldComeFirst(recentStations: recentStations) {
+            return [episodeSection, stationSection]
+        }
+        return [stationSection, episodeSection]
+    }
     
     private func createPodcastsTab() -> CPListTemplate {
         var sections: [CPListSection] = []
         
         print("🚗 CarPlay: Creating Podcast tab - DEBUG START")
-        
-        // CRITICAL FIX: Ensure podcast data is loaded from Core Data before creating tab
-        // This ensures feeds are available even if the phone app is closed
-        Task {
-            await loadPodcastDataFromCoreData()
-        }
         
         // Get podcasts from CarPlayManager and order them the same as PodcastListView
         let carPlayManager = CarPlayManager.shared
@@ -1591,8 +1765,20 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // First, get the total episode count from CoreData
         getEpisodeCount(for: podcast) { [weak self] totalEpisodes in
             guard let self = self else { return }
+            let inMemoryEpisodes = self.validInMemoryEpisodes(for: podcast)
             
             if totalEpisodes == 0 {
+                if !inMemoryEpisodes.isEmpty {
+                    var updatedPodcast = podcast
+                    updatedPodcast.episodes = inMemoryEpisodes
+                    self.displayPodcastWithPagination(
+                        updatedPodcast,
+                        totalEpisodes: inMemoryEpisodes.count,
+                        loadedCount: inMemoryEpisodes.count,
+                        completion: completion
+                    )
+                    return
+                }
                 // No episodes - show empty state
                 self.showEmptyPodcastState(podcast, completion: completion)
                 return
@@ -1611,10 +1797,31 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             self.loadInitialEpisodesForPodcast(podcast, limit: initialBatchSize) { episodes in
                 var updatedPodcast = podcast
-                updatedPodcast.episodes = episodes
-                self.displayPodcastWithPagination(updatedPodcast, totalEpisodes: totalEpisodes, loadedCount: episodes.count, completion: completion)
+                let availableEpisodes = episodes.isEmpty ? inMemoryEpisodes : episodes
+                guard !availableEpisodes.isEmpty else {
+                    self.showEmptyPodcastState(podcast, completion: completion)
+                    return
+                }
+                updatedPodcast.episodes = availableEpisodes
+                self.displayPodcastWithPagination(updatedPodcast, totalEpisodes: max(totalEpisodes, availableEpisodes.count), loadedCount: availableEpisodes.count, completion: completion)
             }
         }
+    }
+
+    private func validInMemoryEpisodes(for podcast: PodcastFeed) -> [PodcastEpisode] {
+        let currentFeed = PodcastViewModel.shared.podcastFeeds.first { $0.id == podcast.id }
+        var episodes = currentFeed?.episodes ?? podcast.episodes
+        episodes = episodes.filter {
+            $0.duration > 0
+                && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !$0.audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        episodes.sort { $0.publicationDate > $1.publicationDate }
+
+        if let maxEpisodes = podcast.maxEpisodes, maxEpisodes > 0 {
+            return Array(episodes.prefix(maxEpisodes))
+        }
+        return episodes
     }
     
     private func showEmptyPodcastState(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
@@ -1830,8 +2037,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // CRITICAL FIX: Get fresh state from EpisodeStateManager instead of stale episode.state
         // This ensures we always show the correct status and highlighting
         let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
-        let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
-        let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+        let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
+        let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
         let isPlayed = (episodeState == .played)
         
         // Determine episode status based on state and current playback
@@ -1945,7 +2152,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             // CRITICAL FIX: Get fresh state from EpisodeStateManager
             let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
-            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
             let isPlayed = (episodeState == .played)
             
             // Determine episode status based on state and current playback
@@ -2008,8 +2215,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             // CRITICAL FIX: Get fresh state from EpisodeStateManager
             let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
-            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
+            let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
             let isPlayed = (episodeState == .played)
             
             // Determine episode status based on state and current playback
@@ -2065,16 +2272,26 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         })
     }
     
-    /// Station whose row should show the now-playing indicator, or nil when radio isn't playing.
-    private var highlightedStationId: String? {
-        guard PlaybackManager.shared.activePlayer != .podcast else { return nil }
-        // `pendingHighlightStationId` is whatever CarPlay last saw start - either a tap here or a
-        // station-change notification. RadioPlayer's own `currentlyPlayingStation` lags behind and
-        // can stay on the previously restored station, which is what kept row 1 highlighted.
-        return pendingHighlightStationId ?? RadioPlayer.shared.currentlyPlayingStation?.id
-    }    
     private func shouldShowPlayingIndicator(for station: RadioStation) -> Bool {
-        station.id == highlightedStationId
+        stationMatchesActivePlayback(
+            stationId: station.id,
+            identityKey: RadioStationViewModel.stationIdentityKey(station.url)
+        )
+    }
+
+    private func stationMatchesActivePlayback(stationId: String, identityKey: String?) -> Bool {
+        guard PlaybackManager.shared.activePlayer != .podcast else { return false }
+
+        let player = RadioPlayer.shared
+        if player.isPlaying, let playingStation = player.currentlyPlayingStation {
+            if let identityKey,
+               let playingIdentityKey = RadioStationViewModel.stationIdentityKey(playingStation.url) {
+                return identityKey == playingIdentityKey
+            }
+            return stationId == playingStation.id
+        }
+
+        return stationId == pendingHighlightStationId
     }
     
     private var appliedSectionSignatures: [String: String] = [:]
@@ -2088,13 +2305,146 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         return true
     }
     
-    private var stationRows: [String: [(stationId: String, item: CPListItem)]] = [:]
+    private struct StationRow {
+        let stationId: String
+        let identityKey: String?
+        let item: CPListItem
+        let baseDetailText: String
+    }
+
+    private var stationRows: [String: [StationRow]] = [:]
     
     private static let playingSuffix = " • Playing"
     
     private func registerStationRows(_ rows: [(stationId: String, item: CPListItem)], key: String) {
-        stationRows[key] = rows
+        stationRows[key] = rows.map { row in
+            StationRow(
+                stationId: row.stationId,
+                identityKey: CarPlayManager.shared.getStation(withId: row.stationId)
+                    .flatMap { RadioStationViewModel.stationIdentityKey($0.url) },
+                item: row.item,
+                baseDetailText: (row.item.detailText ?? "")
+                    .replacingOccurrences(of: Self.playingSuffix, with: "")
+            )
+        }
         applyStationHighlight()
+    }
+
+    private func observeRadioListMetadata() {
+        guard radioMetadataObserver == nil else { return }
+
+        let player = RadioPlayer.shared
+        radioStationObserver = player.$currentlyPlayingStation
+            .combineLatest(player.$isPlaying)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] station, isPlaying in
+                guard let self else { return }
+
+                if isPlaying, let station {
+                    let stationChanged = self.pendingHighlightStationId != station.id
+                    self.pendingHighlightEpisodeId = nil
+                    self.pendingHighlightStationId = station.id
+                    CarPlayManager.shared.updateContent()
+
+                    if self.artworkRequestedPlaybackStationId != station.id {
+                        self.artworkRequestedPlaybackStationId = station.id
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self,
+                                  player.isPlaying,
+                                  player.currentlyPlayingStation?.id == station.id else {
+                                self?.artworkRequestedPlaybackStationId = nil
+                                return
+                            }
+                            self.triggerImmediateITunesArtworkFetch()
+                        }
+                    }
+
+                    if stationChanged {
+                        self.refreshRecentsTabTemplate(nowPlayingStationId: station.id)
+                    }
+                } else if !isPlaying {
+                    self.artworkRequestedPlaybackStationId = nil
+                }
+                self.applyStationHighlight()
+            }
+
+        let updates: [AnyPublisher<Void, Never>] = [
+            player.$displayTitle.map { _ in () }.eraseToAnyPublisher(),
+            player.$displayArtist.map { _ in () }.eraseToAnyPublisher(),
+            player.$songTitle.map { _ in () }.eraseToAnyPublisher(),
+            player.$artistName.map { _ in () }.eraseToAnyPublisher(),
+            player.$metadata.map { _ in () }.eraseToAnyPublisher(),
+            player.$iTunesAlbumArt.map { _ in () }.eraseToAnyPublisher(),
+            player.$albumArt.map { _ in () }.eraseToAnyPublisher()
+        ]
+
+        radioMetadataObserver = Publishers.MergeMany(updates)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                // @Published sends before assigning its new value, so read the complete snapshot
+                // on the next main-queue turn after related fields have settled.
+                DispatchQueue.main.async {
+                    self?.applyStationHighlight()
+                    if PlaybackManager.shared.activePlayer == .radio {
+                        player.updateNowPlayingInfo()
+                    }
+                }
+            }
+    }
+
+    private func observePodcastData() {
+        guard podcastDataObserver == nil else { return }
+
+        let viewModel = PodcastViewModel.shared
+        podcastDataObserver = viewModel.$podcastFeeds
+            .combineLatest(viewModel.$podcastFeedOrder)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] feeds, feedOrder in
+                guard let self, !feeds.isEmpty else { return }
+
+                CarPlayManager.shared.configurePodcastData(feeds, feedOrder: feedOrder)
+                self.refreshPodcastTabTemplate()
+                self.refreshDownloadsTabTemplate()
+            }
+    }
+
+    private var liveRadioMetadata: String? {
+        let player = RadioPlayer.shared
+        guard player.isPlaying, PlaybackManager.shared.activePlayer != .podcast else { return nil }
+
+        let title = player.displayTitle ?? player.songTitle
+        let artist = player.displayArtist ?? player.artistName
+        let parts = [artist, title].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        if !parts.isEmpty { return parts.joined(separator: " — ") }
+
+        if let metadata = player.metadata?.trimmingCharacters(in: .whitespaces), !metadata.isEmpty {
+            return metadata
+        }
+        return nil
+    }
+
+    private func stationListArtwork(for station: RadioStation) -> UIImage? {
+        let radioPlayer = RadioPlayer.shared
+        if shouldShowPlayingIndicator(for: station) {
+            return radioPlayer.iTunesAlbumArt
+                ?? radioPlayer.albumArt
+                ?? CarPlayManager.shared.getStationArtwork(for: station)
+        }
+
+        return CarPlayManager.shared.getStationArtwork(for: station)
+    }
+
+    private func applyStationArtworkToRows() {
+        let carPlayManager = CarPlayManager.shared
+        for rows in stationRows.values {
+            for row in rows {
+                guard let station = carPlayManager.getStation(withId: row.stationId),
+                      let artwork = stationListArtwork(for: station) else {
+                    continue
+                }
+                row.item.setImage(artwork)
+            }
+        }
     }
     
     /// Episode whose row should show the now-playing indicator, or nil when nothing is playing.
@@ -2136,21 +2486,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     /// Moves the now-playing indicator by mutating the live rows, so exactly one is ever highlighted.
     /// The white row background is CarPlay's focus ring and is not ours to place.
     private func applyStationHighlight() {
-        let highlighted = highlightedStationId
         for rows in stationRows.values {
             for row in rows {
-                let shouldPlay = row.stationId == highlighted
+                let shouldPlay = stationMatchesActivePlayback(
+                    stationId: row.stationId,
+                    identityKey: row.identityKey
+                )
                 row.item.playingIndicatorLocation = .trailing
                 if row.item.isPlaying != shouldPlay {
                     row.item.isPlaying = shouldPlay
                 }
-                let base = (row.item.detailText ?? "").replacingOccurrences(of: Self.playingSuffix, with: "")
-                let wanted = shouldPlay ? base + Self.playingSuffix : base
+                let playingDetail = liveRadioMetadata ?? row.baseDetailText
+                let wanted = shouldPlay ? playingDetail + Self.playingSuffix : row.baseDetailText
                 if row.item.detailText != wanted {
                     row.item.setDetailText(wanted)
                 }
             }
         }
+        applyStationArtworkToRows()
     }
     
     private func playStation(_ station: RadioStation, completion: @escaping () -> Void) {
@@ -2205,6 +2558,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     radioPlayer.playStation(at: stationIndex, from: stations)
                     // Mirrors the phone app so the station lands in Recents and the indicator refreshes.
                     RadioStationViewModel.shared.updateLastPlayed(for: station)
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.triggerImmediateITunesArtworkFetch()
+                    }
                 }
                 
                 // Gentle fallback attempts that don't trigger concurrent audio session activation
@@ -2237,25 +2594,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 os_log("🚗 CarPlay: Triggered immediate cached iTunes artwork application for station: %@", log: self.log, type: .info, station.name)
             }
             
-            // CRITICAL: Trigger fresh iTunes artwork fetch immediately for PlayNow
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.triggerImmediateITunesArtworkFetch()
-                os_log("🚗 CarPlay: Triggered immediate iTunes artwork fetch for PlayNow: %@", log: self.log, type: .info, station.name)
-            }
-            
             // Additional attempts to ensure artwork is applied
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 self.applyCachedArtworkToCarPlay()
                 os_log("🚗 CarPlay: Fallback cached iTunes artwork application for station: %@", log: self.log, type: .info, station.name)
             }
             
-            // Final iTunes artwork fetch attempt if still no artwork
+            // Retry even when station artwork is visible; it is only a placeholder for song art.
             DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-                let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
-                if nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
-                    self.triggerImmediateITunesArtworkFetch()
-                    os_log("🚗 CarPlay: Final iTunes artwork fetch attempt for PlayNow: %@", log: self.log, type: .info, station.name)
-                }
+                self.triggerImmediateITunesArtworkFetch()
+                os_log("🚗 CarPlay: Final iTunes artwork fetch attempt for PlayNow: %@", log: self.log, type: .info, station.name)
             }
             
             completion()
@@ -2298,8 +2646,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // CRITICAL: Set PlaybackManager state before playing
             PlaybackManager.shared.activePlayer = .podcast
             
-            // Add episode to recently played list (but don't refresh UI yet)
+            // Add the episode and update the tab before playback startup work completes.
             carPlayManager.addEpisodeToRecentlyPlayed(episode)
+            self.refreshRecentsTabTemplate()
             
             // Find the feed that contains this episode
             let podcastFeeds = carPlayManager.getPodcastFeeds()
@@ -2463,6 +2812,22 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Listen for episode state changes (favorites, downloads, etc.)
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("EpisodeStateChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleEpisodeStateChange(notification)
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("EpisodeDownloadChangedInstantly"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleEpisodeStateChange(notification)
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("EpisodePlayedChangedInstantly"),
             object: nil,
             queue: .main
         ) { [weak self] notification in
@@ -2652,6 +3017,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // This prevents the black screen issue while still updating the data
         let isFavoriteChange = userInfo["isFavorite"] != nil
         let isDownloadChange = userInfo["isDownloaded"] != nil
+        let isPlayedChange = userInfo["isPlayed"] != nil
+
+        if let isDownloaded = userInfo["isDownloaded"] as? Bool {
+            latestDownloadStates[episodeId] = isDownloaded
+            refreshDownloadsTabTemplate()
+        }
+
+        if userInfo["isPlayed"] as? Bool == true,
+           var episode = episodeForStateChange(episodeId: episodeId, feedId: userInfo["feedId"] as? String) {
+            episode.state.isPlayed = true
+            CarPlayManager.shared.addEpisodeToRecentlyPlayed(episode)
+            refreshRecentsTabTemplate()
+        }
         
         if isFavoriteChange || isDownloadChange {
             // For favorite/download changes, use immediate but gentle refresh to prevent black screens
@@ -2661,10 +3039,34 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             // Use immediate gentle refresh instead of the aggressive template refresh
             performGentleRefreshIfVisible(episodeId: episodeId)
-        } else {
+        } else if !isPlayedChange {
             // For other changes (like progress), use the existing refresh logic
             refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
         }
+    }
+
+    private func episodeForStateChange(episodeId: String, feedId: String?) -> PodcastEpisode? {
+        if let episode = PodcastPlayer.shared.currentEpisode, episode.id == episodeId {
+            return episode
+        }
+
+        if let episode = currentPodcastFeed?.episodes.first(where: { $0.id == episodeId }) {
+            return episode
+        }
+
+        let context = CoreDataStack.shared.context
+        var resolvedEpisode: PodcastEpisode?
+        context.performAndWait {
+            let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            if let feedId, !feedId.isEmpty {
+                request.predicate = NSPredicate(format: "id == %@ AND feedId == %@", episodeId, feedId)
+            } else {
+                request.predicate = NSPredicate(format: "id == %@", episodeId)
+            }
+            request.fetchLimit = 1
+            resolvedEpisode = try? context.fetch(request).first?.toPodcastEpisode()
+        }
+        return resolvedEpisode
     }
     
     private func handlePlaybackStateChange(_ notification: Notification) {
@@ -2682,68 +3084,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let playerIsPlaying = PodcastPlayer.shared.isPlaying
         os_log("🚗 CarPlay: PodcastPlayer state - current episode: %@, is playing: %@", log: log, type: .info, currentPlayingEpisodeId ?? "none", playerIsPlaying ? "YES" : "NO")
         
-        // CRITICAL: Update CarPlayManager's data immediately before refreshing templates
-        let carPlayManager = CarPlayManager.shared
-        carPlayManager.updateContent() // Refresh all data from core data to get latest state
-        
-        // For episode START events (isPlaying = true), delay UI updates to prevent blank sheet
-        // For episode STOP events (isPlaying = false), update immediately
+        pendingHighlightEpisodeId = isPlaying ? episodeId : nil
+        applyEpisodeHighlight()
+        applyStationHighlight()
+
         if isPlaying {
-            // CRITICAL: Delay UI updates when episode starts to prevent blank sheet issue
-            // Allow episode to fully initialize before updating CarPlay UI
-            os_log("🚗 CarPlay: Episode starting - delaying UI updates to prevent blank sheet", log: log, type: .info)
-            
-            // CRITICAL: Force Now Playing info update for episodes after force close
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                PodcastPlayer.shared.updateNowPlayingInfo()
-                os_log("🚗 CarPlay: Forced Now Playing info update for episode start", log: self.log, type: .info)
+            if let episode = PodcastPlayer.shared.currentEpisode, episode.id == episodeId {
+                CarPlayManager.shared.addEpisodeToRecentlyPlayed(episode)
+                refreshRecentsTabTemplate()
             }
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.performDelayedPlaybackUIUpdates(episodeId: episodeId)
-                // Additional Now Playing update with UI updates
-                PodcastPlayer.shared.updateNowPlayingInfo()
-            }
+            configurePodcastMiniPlayerControls()
+            PodcastPlayer.shared.updateNowPlayingInfo()
+            os_log("🚗 CarPlay: Updated Now Playing and live row highlights without rebuilding templates", log: log, type: .info)
         } else {
-            // Episode stopped/paused - update UI immediately
-            os_log("🚗 CarPlay: Episode stopped/paused - updating UI immediately", log: log, type: .info)
-            performImmediatePlaybackUIUpdates(episodeId: episodeId)
+            os_log("🚗 CarPlay: Updated paused state using live row highlights", log: log, type: .info)
         }
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
         // CarPlay uses CPTemplateApplicationScene and direct template updates
-    }
-    
-    private func performDelayedPlaybackUIUpdates(episodeId: String) {
-        os_log("🚗 CarPlay: Performing delayed UI updates for episode ID: %@", log: log, type: .info, episodeId)
-        
-        applyEpisodeHighlight()
-        applyStationHighlight()
-        
-        // Use the same efficient section update approach that works perfectly for Recents tab
-        // This provides immediate visual highlighting changes just like Recents does
-        forceImmediateSectionUpdate(episodeId: episodeId)
-        
-        // Also refresh the recents tab, stations tab, and downloads tab to show/hide the highlighted playing state
-        refreshRecentsTabTemplate()
-        refreshStationsTabTemplate()
-        refreshDownloadsTabTemplate()
-    }
-    
-    private func performImmediatePlaybackUIUpdates(episodeId: String) {
-        os_log("🚗 CarPlay: Performing immediate UI updates for episode ID: %@", log: log, type: .info, episodeId)
-        
-        applyEpisodeHighlight()
-        applyStationHighlight()
-        
-        // Use the same efficient section update approach that works perfectly for Recents tab
-        // This provides immediate visual highlighting changes just like Recents does
-        forceImmediateSectionUpdate(episodeId: episodeId)
-        
-        // Also refresh the recents tab, stations tab, and downloads tab to show/hide the highlighted playing state
-        refreshRecentsTabTemplate()
-        refreshStationsTabTemplate()
-        refreshDownloadsTabTemplate()
     }
     
     private func handleStationPlayedForRecents(_ notification: Notification) {
@@ -2961,9 +3319,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
             
             os_log("🚗 CarPlay Recents: Found %d recent stations", log: self.log, type: .info, recentStations.count)
-            
+
+            let sectionOrderKey = recentEpisodesShouldComeFirst(recentStations: recentStations)
+                ? "episodes-first"
+                : "stations-first"
             guard shouldUpdateSections(key: "recents",
-                                       data: (recentStations.map(\.id) + recentEpisodes.map(\.id)).joined(separator: ",")) else {
+                                       data: sectionOrderKey + ":" + (recentStations.map(\.id) + recentEpisodes.map(\.id)).joined(separator: ",")) else {
                 applyStationHighlight()
                 return
             }
@@ -2971,7 +3332,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Create new sections with updated data
             var newSections: [CPListSection] = []
             
-            // Recent stations section FIRST (as requested)
+            // Recent stations section
             var recentStationItems: [CPListItem] = []
             var recentRows: [(stationId: String, item: CPListItem)] = []
             var equalizerSetCount = 0
@@ -3006,9 +3367,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
             
             let recentStationsSection = CPListSection(items: recentStationItems, header: "Recently Played Stations", sectionIndexTitle: nil)
-            newSections.append(recentStationsSection)
             
-            // Recent episodes section SECOND (after stations)
+            // Recent episodes section
             var recentEpisodeItems: [CPListItem] = []
             var recentEpisodeRows: [(episodeId: String, item: CPListItem)] = []
             for episode in recentEpisodes {
@@ -3037,24 +3397,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 
                 // Try to get artwork using the new method that supports persisted data
                 itemImage = carPlayManager.getPodcastArtworkByFeedId(episode.feedId)
+                let needsArtworkLoad = itemImage == nil
                 
                 if let image = itemImage {
                     print("CarPlay: Successfully loaded artwork for episode '\(episode.title)' (feedId: \(episode.feedId))")
-                } else {
-                    print("CarPlay: No artwork available for episode '\(episode.title)' (feedId: \(episode.feedId))")
-                    
-                    // If we have an active feed, try loading from URL asynchronously
-                    if let feed = podcastFeed, let artworkUrl = feed.artworkUrl {
-                        carPlayManager.loadPodcastArtworkFromURL(for: feed) { [weak self] loadedImage in
-                            DispatchQueue.main.async {
-                                if loadedImage != nil {
-                                    // Refresh the CarPlay interface with the loaded artwork
-                                    print("CarPlay: Artwork loaded from URL for '\(feed.title)', refreshing interface")
-                                    self?.refreshCarPlayInterface()
-                                }
-                            }
-                        }
-                    }
                 }
                 
                 // Use microphone icon as fallback if no artwork found
@@ -3065,6 +3411,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 let item = CPListItem(text: episode.title,
                                      detailText: "\(duration)\(statusText)",
                                      image: itemImage)
+
+                     if needsArtworkLoad,
+                   let feed = podcastFeed,
+                   feed.artworkUrl != nil {
+                    print("CarPlay: No artwork available for episode '\(episode.title)' (feedId: \(episode.feedId))")
+                    carPlayManager.loadPodcastArtworkFromURL(for: feed) { loadedImage in
+                        guard let loadedImage else { return }
+                        DispatchQueue.main.async {
+                            item.setImage(loadedImage)
+                            print("CarPlay: Artwork loaded from URL for '\(feed.title)' and applied in place")
+                        }
+                    }
+                }
                 
                 // Set Apple standard highlighting for currently playing episode
                 if #available(iOS 14.0, *) {
@@ -3085,7 +3444,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
             
             let recentEpisodesSection = CPListSection(items: recentEpisodeItems, header: "Recently Played Episodes", sectionIndexTitle: nil)
-            newSections.append(recentEpisodesSection)
+            newSections.append(contentsOf: orderedRecentSections(
+                stations: recentStationsSection,
+                episodes: recentEpisodesSection,
+                recentStations: recentStations
+            ))
             
             // Update the sections directly on the existing template - this preserves navigation
             recentsTab.updateSections(newSections)
@@ -3597,7 +3960,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         let updatedFeeds = carPlayManager.getPodcastFeeds()
         
-        if let updatedFeed = updatedFeeds.first(where: { $0.id == currentFeed.id }) {
+        if var updatedFeed = updatedFeeds.first(where: { $0.id == currentFeed.id }) {
+            if updatedFeed.episodes.isEmpty {
+                updatedFeed.episodes = currentFeed.episodes
+            }
             // Update the current feed reference
             currentPodcastFeed = updatedFeed
             
@@ -3639,7 +4005,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         let updatedFeeds = carPlayManager.getPodcastFeeds()
         
-        if let updatedFeed = updatedFeeds.first(where: { $0.id == currentFeed.id }) {
+        if var updatedFeed = updatedFeeds.first(where: { $0.id == currentFeed.id }) {
+            if updatedFeed.episodes.isEmpty {
+                updatedFeed.episodes = currentFeed.episodes
+            }
             // Update the current feed reference
             currentPodcastFeed = updatedFeed
             
@@ -3652,86 +4021,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         isUpdatingTemplate = false
     }
     
-    private func forceImmediateSectionUpdate(episodeId: String) {
-        // Since Recents tab works perfectly with updateSections(), let's use the same approach for podcast episode lists
-        // This should provide immediate highlighting updates just like Recents does
-        os_log("🚗 CarPlay: Forcing immediate section update for episode ID: %@", log: log, type: .info, episodeId)
-        
-        // Check if we're currently showing a podcast episode list
-        guard let currentFeed = currentPodcastFeed else {
-            os_log("🚗 CarPlay: No current podcast feed set for section update", log: log, type: .debug)
-            return
-        }
-        
-        // CRITICAL FIX: Reload episodes directly from Core Data to get fresh episode data
-        // CarPlayManager's feeds have empty episode arrays (loaded on-demand), so we must load from Core Data
-        os_log("🚗 CarPlay: Reloading episodes from Core Data for feed '%@'", log: log, type: .info, currentFeed.title)
-        
-        // Load episodes synchronously from Core Data
-        let context = CoreDataStack.shared.context
-        var reloadedEpisodes: [PodcastEpisode] = []
-        
-        context.performAndWait {
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "feedId == %@", currentFeed.id)
-            fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
-            
-            do {
-                let managedEpisodes = try context.fetch(fetchRequest)
-                reloadedEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
-                os_log("🚗 CarPlay: Reloaded %d episodes from Core Data for feed '%@'", log: self.log, type: .info, reloadedEpisodes.count, currentFeed.title)
-            } catch {
-                os_log("🚗 CarPlay: Failed to reload episodes from Core Data: %@", log: self.log, type: .error, error.localizedDescription)
-            }
-        }
-        
-        guard !reloadedEpisodes.isEmpty else {
-            os_log("🚗 CarPlay: No episodes found in Core Data for feed '%@'", log: log, type: .error, currentFeed.title)
-            return
-        }
-        
-        // Create updated feed with fresh episodes
-        var updatedFeed = currentFeed
-        updatedFeed.episodes = reloadedEpisodes
-        
-        os_log("🚗 CarPlay: Reloaded feed '%@' - now has %d episodes (was %d)", log: log, type: .info, updatedFeed.title, updatedFeed.episodes.count, currentFeed.episodes.count)
-        
-        // Update the current feed reference with fresh data
-        currentPodcastFeed = updatedFeed
-        
-        // Get the currently playing episode to determine if we need to update this feed
-        let currentPlayingEpisodeId = PodcastPlayer.shared.currentEpisode?.id
-        
-        // Check if the currently playing episode is in this feed OR if any episode in this feed was previously playing
-        // This ensures we update when switching between episodes within the same podcast
-        let shouldUpdate = currentPlayingEpisodeId == nil || 
-                          updatedFeed.episodes.contains(where: { $0.id == currentPlayingEpisodeId }) ||
-                          updatedFeed.episodes.contains(where: { $0.id == episodeId })
-        
-        if !shouldUpdate {
-            os_log("🚗 CarPlay: No episodes in current feed need section update", log: log, type: .debug)
-            return
-        }
-        
-        os_log("🚗 CarPlay: Updating sections for podcast '%@' - current playing: %@, notification episode: %@", log: log, type: .info, updatedFeed.title, currentPlayingEpisodeId ?? "none", episodeId)
-        
-        // Use the same efficient section update approach that works perfectly for Recents
-        // Reset the updating flag to ensure this critical update goes through
-        isUpdatingTemplate = false
-        
-        // Use immediate section updates with FRESH feed data - same approach as Recents tab which works perfectly
-        updateCurrentPodcastTemplateSections(for: updatedFeed)
-    }
-    
-    private func forceImmediateHighlightingUpdate(episodeId: String) {
-        // Legacy function - now redirects to the section update approach that works like Recents
-        // This ensures backward compatibility while using the same approach as the working Recents tab
-        forceImmediateSectionUpdate(episodeId: episodeId)
-    }
-    
     private func updateCurrentPodcastTemplateSections(for podcast: PodcastFeed) {
         guard let interfaceController = self.interfaceController else {
             os_log("🚗 CarPlay: Cannot refresh podcast episodes - no interface controller", log: log, type: .error)
+            return
+        }
+
+        guard !podcast.episodes.isEmpty else {
+            os_log("🚗 CarPlay: Skipping empty episode refresh to preserve the visible podcast list", log: log, type: .error)
             return
         }
         
@@ -3796,8 +4093,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // CRITICAL FIX: Get fresh state from EpisodeStateManager instead of stale episode.state
             // This ensures we always show the correct status and highlighting
             let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
-            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+            let episodeProgress = EpisodeStateManager.shared.getProgress(for: episode.id, feedId: episode.feedId)
+            let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
             let isPlayed = (episodeState == .played)
             
             // Determine episode status based on state and current playback
@@ -3901,7 +4198,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func loadEpisodesForPodcast(_ podcastFeed: PodcastFeed, completion: @escaping ([PodcastEpisode]) -> Void) {
         os_log("🚗 CarPlay: Loading ALL episodes for podcast '%@' (closed app compatible)", log: log, type: .info, podcastFeed.title)
         
-        let context = CoreDataStack.shared.context
+        let context = CoreDataStack.shared.newBackgroundContext()
         
         context.perform {
             do {
@@ -3969,7 +4266,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func loadInitialEpisodesForPodcast(_ podcastFeed: PodcastFeed, limit: Int, completion: @escaping ([PodcastEpisode]) -> Void) {
         os_log("🚗 CarPlay: Loading initial %d episodes for podcast '%@' (closed app compatible)", log: log, type: .info, limit, podcastFeed.title)
         
-        let context = CoreDataStack.shared.context
+        let context = CoreDataStack.shared.newBackgroundContext()
         
         context.perform {
             do {
@@ -4043,7 +4340,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     /// Get total VALID episode count from CoreData (excludes 0-duration and invalid episodes)
     /// CRITICAL FIX: Only counts episodes that will actually be displayed after validation
     private func getEpisodeCount(for podcastFeed: PodcastFeed, completion: @escaping (Int) -> Void) {
-        let context = CoreDataStack.shared.context
+        let context = CoreDataStack.shared.newBackgroundContext()
         
         context.perform {
             do {
@@ -4094,7 +4391,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     /// Get total VALID episode count from CoreData synchronously (excludes 0-duration and invalid episodes)
     /// CRITICAL FIX: Only counts episodes that will actually be displayed after validation
     private func getEpisodeCountSync(for podcastFeed: PodcastFeed) -> Int {
-        let context = CoreDataStack.shared.context
+        let context = CoreDataStack.shared.newBackgroundContext()
         var validCount = 0
         
         context.performAndWait {
@@ -4460,8 +4757,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     /// Sets up aggressive periodic monitoring for cached artwork
     private func setupAggressiveCachedArtworkMonitoring() {
-        // ENHANCED: More frequent checks every 1 second for immediate cached artwork updates
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+        // Notifications provide immediate updates; this timer is only a fallback for missed events.
+        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] timer in
             guard let self = self else {
                 timer.invalidate()
                 return
@@ -4567,18 +4864,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             .replacingOccurrences(of: " ", with: "_")
             .replacingOccurrences(of: "[^a-zA-Z0-9_]", with: "", options: .regularExpression)
         
-        // Check UserDefaults for cached artwork data
-        let userDefaults = UserDefaults.standard
-        
-        // First check for iTunes artwork data
-        if let artworkData = userDefaults.data(forKey: "iTunesArtwork_\(cacheKey)") {
-            if let image = UIImage(data: artworkData) {
-                os_log("🚗 CarPlay: Found cached iTunes artwork for key: %@", log: log, type: .info, cacheKey)
-                return image
-            }
-        }
-        
-        // Fallback: Check if this is a current station and use its saved iTunes artwork data
+        // Artwork is persisted with the station in Core Data rather than UserDefaults.
         let radioPlayer = RadioPlayer.shared
         if let currentStation = radioPlayer.currentlyPlayingStation,
            let iTunesArtworkData = currentStation.iTunesArtworkData,
@@ -4619,25 +4905,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             return artwork
         }
         
-        // Strategy 3: Try partial matches
-        let userDefaults = UserDefaults.standard
-        let allKeys = userDefaults.dictionaryRepresentation().keys
-        
-        for key in allKeys {
-            if key.hasPrefix("iTunesArtwork_") || key.hasPrefix("CarPlayArtwork_") {
-                let keyLower = key.lowercased()
-                if (keyLower.contains(normalizedArtist) && keyLower.contains(normalizedTitle)) ||
-                   keyLower.contains(normalizedTitle) {
-                    if let artworkData = userDefaults.data(forKey: key),
-                       let image = UIImage(data: artworkData) {
-                        os_log("🚗 CarPlay: Found cached artwork via partial match: %@", log: log, type: .info, key)
-                        return image
-                    }
-                }
-            }
-        }
-        
-        // Strategy 4: Check current station's iTunes artwork
+        // Strategy 3: Check current station's iTunes artwork
         let radioPlayer = RadioPlayer.shared
         if let currentStation = radioPlayer.currentlyPlayingStation,
            let iTunesArtworkData = currentStation.iTunesArtworkData,
@@ -4669,57 +4937,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     /// Triggers immediate iTunes artwork fetching for CarPlay when possible
     private func triggerImmediateITunesArtworkFetch() {
         let radioPlayer = RadioPlayer.shared
-        
-        // First check if we have current metadata to search for
-        var metadata = radioPlayer.metadata
-        
-        // If no metadata available yet, try to construct it from current station
-        if metadata == nil || metadata!.isEmpty {
-            if let currentStation = radioPlayer.currentlyPlayingStation {
-                metadata = currentStation.name
-                os_log("🚗 CarPlay: No metadata available, using station name for iTunes artwork fetch: %@", log: log, type: .info, currentStation.name)
-            } else {
-                os_log("🚗 CarPlay: No metadata or station available for iTunes artwork fetch", log: log, type: .debug)
-                return
-            }
-        }
-        
-        guard let finalMetadata = metadata, !finalMetadata.isEmpty else {
-            os_log("🚗 CarPlay: No valid metadata available for iTunes artwork fetch", log: log, type: .debug)
+
+        guard radioPlayer.currentlyPlayingStation != nil else {
+            os_log("🚗 CarPlay: No station available for artwork fetch", log: log, type: .debug)
             return
         }
-        
-        // Don't skip if artwork already present for PlayNow - always try to get better artwork
-        let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
-        let hasArtwork = nowPlayingInfo?[MPMediaItemPropertyArtwork] != nil
-        
-        if hasArtwork {
-            os_log("🚗 CarPlay: Artwork already present, but triggering fresh iTunes fetch for PlayNow: %@", log: log, type: .info, finalMetadata)
-        } else {
-            os_log("🚗 CarPlay: No artwork present, triggering IMMEDIATE iTunes artwork fetch for: %@", log: log, type: .info, finalMetadata)
-        }
-        
-        // Use background task to ensure network access during CarPlay session
-        let taskId = UIApplication.shared.beginBackgroundTask(withName: "CarPlayITunesArtworkFetch") {
-            os_log("🚗 CarPlay: iTunes artwork fetch background task expired", log: self.log, type: .default)
-        }
-        
-        radioPlayer.searchITunesForArtwork(metadata: finalMetadata) { [weak self] image in
-            DispatchQueue.main.async {
-                UIApplication.shared.endBackgroundTask(taskId)
-                
-                if let image = image {
-                    os_log("🚗 CarPlay: iTunes artwork fetch SUCCESS - applying INSTANTLY", log: self?.log ?? OSLog.default, type: .info)
-                    radioPlayer.saveITunesArtworkToCurrentStation(image)
-                    
-                    // INSTANT SYNC: Force immediate Now Playing info update with zero delay
-                    radioPlayer.forceUpdateNowPlayingInfo()
-                    self?.forceCarPlayNowPlayingUpdate()
-                } else {
-                    os_log("🚗 CarPlay: iTunes artwork fetch failed for: %@", log: self?.log ?? OSLog.default, type: .debug, finalMetadata)
-                }
-            }
-        }
+
+        os_log("🚗 CarPlay: Triggering radio artwork pipeline", log: log, type: .info)
+        radioPlayer.fetchArtworkForCarPlay()
     }
     
     // MARK: - Instant CarPlay Artwork Sync System
@@ -4759,11 +4984,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         os_log("🚀 CarPlay: Processing INSTANT artwork sync - type: %@, metadata: %@", log: log, type: .info, syncType, metadata)
-        
+
         // INSTANT SYNC: All operations happen immediately without any delays
         DispatchQueue.main.async { [weak self] in
             // Apply cached artwork immediately
             self?.applyCachedArtworkToCarPlay()
+
+            // Keep every visible copy of the playing station in sync with the player artwork.
+            self?.applyStationArtworkToRows()
             
             // Force Now Playing update immediately
             self?.forceCarPlayNowPlayingUpdate()

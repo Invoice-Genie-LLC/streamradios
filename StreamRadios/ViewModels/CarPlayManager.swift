@@ -15,8 +15,25 @@ class CarPlayManager: ObservableObject {
     // MARK: - Properties
     private let log = OSLog(subsystem: "com.yourapp.streamradios", category: "CarPlayManager")
     
-    // CarPlay connection status for performance optimizations
-    @Published var isCarPlayConnected: Bool = false
+    // CarPlay remains connected while either its scene or audio route is active. Audio-session
+    // category changes can briefly remove the route without disconnecting the CarPlay scene.
+    @Published private(set) var isCarPlayConnected: Bool = false
+    private var isCarPlaySceneConnected = false
+    private var isCarAudioRouteActive = false
+
+    func setCarPlaySceneConnected(_ connected: Bool) {
+        isCarPlaySceneConnected = connected
+        updateConnectionState()
+    }
+
+    func setCarAudioRouteActive(_ active: Bool) {
+        isCarAudioRouteActive = active
+        updateConnectionState()
+    }
+
+    private func updateConnectionState() {
+        isCarPlayConnected = isCarPlaySceneConnected || isCarAudioRouteActive
+    }
     
     // Data properties
     private var radioStations: [RadioStation] = []
@@ -73,6 +90,32 @@ class CarPlayManager: ObservableObject {
             print("🚗 CarPlay: Received favorite station change notification")
             self?.handleFavoriteStationChange(notification)
         }
+
+        NotificationCenter.default.addObserver(
+            forName: .stationsUpdated,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshRadioStationData(reason: "stations_updated")
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("StationsLoaded"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshRadioStationData(reason: "stations_loaded")
+        }
+    }
+
+    private func refreshRadioStationData(reason: String) {
+        updateContent()
+        NotificationCenter.default.post(
+            name: NSNotification.Name("CarPlayStationOrderChanged"),
+            object: nil,
+            userInfo: ["reason": reason]
+        )
+        print("🚗 CarPlay: Refreshed radio station data after \(reason)")
     }
     
     @MainActor
@@ -95,6 +138,14 @@ class CarPlayManager: ObservableObject {
         // Get updated feed order from main app
         let updatedFeedOrder = PodcastViewModel.shared.podcastFeedOrder
         let updatedFeeds = PodcastViewModel.shared.podcastFeeds
+
+        // During a CarPlay cold launch the phone model can publish its order before its feeds have
+        // loaded. Keep the independently loaded Core Data snapshot instead of replacing it with an
+        // empty transitional value. A true empty store is still applied by the direct scene loader.
+        guard !updatedFeeds.isEmpty || podcastFeeds.isEmpty else {
+            print("🚗 🎙️ CarPlay: Ignoring temporary empty podcast feed-order snapshot")
+            return
+        }
         
         // Update our local data immediately
         self.podcastFeeds = updatedFeeds
@@ -129,9 +180,18 @@ class CarPlayManager: ObservableObject {
     
     func updateContent() {
         // Refresh data from main app sources
-        radioStations = RadioStationViewModel.shared.stations
+        let latestStations = RadioStationViewModel.shared.stations
+        if !latestStations.isEmpty || radioStations.isEmpty {
+            radioStations = latestStations
+        }
         updateRecentPodcastEpisodes()
         os_log("CarPlay: Content updated - %d stations, %d recent episodes", log: log, type: .debug, radioStations.count, recentPodcastEpisodes.count)
+    }
+
+    func configureRadioData(_ stations: [RadioStation]) {
+        guard !stations.isEmpty || radioStations.isEmpty else { return }
+        radioStations = stations
+        os_log("CarPlay: Configured with %d radio stations", log: log, type: .info, stations.count)
     }
     
     /// Force refresh podcast data immediately - called when main app becomes active
@@ -149,9 +209,14 @@ class CarPlayManager: ObservableObject {
         let latestFeeds = PodcastViewModel.shared.podcastFeeds
         print("🚗 CarPlay: DEBUG - Found \(latestFeeds.count) feeds in PodcastViewModel (no reload needed)")
         
-        // Configure CarPlayManager with latest data and maintain order
-        let feedOrder = PodcastViewModel.shared.podcastFeedOrder
-        self.configurePodcastData(latestFeeds, feedOrder: feedOrder)
+        // The main model can still be empty while the independent CarPlay Core Data load has
+        // already succeeded. Never discard that valid snapshot during this transition.
+        if !latestFeeds.isEmpty || podcastFeeds.isEmpty {
+            let feedOrder = PodcastViewModel.shared.podcastFeedOrder
+            self.configurePodcastData(latestFeeds, feedOrder: feedOrder)
+        } else {
+            print("🚗 CarPlay: Preserving independently loaded podcast data during phone startup")
+        }
         
         // Update our local data
         self.updateContent()
@@ -222,6 +287,10 @@ class CarPlayManager: ObservableObject {
             return filteredStations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
         }
     }
+
+    func getStation(withId id: String) -> RadioStation? {
+        radioStations.first { $0.id == id }
+    }
     
     func getFavoriteStations() -> [RadioStation] {
         // Get hidden countries (same as main app)
@@ -262,6 +331,10 @@ class CarPlayManager: ObservableObject {
     
     func getRecentPodcastEpisodes() -> [PodcastEpisode] {
         return recentPodcastEpisodes
+    }
+
+    func getMostRecentPodcastPlayedAt() -> Date? {
+        return recentlyPlayedEpisodes.first?.playedAt
     }
     
     func getFavoritePodcastEpisodes() -> [PodcastEpisode] {

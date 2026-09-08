@@ -144,6 +144,7 @@ struct ContentView: View {
     /// Clears `isScrolling` if the matching stop notification never arrives.
     @State private var scrollingWatchdog: DispatchWorkItem?
     @State private var homeButtonExplicitlyShowingTabView = false // Track when home button forces TabView visible
+    @State private var keyboardOffset: CGFloat = 0
     
     // Network status for disabling country picker when offline
     @State private var isOffline = false
@@ -488,8 +489,11 @@ struct ContentView: View {
                 .opacity(shouldShowGlobalPlayer ? 1.0 : 0.0)
                 .animation(.easeInOut(duration: 0.3), value: shouldShowGlobalPlayer)
                 .allowsHitTesting(true) // Allow interaction with player only
-                .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
+                .offset(y: keyboardOffset)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            updateKeyboardOffset(from: notification)
         }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
                     // App is closing: dismiss the player UI overlay
@@ -614,6 +618,27 @@ struct ContentView: View {
         
         guard let rootViewController = keyWindow?.rootViewController else { return nil }
         return findTabBarController(in: rootViewController)
+    }
+
+    private func updateKeyboardOffset(from notification: Notification) {
+        guard let value = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue,
+              let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                                .filter({ $0.session.role == .windowApplication })
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow) else {
+            keyboardOffset = 0
+            return
+        }
+
+        let keyboardFrame = window.convert(value.cgRectValue, from: window.screen.coordinateSpace)
+        let isDocked = keyboardFrame.maxY >= window.bounds.maxY - 1
+        let overlap = isDocked ? max(0, window.bounds.maxY - keyboardFrame.minY) : 0
+        let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
+
+        withAnimation(.easeOut(duration: duration)) {
+            keyboardOffset = overlap
+        }
     }
     
     /// Recursively finds UITabBarController in view hierarchy

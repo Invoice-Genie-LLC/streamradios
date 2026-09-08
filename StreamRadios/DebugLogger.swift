@@ -263,9 +263,7 @@ class DebugLogger: ObservableObject {
     
     private func logToConsole(_ entry: LogEntry) {
         let consoleMessage = "\(entry.level.emoji) [\(entry.category)] \(entry.message) | \(entry.file):\(entry.line) in \(entry.function)"
-        print(consoleMessage)
-        
-        // Also log to OS unified logging system
+
         let logger = Logger(subsystem: "com.streamradios.app", category: entry.category)
         switch entry.level {
         case .critical:

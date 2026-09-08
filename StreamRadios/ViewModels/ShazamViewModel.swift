@@ -70,6 +70,55 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             await self?.runStreamRecognition()
         }
     }
+
+    func matchCurrentStreamForArtwork(expectedStationId: String) async -> (title: String, artist: String, artworkURL: URL)? {
+          guard !isRecording,
+              RadioPlayer.shared.currentlyPlayingStation?.id == expectedStationId,
+              let urlString = RadioPlayer.shared.currentlyPlayingStation?.url,
+              let url = URL(string: urlString) else {
+            return nil
+        }
+
+        do {
+            let sample = try await captureStreamSample(from: url, seconds: 12)
+            try Task.checkCancellation()
+            let buffer = try await decodeToShazamBuffer(sample)
+            try Task.checkCancellation()
+            let maxFrames = AVAudioFrameCount(shazamFormat.sampleRate * 11.9)
+            if buffer.frameLength > maxFrames { buffer.frameLength = maxFrames }
+
+            let generator = SHSignatureGenerator()
+            try generator.append(buffer, at: nil)
+
+            guard RadioPlayer.shared.currentlyPlayingStation?.id == expectedStationId else {
+                return nil
+            }
+
+            switch await SHSession().result(from: generator.signature()) {
+            case .match(let match):
+                guard RadioPlayer.shared.currentlyPlayingStation?.id == expectedStationId,
+                      let item = match.mediaItems.first,
+                      let title = item.title,
+                      let artist = item.artist,
+                      let artworkURL = item.artworkURL else {
+                    return nil
+                }
+                DebugLogger.logInfo("Shazam artwork fallback matched '\(title)' by '\(artist)'", category: "Shazam")
+                return (title, artist, artworkURL)
+            case .noMatch:
+                DebugLogger.logInfo("Shazam artwork fallback found no match", category: "Shazam")
+                return nil
+            case .error(let error, _):
+                DebugLogger.logWarning("Shazam artwork fallback failed - \(error.localizedDescription)", category: "Shazam")
+                return nil
+            @unknown default:
+                return nil
+            }
+        } catch {
+            DebugLogger.logWarning("Shazam artwork fallback capture failed - \(error.localizedDescription)", category: "Shazam")
+            return nil
+        }
+    }
     
     /// The view model is shared, so a new session must not show the previous station's result.
     private func clearPreviousMatch() {

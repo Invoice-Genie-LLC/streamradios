@@ -61,6 +61,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var isPodcastActive: Bool = false
     private var nowPlayingUpdateTimer: Timer?
     private var updateTimer: Timer?
+    private var cancellables = Set<AnyCancellable>()
     private let updateInterval: TimeInterval = 2.0
     private var lastReportedProgress: Double = 0
     private let stateManager = EpisodeStateManager.shared
@@ -75,6 +76,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var restorationAttempts: Int = 0
     private let maxRestorationAttempts: Int = 5
     private var hasSuccessfullyRestored: Bool = false
+    private var isConfigured = false
+    private var isRestorationInProgress = false
 
     // MARK: - Performance Optimization Properties
     private var isUserScrolling = false
@@ -124,8 +127,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     // CRITICAL: Add comprehensive background audio observers like RadioPlayer
     private func setupBackgroundAudioObservers() {
-        // CRITICAL: Add app lifecycle observers for background audio session maintenance
-        NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] notification in
+                Task { @MainActor [weak self] in
+                    self?.handleAppTermination(notification: notification)
+                    self?.handleAppDidEnterBackground()
+                }
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
         
@@ -145,38 +155,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let currentProgress = self.currentProgress
             DebugLogger.logInfo("Background transition context - Episode: \(episodeTitle), Progress: \(currentProgress)%, Duration: \(duration)s", category: "BackgroundAudio")
             
-            // Don't create competing background tasks - let AppDelegate handle this centrally
-            // Move audio session configuration to background queue to avoid main thread IPC delays
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    
-                    // The session is active and routed at this point. Changing the category options
-                    // on it - .allowAirPlay in particular needs a route change - is what returns -50,
-                    // and it buys nothing since playback is already running. Only an outright wrong
-                    // category is worth correcting, and Shazam legitimately owns .playAndRecord.
-                    guard audioSession.category != .playback,
-                          audioSession.category != .playAndRecord else {
-                        print("✅ PodcastPlayer: Audio session category is fine for background (\(audioSession.category.rawValue)) - leaving it alone")
-                        return
-                    }
-                    
-                    // MAIN THREAD FIX: Configure audio session on background queue to avoid IPC delays
-                    try audioSession.setCategory(.playback, 
-                                               mode: .default, 
-                                               options: PlaybackManager.playbackCategoryOptions)
-                    
-                    DispatchQueue.main.async {
-                        print("✅ PodcastPlayer: Background transition handled - audio session category set")
-                        DebugLogger.logInfo("Podcast background transition completed - centralized task management active", category: "BackgroundAudio")
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        print("❌ PodcastPlayer: Audio session check failed: \(error)")
-                        DebugLogger.logError("Audio session verification failed during podcast background transition: \(error.localizedDescription)", category: "BackgroundAudio")
-                    }
-                }
-            }
+            DebugLogger.logInfo("Podcast background transition completed - centralized audio session remains active", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering background with no active podcast playback - no background maintenance needed", category: "BackgroundAudio")
         }
@@ -398,17 +377,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                                              name: UIApplication.willTerminateNotification,
                                              object: nil)
         
-        // Also listen for when app goes to background (force close might trigger this first)
-        NotificationCenter.default.addObserver(self,
-                                             selector: #selector(handleAppTermination),
-                                             name: UIApplication.didEnterBackgroundNotification,
-                                             object: nil)
-        
-        // Listen for when app resigns active state
-        NotificationCenter.default.addObserver(self,
-                                             selector: #selector(handleAppTermination),
-                                             name: UIApplication.willResignActiveNotification,
-                                             object: nil)
     }
     
     private func setupCarPlayRouteChangeHandling() {
@@ -452,9 +420,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @objc private func handleCrossDeviceProgressSync(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let episodeId = userInfo["episodeId"] as? String,
+              let feedId = userInfo["feedId"] as? String,
               let newProgress = userInfo["progress"] as? Double,
               let currentEpisode = currentEpisode,
               currentEpisode.id == episodeId,
+              currentEpisode.feedId == feedId,
               isPlaying else {
             return
         }
@@ -546,6 +516,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @objc private func handleCrossDeviceProgressUpdate(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let episodeId = userInfo["episodeId"] as? String,
+              let feedId = userInfo["feedId"] as? String,
               let newProgress = userInfo["progress"] as? Double,
               let timestamp = userInfo["timestamp"] as? Double,
               let source = userInfo["source"] as? String,
@@ -555,7 +526,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         
         // Check if this update is for the currently loaded episode (whether playing or paused)
-        guard let currentEpisode = currentEpisode, currentEpisode.id == episodeId else {
+        guard let currentEpisode = currentEpisode,
+              currentEpisode.id == episodeId,
+              currentEpisode.feedId == feedId else {
             // Not the current episode - just log and return
             return
         }
@@ -611,9 +584,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Handle different app lifecycle events to ensure progress is saved
         os_log("App lifecycle event detected: %@", log: log, type: .info, notification.name.rawValue)
         
-        if notification.name == UIApplication.willTerminateNotification ||
-           notification.name == UIApplication.didEnterBackgroundNotification ||
-           notification.name == UIApplication.willResignActiveNotification {
+          if notification.name == UIApplication.willTerminateNotification ||
+              notification.name == UIApplication.didEnterBackgroundNotification {
             
             // REAL-TIME SYNC: Sync when app goes to background or terminates
             let reason: String
@@ -622,23 +594,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 reason = "app_closed"
             case UIApplication.didEnterBackgroundNotification:
                 reason = "app_background"
-            case UIApplication.willResignActiveNotification:
-                reason = "app_background"
             default:
                 reason = "app_background"
             }
             
-            // REAL-TIME SYNC: Trigger immediate sync for app lifecycle events
-            if let currentEpisode = currentEpisode {
-                // CRITICAL FIX: Use currentProgress instead of recalculating to preserve chapter seek progress
-                let progress = currentProgress > 0 ? currentProgress : (duration > 0 ? currentTime / duration : 0)
-                stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: reason, feedId: currentEpisode.feedId)
-                
-
-            }
-            
             // Ensure progress is saved when app is force closed or goes to background
-            handleAppWillTerminate()
+            handleAppWillTerminate(syncReason: reason)
             
             // Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
             // Removed to fix Swift Concurrency warning
@@ -659,18 +620,20 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             output.portType == .carAudio
         }
         
-        let wasCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
+        let carPlayManager = CarPlayManager.shared
+        let wasCarPlayConnected = carPlayManager.isCarPlayConnected
+        carPlayManager.setCarAudioRouteActive(isCarPlayCurrentlyConnected)
+        let isCarPlayConnected = carPlayManager.isCarPlayConnected
         
         // CARPLAY CONNECTION DETECTION
-        if isCarPlayCurrentlyConnected && !wasCarPlayConnected {
+        if isCarPlayConnected && !wasCarPlayConnected {
             print("🚗 PodcastPlayer: CarPlay CONNECTED - enhancing experience")
-            CarPlayManager.shared.isCarPlayConnected = true
         }
         
         // CARPLAY DISCONNECTION DETECTION - CRITICAL FIX
-        else if !isCarPlayCurrentlyConnected && wasCarPlayConnected {
+        else if !isCarPlayConnected && wasCarPlayConnected {
             print("🚗 PodcastPlayer: CarPlay DISCONNECTED - ensuring seamless transition to main app")
-            CarPlayManager.shared.isCarPlayConnected = false
+            persistCurrentProgress(reason: "CarPlay audio route disconnected")
             
             // CRITICAL: Ensure seamless playback transition when CarPlay disconnects
             if player != nil && currentEpisode != nil {
@@ -685,37 +648,27 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     
-                    // CRITICAL: Set podcast as active player FIRST to maintain UI visibility
-                    PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true)
                     print("🚗 CarPlay Disconnect: Set podcast as active player immediately")
-                    
-                    // Aggressively maintain audio session for seamless transition
-                    do {
-                        try AVAudioSession.sharedInstance().setActive(true, options: [])
-                        print("✅ CarPlay Disconnect: Audio session kept active for main app podcast")
-                    } catch {
-                        print("⚠️ CarPlay Disconnect: Failed to maintain audio session: \(error)")
-
-                    }
-                    
-                    // CRITICAL: Force player to continue/resume playback if it was playing
-                    if wasPlayingBeforeDisconnect {
-                        if self.player?.timeControlStatus != .playing {
-                            print("🔄 CarPlay Disconnect: Force resuming podcast playback in main app")
-                            self.player?.play()
+                    PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true) { [weak self] activated in
+                        guard let self else { return }
+                        guard activated else {
+                            print("⚠️ CarPlay Disconnect: Audio session unavailable for main app podcast")
+                            return
                         }
-                        
-                        // AGGRESSIVE: Ensure isPlaying state is correct and maintained
-                        self.isPlaying = true
+
+                        print("✅ CarPlay Disconnect: Audio session kept active for main app podcast")
+                        if wasPlayingBeforeDisconnect {
+                            if self.player?.timeControlStatus != .playing {
+                                print("🔄 CarPlay Disconnect: Force resuming podcast playback in main app")
+                                self.player?.play()
+                            }
+                            self.isPlaying = true
+                        }
+
+                        self.updateNowPlayingInfo()
+                        self.objectWillChange.send()
+                        print("✅ CarPlay Disconnect: Aggressive podcast transition to main app completed")
                     }
-                    
-                    // Force update Now Playing info for main app immediately
-                    self.updateNowPlayingInfo()
-                    
-                    // Force UI refresh to show podcast player
-                    self.objectWillChange.send()
-                    
-                    print("✅ CarPlay Disconnect: Aggressive podcast transition to main app completed")
                 }
                 
                 // BACKUP: Multiple checks to ensure everything is maintained
@@ -732,8 +685,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         // Resume playback if it was playing and got stopped
                         if wasPlayingBeforeDisconnect && self.player?.timeControlStatus != .playing && self.currentEpisode != nil {
                             print("🔄 CarPlay Disconnect BACKUP (\(delay)s): Force resuming podcast playback")
-                            self.player?.play()
-                            self.isPlaying = true
+                            PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true) { [weak self] activated in
+                                guard activated, let self else { return }
+                                self.player?.play()
+                                self.isPlaying = true
+                            }
                         }
                         
                         // Ensure UI state is maintained for current episode
@@ -779,7 +735,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     private func attemptReconnection() {
         guard currentReconnectionAttempt < maxReconnectionAttempts else {
-            stopReconnectionAttempts()
+            stopReconnectionAttempts(reportFailure: true)
             return
         }
         
@@ -813,17 +769,17 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
-    private func stopReconnectionAttempts() {
+    private func stopReconnectionAttempts(reportFailure: Bool = false) {
         reconnectionTimer?.invalidate()
         reconnectionTimer = nil
         isAttemptingReconnection = false
         currentReconnectionAttempt = 0
         
-        if player?.timeControlStatus != .playing {
+        if reportFailure && player?.timeControlStatus != .playing {
             os_log("❌ PodcastPlayer: Failed to reconnect after %d attempts", log: log, type: .error, maxReconnectionAttempts)
             connectionState = .error
             // Don't clear userWantsToPlay so they can try again manually
-        } else {
+        } else if player?.timeControlStatus == .playing {
             connectionState = .connected
         }
     }
@@ -1020,7 +976,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             currentEpisodeIndex = index
             os_log("Set current episode index to %d", log: log, type: .info, index)
         } else {
-            os_log("Failed to find index for current episode", log: log, type: .error)
+            if !allEpisodesInFeed.isEmpty {
+                os_log("Current episode is not present in the loaded feed queue", log: log, type: .info)
+            }
             currentEpisodeIndex = nil
         }
     }
@@ -1121,7 +1079,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // CRITICAL FIX: Use rewindAndPlay to properly reset episode state
             // This method handles all the necessary state resets including played status
-            stateManager.rewindAndPlay(episodeId: episode.id)
+            stateManager.rewindAndPlay(episodeId: episode.id, feedId: episode.feedId)
             
             // Reset progress in view model by updating cache directly
             Task { @MainActor in
@@ -1129,16 +1087,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 // REWIND CORE DATA FIX: Always reset isPlayed state in both EpisodeStateManager and Core Data
                 // This ensures the episode shows as unplayed in all parts of the system
-                viewModel?.updateEpisodeState(episode.id, progress: 0.0, isPlayed: false)
+                viewModel?.updateEpisodeState(episode.id, feedId: episode.feedId, progress: 0.0, isPlayed: false)
                 
                 // CORE DATA IMMEDIATE SYNC: Force immediate Core Data sync for the rewound episode
                 // This ensures the Core Data state is updated right away, not just in memory
                 Task.detached(priority: .userInitiated) {
                     let episodeStates = [episode.id: EpisodeState(
                         isPlayed: false,
-                        isFavorite: EpisodeStateManager.shared.isFavorite(episode.id),
+                        isFavorite: EpisodeStateManager.shared.isFavorite(episode.id, feedId: episode.feedId),
                         progress: 0.0,
-                        isDownloaded: EpisodeStateManager.shared.isDownloaded(episode.id)
+                        isDownloaded: EpisodeStateManager.shared.isDownloaded(episode.id, feedId: episode.feedId)
                     )]
                     
                     do {
@@ -1172,6 +1130,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func configure(with viewModel: PodcastViewModel) {
         self.viewModel = viewModel
+
+        guard !isConfigured else { return }
+        isConfigured = true
         
         // Reset restoration attempts counter for fresh configuration
         restorationAttempts = 0
@@ -1299,6 +1260,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             print("ℹ️ PodcastPlayer: Skipping restoration - already successfully restored")
             return
         }
+        guard !isRestorationInProgress else {
+            print("ℹ️ PodcastPlayer: Skipping restoration - another attempt is in progress")
+            return
+        }
+        isRestorationInProgress = true
+        defer { isRestorationInProgress = false }
         
         // Only restore if podcast was the last active player
         let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
@@ -1744,7 +1711,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 // PERFORMANCE: Throttle ViewModel updates to reduce CPU usage
                 let isPlayed = progress >= 0.99 ? true : (currentEpisode.state.isPlayed ? true : false)
-                self.viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: isPlayed)
+                self.viewModel?.updateEpisodeState(currentEpisode.id, feedId: currentEpisode.feedId, progress: progress, isPlayed: isPlayed)
                 
                 os_log("Updated episode status on navigation away: %@, Progress: %.2f", log: self.log, type: .info, currentEpisode.title, progress)
                 
@@ -1765,7 +1732,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     
                     // Update the episode state
                     let isPlayed = episode.state.isPlayed ? true : false
-                    viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: isPlayed)
+                    viewModel?.updateEpisodeState(episode.id, feedId: episode.feedId, progress: progress, isPlayed: isPlayed)
                 }
                 
                 // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
@@ -1789,6 +1756,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+        playEpisode(episode, feed: feed, audioSessionActivated: false)
+    }
+
+    private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed, audioSessionActivated: Bool) {
         os_log("Starting playback for episode: %@ (ID: %@)", log: log, type: .info, episode.title, episode.id)
         
         guard isPlaybackEntitled(retry: { [weak self] in self?.playEpisode(episode, feed: feed) }) else {
@@ -1804,6 +1775,18 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            isPlaying,
            CarPlayManager.shared.isCarPlayConnected {
             os_log("🚗 CARPLAY PROTECTION: Episode %@ is already playing in CarPlay - not reloading to prevent progress reset", log: log, type: .info, episode.title)
+            return
+        }
+
+        guard audioSessionActivated else {
+            PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true) { [weak self] activated in
+                guard activated else {
+                    self?.loadingEpisodeId = nil
+                    print("❌ Podcast playback blocked - audio session activation failed")
+                    return
+                }
+                self?.playEpisode(episode, feed: feed, audioSessionActivated: true)
+            }
             return
         }
         
@@ -1858,7 +1841,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Update state manager immediately to stop showing previous episode as playing
             stateManager.switchToEpisode(
                 newEpisodeId: episode.id,
+                newFeedId: episode.feedId,
                 previousEpisodeId: previousEpisode.id,
+                previousFeedId: previousEpisode.feedId,
                 previousProgress: currentProgress
             )
         }
@@ -1959,7 +1944,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // This eliminates all race conditions during app startup
             
             // STEP 1: Load progress ONLY from Core Data (authoritative source)
-            let coreDataProgress = loadProgressFromCoreData(episodeId: episode.id)
+            let coreDataProgress = loadProgressFromCoreData(episodeId: episode.id, feedId: episode.feedId)
             
             // STEP 2: Use Core Data progress as the ONLY source of truth
             let primaryProgress = coreDataProgress
@@ -1967,13 +1952,13 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // STEP 3: Sync EpisodeStateManager in background (non-blocking)
             if coreDataProgress > 0 {
                 Task.detached(priority: .utility) { 
-                    EpisodeStateManager.shared.setProgressSilently(for: episode.id, progress: coreDataProgress)
+                    EpisodeStateManager.shared.setProgressSilently(for: episode.id, progress: coreDataProgress, feedId: episode.feedId)
                 }
             }
             
             // STEP 4: Start CloudKit sync in background to keep data in sync (non-blocking)
             Task {
-                await syncWithCloudKitInBackground(for: episode.id, currentProgress: primaryProgress)
+                await syncWithCloudKitInBackground(for: episode.id, feedId: episode.feedId, currentProgress: primaryProgress)
             }
             
                             // CORE DATA PRIORITY: Use Core Data progress if available, as it's the authoritative source
@@ -2051,7 +2036,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Only start playing the new episode after we've handled the previous one
         if currentEpisode?.id == episode.id {
-            stateManager.startPlaying(episodeId: episode.id)
+            stateManager.startPlaying(episodeId: episode.id, feedId: episode.feedId)
         }
         
         play()
@@ -2125,7 +2110,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 if playerItem.status == .readyToPlay {
                     self.duration = playerItem.duration.seconds
                     self.updatePlaybackInfo()
-                    Task {
+                    Task { @MainActor in
+                        guard !self.isRestorationInProgress else {
+                            print("🔧 PodcastPlayer: Restoration owns the initial seek")
+                            return
+                        }
                         await self.seekToSavedProgress()
                     }
                     
@@ -2148,10 +2137,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 self.currentProgress = 1.0
                 
                 // Mark episode as completed in EpisodeStateManager
-                self.stateManager.completeEpisode(episodeId: currentEpisode.id)
-                
-                // Save to CloudKit when episode completes
-                self.saveProgressWithCoreDataPriority(for: currentEpisode, progress: 1.0, reason: "episode completed")
+                self.stateManager.completeEpisode(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
                 
                 // Mark episode as completed (deprecated method for compatibility)
                 self.viewModel?.markEpisodeAsCompleted(currentEpisode)
@@ -2369,8 +2355,23 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func play() {
+        play(audioSessionActivated: false)
+    }
+
+    private func play(audioSessionActivated: Bool) {
         guard isPlaybackEntitled(retry: { [weak self] in self?.play() }) else {
             os_log("🔒 Podcast playback blocked - no active subscription", log: log, type: .info)
+            return
+        }
+
+        guard audioSessionActivated else {
+            PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true) { [weak self] activated in
+                guard activated else {
+                    print("❌ Podcast playback blocked - audio session activation failed")
+                    return
+                }
+                self?.play(audioSessionActivated: true)
+            }
             return
         }
         
@@ -2480,8 +2481,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         connectionState = .connected
         
         // Update StateManager when starting playback
-        stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true)
-        stateManager.startPlaying(episodeId: currentEpisode.id)
+        stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true, feedId: currentEpisode.feedId)
+        stateManager.startPlaying(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
         
         // CRITICAL FIX: Update Now Playing info immediately for lock screen sync
         updateNowPlayingInfoElapsedTimeOnly()
@@ -2580,14 +2581,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Update StateManager with current progress when pausing
         // CRITICAL FIX: Only mark as played if progress is actually >= 99%, not during regular pause
         let isActuallyCompleted = finalProgress >= 0.99
-        stateManager.updateProgress(for: currentEpisode.id, progress: finalProgress, isPlaying: false, currentTime: actualCurrentTime)
+        stateManager.updateProgress(for: currentEpisode.id, progress: finalProgress, isPlaying: false, currentTime: actualCurrentTime, feedId: currentEpisode.feedId)
         
         // CRITICAL FIX: Always call pausePlayback() to ensure episode state is set to .inProgress
         // This ensures the status label shows "IN PROGRESS" immediately when paused
-        stateManager.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
-        
-        // REAL-TIME SYNC: Use the new real-time sync method for episode pause with known feedId
-        stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: finalProgress, reason: "episode_paused", feedId: currentEpisode.feedId)
+        stateManager.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress, feedId: currentEpisode.feedId)
         
         // ⚡ PROACTIVE: Update snapshot immediately for instant loading on next app launch
         Task {
@@ -2597,15 +2595,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         NotificationCenter.default.post(
             name: .init("InstantSyncDidUpdatePodcastProgress"),
             object: nil,
-            userInfo: ["episodeId": currentEpisode.id, "progress": finalProgress]
+            userInfo: ["episodeId": currentEpisode.id, "feedId": currentEpisode.feedId, "progress": finalProgress]
         )
         
         // CRITICAL FIX: For lock screen pauses, ensure UserDefaults are synchronized immediately
         if isLockScreenPause {
             // CRITICAL FIX: Preserve current episode data when pausing from lock screen
             saveCurrentEpisodeToUserDefaults()
-            UserDefaults.standard.synchronize()
-            os_log("🔒 Lock screen pause detected - preserved episode data and forced UserDefaults synchronization", log: log, type: .info)
+            os_log("🔒 Lock screen pause detected - preserved episode data", log: log, type: .info)
         }
 
         ensureProgressTracking(for: currentEpisode)
@@ -2636,8 +2633,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     /// Stops podcast and clears user intent (like RadioPlayer stop functionality)
     func stop() {
-        guard let player = player else { return }
-        
+        stop(deactivateAudioSession: true)
+    }
+
+    func stop(deactivateAudioSession: Bool) {
         // CRITICAL FIX: Clear user intent and manual pause flags when stopping
         userWantsToPlay = false
         wasManuallyPaused = false
@@ -2653,28 +2652,23 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 saveProgressIfNeeded()
                 saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user stopped episode")
                 
-                // Update StateManager
-                let actualCurrentTime = player.currentTime().seconds
-                stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: false, currentTime: actualCurrentTime)
-                stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
-                
-                // REAL-TIME SYNC: Use the new real-time sync method for episode stop with known feedId
-                stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: "app_closed", feedId: currentEpisode.feedId)
-                
                 // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
                 NotificationCenter.default.post(
                     name: .init("InstantSyncDidUpdatePodcastProgress"),
                     object: nil,
-                    userInfo: ["episodeId": currentEpisode.id, "progress": progress]
+                    userInfo: ["episodeId": currentEpisode.id, "feedId": currentEpisode.feedId, "progress": progress]
                 )
                 
                 print("📊 PROGRESS SAVE: Saved meaningful progress \(progress) for episode \(currentEpisode.title)")
             } else {
                 print("📊 PROGRESS SKIP: Skipped saving minimal progress \(progress) for episode \(currentEpisode.title)")
             }
+
+            // Switching to radio must always clear the episode's playing state, even near 0%.
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress, feedId: currentEpisode.feedId)
         }
         
-        player.pause()
+        player?.pause()
         isPlaying = false
         userWantsToPlay = false  // Clear user intent
         
@@ -2691,7 +2685,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // CRITICAL FIX: Deactivate audio session when stopping (not pausing)
         // This will clear Now Playing info appropriately when user stops playback completely
-        if PlaybackManager.shared.activePlayer == .podcast {
+        if deactivateAudioSession && PlaybackManager.shared.activePlayer == .podcast {
             PlaybackManager.shared.deactivateAudioSession()
         }
         
@@ -2727,19 +2721,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             player?.pause()
             isPlaying = false
             
-            // CRITICAL: Immediately deactivate audio session to prevent mixing - DO NOT make async
-            // This MUST be synchronous to ensure no audio mixing with phone calls
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                // Immediately deactivate to ensure complete audio stop for phone calls
-                try audioSession.setActive(false, options: [])
-                print("✅ PodcastPlayer: Audio session immediately deactivated for phone call")
-            } catch {
-                print("⚠️ PodcastPlayer: Could not deactivate audio session: \(error)")
-                // Even if deactivation fails, the player.pause() above should stop the audio
-            }
-            
-            print("✅ PodcastPlayer: Playback paused and audio session deactivated due to interruption")
+            print("✅ PodcastPlayer: Playback paused due to interruption")
             
             DebugLogger.logInfo("Podcast audio interruption handled - Was playing: \(wasPlayingBeforeInterruption), Episode: \(currentEpisode?.title ?? "None")", category: "AudioInterruption")
             
@@ -2762,7 +2744,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     /// Resumes playback after an audio interruption (e.g., alarm, phone call, other apps)
-    func resumeAfterInterruption() {
+    func resumeAfterInterruption(audioSessionActivated: Bool = false) {
         print("🔊 PodcastPlayer: Attempting to resume playback after interruption")
         DebugLogger.logInfo("Resuming podcast playback after audio interruption", category: "AudioInterruption")
         
@@ -2780,74 +2762,29 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             print("⚠️ PodcastPlayer: No current episode - this might be an app interruption scenario")
             DebugLogger.logWarning("Attempting resume without current episode (possible app interruption)", category: "AudioInterruption")
         }
-        
-        // PHONE CALL FIX: Check if audio session is already active to prevent OSStatus -50 errors
-        // PlaybackManager may have already activated the session successfully
-        let audioSession = AVAudioSession.sharedInstance()
-        let isSessionActive = audioSession.category == .playback
-        
-        if !isSessionActive {
-            // Only activate session if it's not already in the correct state
-            do {
-                // First, ensure the category is correct and take control of audio
-                try audioSession.setCategory(.playback, 
-                                           mode: .default, 
-                                           options: PlaybackManager.playbackCategoryOptions)
-                
-                // Aggressively activate audio session to reclaim audio from other apps
-                try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-                
-                print("✅ PodcastPlayer: Audio session reactivated, attempting playback resume")
-            } catch {
-                print("❌ PodcastPlayer: Failed to activate audio session: \(error)")
-                DebugLogger.logError("Failed to activate audio session for podcast resume: \(error.localizedDescription)", category: "AudioInterruption")
-                
-                // Continue anyway - PlaybackManager might have already activated it
-                print("🔄 PodcastPlayer: Continuing with resume despite session activation error")
+
+        guard audioSessionActivated else {
+            PlaybackManager.shared.setActivePlayer(.podcast, shouldActivateSession: true) { [weak self] activated in
+                guard activated else {
+                    print("❌ PodcastPlayer: Audio session unavailable for interruption resume")
+                    return
+                }
+                self?.resumeAfterInterruption(audioSessionActivated: true)
             }
-        } else {
-            print("✅ PodcastPlayer: Audio session already active, proceeding with resume")
+            return
         }
-        
+
         // Resume playback with small delay to ensure session is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
-            
-            do {
-                // Resume playback
-                player.play()
-                self.isPlaying = true
-                self.wasPlayingBeforeInterruption = false // Reset the flag
-                
-                // Update Now Playing info
-                self.updateNowPlayingInfo()
-                
-                print("✅ PodcastPlayer: Successfully resumed playback after interruption")
-                DebugLogger.logInfo("Podcast playback successfully resumed after interruption", category: "AudioInterruption")
-                
-            } catch {
-                print("❌ PodcastPlayer: Failed to resume playback: \(error)")
-                DebugLogger.logError("Failed to resume podcast playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
-                
-                // Retry with more aggressive approach and longer delay for stubborn cases (other apps holding audio)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self = self else { return }
-                    
-                    do {
-                        let audioSession = AVAudioSession.sharedInstance()
-                        // Force reactivation without notifying others to aggressively reclaim audio
-                        try audioSession.setActive(false)
-                        try audioSession.setActive(true, options: [])
-                        player.play()
-                        self.isPlaying = true
-                        self.wasPlayingBeforeInterruption = false
-                        self.updateNowPlayingInfo()
-                        print("✅ PodcastPlayer: Successfully resumed playback after aggressive retry")
-                    } catch {
-                        print("❌ PodcastPlayer: Final aggressive retry failed: \(error)")
-                    }
-                }
-            }
+
+            player.play()
+            self.isPlaying = true
+            self.wasPlayingBeforeInterruption = false
+            self.updateNowPlayingInfo()
+
+            print("✅ PodcastPlayer: Successfully resumed playback after interruption")
+            DebugLogger.logInfo("Podcast playback successfully resumed after audio interruption", category: "AudioInterruption")
         }
     }
     
@@ -2956,7 +2893,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                log: log, type: .info, time, newProgress * 100, currentEpisode.title, chapterSeekProtectionInterval)
         
         // Save progress immediately BEFORE seeking to prevent race conditions with background operations
-        saveProgressToCoreDataSync(episodeId: currentEpisode.id, progress: newProgress)
+        saveProgressToCoreDataSync(episodeId: currentEpisode.id, feedId: currentEpisode.feedId, progress: newProgress)
         
         // Update EpisodeStateManager immediately
         stateManager.updateProgress(
@@ -2983,7 +2920,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 // CRITICAL FIX: Re-save progress after seek completion to prevent reversion
                 // This ensures the backwards seek position is permanently saved
-                self.saveProgressToCoreDataSync(episodeId: currentEpisode.id, progress: newProgress)
+                self.saveProgressToCoreDataSync(episodeId: currentEpisode.id, feedId: currentEpisode.feedId, progress: newProgress)
                 self.stateManager.updateProgress(
                     for: currentEpisode.id, 
                     progress: newProgress, 
@@ -3015,7 +2952,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         } else {
             UserDefaults.standard.set(speed, forKey: "podcastPlaybackSpeed")
         }
-        UserDefaults.standard.synchronize()
         
         os_log("🎵 Playback speed set to %.2fx", log: log, type: .info, speed)
     }
@@ -3028,7 +2964,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let feedToggleKey = "feedSpecificSettings_\(currentFeed.id ?? "unknown")"
             UserDefaults.standard.set(enabled, forKey: feedToggleKey)
         }
-        UserDefaults.standard.synchronize()
         
         // Load appropriate speed setting
         loadPlaybackSpeedForCurrentContext()
@@ -3077,7 +3012,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let progress = currentProgress > 0 ? currentProgress : (currentTime / duration)
         
         // Save progress to persistent storage
-        stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying, currentTime: currentTime)
+        stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying, currentTime: currentTime, feedId: currentEpisode.feedId)
         // Core Data saves happen automatically in updateProgress
         
         // Update local cache
@@ -3085,11 +3020,28 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             viewModel?.episodeProgress[currentEpisode.id] = progress
         }
         
-        // Force UserDefaults sync for additional safety
-        UserDefaults.standard.synchronize()
-        
         os_log("💾 Progress saved to disk for episode: %@, Progress: %.2f%%, Reason: Manual save", 
                log: log, type: .info, currentEpisode.title, progress * 100)
+    }
+
+    func persistCurrentProgress(reason: String) {
+        guard let currentEpisode, duration > 0 else { return }
+
+        let playerTime = player?.currentTime().seconds ?? currentTime
+        let validPlayerTime = playerTime.isFinite ? max(0, playerTime) : currentTime
+        let progress = min(max(validPlayerTime / duration, 0), 1)
+
+        currentTime = validPlayerTime
+        currentProgress = progress
+        stateManager.updateProgress(
+            for: currentEpisode.id,
+            progress: progress,
+            isPlaying: isPlaying,
+            currentTime: validPlayerTime
+        )
+        saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: reason)
+        os_log("💾 Persisted live player progress for %@: %.2f%% (%@)",
+               log: log, type: .info, currentEpisode.title, progress * 100, reason)
     }
     
     /// Save episode progress to CloudKit only when specific user actions occur
@@ -3106,11 +3058,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // CRITICAL: Sync to CloudKit immediately when episode is paused or switched
             await PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
                 episodeId: episode.id,
+                feedId: episode.feedId,
                 progress: progress
             )
             
             // Also update episode state for UI consistency
-            await self.viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: progress >= 0.99)
+            await self.viewModel?.updateEpisodeState(episode.id, feedId: episode.feedId, progress: progress, isPlayed: progress >= 0.99)
             
             os_log("✅ CloudKit sync completed for episode: %@ at %.2f%%", 
                    log: self.log, type: .info, episode.title, progress * 100)
@@ -3122,27 +3075,37 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         os_log("💾 Saving episode progress (Core Data priority) due to: %@ - Episode: %@, Progress: %.2f", 
                log: log, type: .info, reason, episode.title, progress)
         
-        // PERFORMANCE: Move all operations to background thread to prevent main thread hangs
-        Task.detached(priority: .background) { [self] in
-            // STEP 1: Save to Core Data (background operation)
-            self.saveProgressToCoreDataSync(episodeId: episode.id, progress: progress)
-            
-            // STEP 2: Update EpisodeStateManager to stay in sync (background operation)
-            EpisodeStateManager.shared.updateProgress(for: episode.id, progress: progress, isPlaying: self.isPlaying, currentTime: self.currentTime)
-            
-            // STEP 3: Save to CloudKit as backup/sync (asynchronous)
-            self.saveProgressToCloudKit(for: episode, progress: progress, reason: reason)
+        // Core Data work is queued by the background context and does not block this caller.
+        saveProgressToCoreDataSync(episodeId: episode.id, feedId: episode.feedId, progress: progress)
+
+        Task { @MainActor in
+            EpisodeStateManager.shared.updateProgress(
+                for: episode.id,
+                progress: progress,
+                isPlaying: self.isPlaying,
+                currentTime: self.currentTime,
+                feedId: episode.feedId
+            )
+
+            EpisodeStateManager.shared.performRealTimeSyncForEpisode(
+                episode.id,
+                reason: reason,
+                feedId: episode.feedId
+            )
         }
     }
     
     /// Save progress directly to Core Data for immediate persistence
-    private func saveProgressToCoreDataSync(episodeId: String, progress: Double) {
+    private func saveProgressToCoreDataSync(episodeId: String, feedId: String, progress: Double) {
         // PERFORMANCE FIX: Use background context to prevent main thread I/O hangs
         let backgroundContext = CoreDataStack.shared.newBackgroundContext()
         backgroundContext.perform {
             do {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "id == %@", episodeId),
+                    NSPredicate(format: "feedId == %@", feedId)
+                ])
                 fetchRequest.fetchLimit = 1
                 
                 if let episode = try backgroundContext.fetch(fetchRequest).first {
@@ -3159,7 +3122,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     /// Load progress from Core Data (primary source of truth) - SYNCHRONOUS with enhanced validation
-    private func loadProgressFromCoreData(episodeId: String) -> Double {
+    private func loadProgressFromCoreData(episodeId: String, feedId: String) -> Double {
         let context = CoreDataStack.shared.context
         var progress: Double = 0.0
         
@@ -3168,7 +3131,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         context.performAndWait {
             do {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "id == %@", episodeId),
+                    NSPredicate(format: "feedId == %@", feedId)
+                ])
                 fetchRequest.fetchLimit = 1
                 
                 let episodes = try context.fetch(fetchRequest)
@@ -3180,7 +3146,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     
                     // ENHANCED VALIDATION: If Core Data shows 0 but other sources have progress, investigate
                     if progress == 0.0 {
-                        let stateManagerProgress = stateManager.getProgress(for: episodeId)
+                        let stateManagerProgress = stateManager.getProgress(for: episodeId, feedId: feedId)
                         if stateManagerProgress > 0.0 {
                             os_log("VALIDATION WARNING: Core Data shows 0 but EpisodeStateManager has %.4f for episode %@", 
                                    log: log, type: .info, stateManagerProgress, episodeId)
@@ -3207,10 +3173,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     /// ENHANCED PROTECTION: Validate and recover progress if accidentally reset
-    private func validateAndRecoverProgress(for episodeId: String) -> Double {
+    private func validateAndRecoverProgress(for episodeId: String, feedId: String) -> Double {
         let playerProgress = currentProgress
-        let stateManagerProgress = stateManager.getProgress(for: episodeId)
-        let coreDataProgress = loadProgressFromCoreData(episodeId: episodeId)
+        let stateManagerProgress = stateManager.getProgress(for: episodeId, feedId: feedId)
+        let coreDataProgress = loadProgressFromCoreData(episodeId: episodeId, feedId: feedId)
         
         // Find the highest reliable progress value
         let maxProgress = max(playerProgress, max(stateManagerProgress, coreDataProgress))
@@ -3233,12 +3199,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     /// Sync with CloudKit in background while ensuring Core Data stays authoritative
-    private func syncWithCloudKitInBackground(for episodeId: String, currentProgress: Double) async {
+    private func syncWithCloudKitInBackground(for episodeId: String, feedId: String, currentProgress: Double) async {
         os_log("Background CloudKit sync for episode: %@", log: log, type: .info, episodeId)
         
         do {
             // Fetch latest from CloudKit
-            if let cloudState = try await PodcastCloudKitManager.shared.fetchEpisodeStateFromCloudKit(episodeId) {
+            if let cloudState = try await PodcastCloudKitManager.shared.fetchEpisodeStateFromCloudKit(episodeId, feedId: feedId) {
                 let cloudProgress = cloudState.progress
                 
                 // Compare Core Data (authoritative) vs CloudKit
@@ -3248,12 +3214,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                            log: log, type: .info, cloudProgress * 100, currentProgress * 100)
                     
                     // Update Core Data (primary storage)
-                    updateProgressInCoreData(episodeId: episodeId, progress: cloudProgress, isPlayed: cloudState.isPlayed)
+                    updateProgressInCoreData(episodeId: episodeId, feedId: feedId, progress: cloudProgress, isPlayed: cloudState.isPlayed)
                     
                     // Update EpisodeStateManager to stay in sync
-                    EpisodeStateManager.shared.setProgressSilently(for: episodeId, progress: cloudProgress)
-                    EpisodeStateManager.shared.setFavoriteSilently(episodeId, isFavorite: cloudState.isFavorite)
-                    EpisodeStateManager.shared.setPlayedSilently(episodeId, isPlayed: cloudState.isPlayed)
+                    EpisodeStateManager.shared.setProgressSilently(for: episodeId, progress: cloudProgress, feedId: feedId)
+                    EpisodeStateManager.shared.setFavoriteSilently(episodeId, isFavorite: cloudState.isFavorite, feedId: feedId)
+                    EpisodeStateManager.shared.setPlayedSilently(episodeId, isPlayed: cloudState.isPlayed, feedId: feedId)
                     
                     // If this episode is currently playing, update the player progress
                     await MainActor.run {
@@ -3329,12 +3295,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     /// Update progress in Core Data synchronously
-    private func updateProgressInCoreData(episodeId: String, progress: Double, isPlayed: Bool) {
+    private func updateProgressInCoreData(episodeId: String, feedId: String, progress: Double, isPlayed: Bool) {
         let context = CoreDataStack.shared.context
         context.performAndWait {
             do {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "id == %@", episodeId),
+                    NSPredicate(format: "feedId == %@", feedId)
+                ])
                 fetchRequest.fetchLimit = 1
                 
                 if let episode = try context.fetch(fetchRequest).first {
@@ -3366,7 +3335,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         saveProgressWithCoreDataPriority(for: episode, progress: progress, reason: "user switched to another episode")
         
         // 1. Update progress in state manager FIRST (highest priority for seeking)
-        stateManager.updateProgress(for: episode.id, progress: progress, isPlaying: false, currentTime: timeToSave)
+        stateManager.updateProgress(for: episode.id, progress: progress, isPlaying: false, currentTime: timeToSave, feedId: episode.feedId)
         
         // 2. Update progress in view model (in-memory cache)
         Task { @MainActor in
@@ -3374,14 +3343,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // 3. Update the episode state using the new method
             let isPlayed = progress >= 0.99
-            viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: isPlayed)
+            viewModel?.updateEpisodeState(episode.id, feedId: episode.feedId, progress: progress, isPlayed: isPlayed)
         }
         
         // 4. Core Data saves happen automatically, no need to force save
         // Data is already persisted through saveCurrentStates()
-        
-        // 5. Force synchronize UserDefaults for additional safety
-        UserDefaults.standard.synchronize()
         
         os_log("✅ Progress saved successfully for episode: %@ at %.2f%% to all storage locations", log: log, type: .info, episode.title, progress * 100)
     }
@@ -3599,7 +3565,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                             
                             // ENHANCED PROTECTION: Validate progress every few seconds during playback
                             if let currentEpisode = self.currentEpisode, Int(self.currentTime) % 10 == 0 {
-                                let validatedProgress = self.validateAndRecoverProgress(for: currentEpisode.id)
+                                let validatedProgress = self.validateAndRecoverProgress(for: currentEpisode.id, feedId: currentEpisode.feedId)
                                 if validatedProgress != self.currentProgress {
                                     os_log("CONTINUOUS PROTECTION: Recovered progress from %.4f to %.4f during playback", 
                                            log: self.log, type: .info, self.currentProgress, validatedProgress)
@@ -3713,6 +3679,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         var nowPlayingInfo = [String: Any]()
         nowPlayingInfo[MPMediaItemPropertyTitle] = currentEpisode.title
         nowPlayingInfo[MPMediaItemPropertyArtist] = currentFeed.title
+        nowPlayingInfo[MPMediaItemPropertyPodcastTitle] = currentFeed.title
+        nowPlayingInfo[MPNowPlayingInfoPropertyExternalContentIdentifier] = currentEpisode.id
+        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
         // Use feed description as album title for lock screen navigation
         // This enables users to tap on the description to navigate to the episode list
         if let feedDescription = currentFeed.descriptionText, !feedDescription.isEmpty {
@@ -3885,6 +3854,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     // REAL-TIME CROSS-DEVICE SYNC: Sync progress every 10% during playback for cross-device sync
                     PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
                         episodeId: currentEpisode.id,
+                        feedId: currentEpisode.feedId,
                         progress: progress
                     )
                 } else {
@@ -3910,7 +3880,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         return String(format: "%d:%02d", minutes, seconds)
     }
     
-    func handleAppWillTerminate() {
+    func handleAppWillTerminate(syncReason: String = "app_closed") {
         if let currentEpisode = currentEpisode {
             // CRITICAL FIX: Prioritize currentTime over player time to prevent 3-4 second loss during force close
             // The time observer (currentTime) is more accurate than AVPlayer's currentTime() during force close
@@ -3955,13 +3925,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // CRITICAL FIX: Use Core Data priority approach for force close
             // This ensures Core Data is saved first, then CloudKit syncs afterward
-            saveProgressWithCoreDataPriority(for: currentEpisode, progress: maxProgress, reason: "app force closed")
+            saveProgressWithCoreDataPriority(for: currentEpisode, progress: maxProgress, reason: syncReason)
             
             // Save to StateManager with maximum progress (synchronous and reliable)
-            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
-            
-            // Force synchronize UserDefaults immediately
-            UserDefaults.standard.synchronize()
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress, feedId: currentEpisode.feedId)
             
             // Update in-memory cache directly
             Task { @MainActor in
@@ -4079,7 +4046,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             Task { @MainActor in
                 viewModel?.episodeProgress[currentEpisode.id] = maxProgress
             }
-            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress, feedId: currentEpisode.feedId)
             os_log("Saved maximum progress on deinit for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, maxProgress)
         }
         

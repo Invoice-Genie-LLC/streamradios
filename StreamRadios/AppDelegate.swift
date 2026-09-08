@@ -8,7 +8,6 @@
 import UIKit
 import CoreData
 import UserNotifications
-import AVFoundation
 import SwiftUI
 import BackgroundTasks
 import MediaPlayer
@@ -20,7 +19,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
        var radioPlayer = RadioPlayer.shared
        var podcastPlayer = PodcastPlayer.shared
        var viewModel = RadioStationViewModel.shared
-        var podcastViewModel = PodcastViewModel()
+        var podcastViewModel = PodcastViewModel.shared
     
     private var shouldPlayAlarmStationOnReady = false
     private var pendingAlarmStationID: String?
@@ -170,7 +169,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 // CRITICAL FIX: Use currentProgress instead of recalculating to preserve chapter seek progress
                 let progress = currentProgress > 0 ? currentProgress : (podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0)
                 Task.detached(priority: .userInitiated) {
-                    await self.podcastViewModel.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
+                    await self.podcastViewModel.updateEpisodeState(currentEpisode.id, feedId: currentEpisode.feedId, progress: progress, isPlayed: progress >= 0.99)
                 }
                 
                 // If episode was playing when app is closing, mark it as "In Progress"
@@ -181,7 +180,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     podcastViewModel.updateEpisode(updatedEpisode)
                     
                     // Ensure EpisodeStateManager also reflects the correct state
-                    EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
+                    EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress, feedId: currentEpisode.feedId)
                 }
 
                 // Update favorite (bookmark) state
@@ -255,19 +254,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             
             // IMMEDIATE SYNCHRONOUS SAVES - No async operations
             
-            // 1. Save to EpisodeStateManager (UserDefaults) - synchronous
-            EpisodeStateManager.shared.setProgress(for: currentEpisode.id, progress: finalProgress)
-            
-            // 2. If playing and has progress, mark as in-progress
+            // Save progress and playback state once through the most specific path.
             if isPlaying && finalProgress > 0 && finalProgress < 0.99 {
-                EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
+                EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress, feedId: currentEpisode.feedId)
+            } else {
+                EpisodeStateManager.shared.setProgress(for: currentEpisode.id, progress: finalProgress, feedId: currentEpisode.feedId)
             }
             
             // 3. Note: synchronize() is deprecated and unnecessary - UserDefaults saves automatically
             // Removed to fix Swift Concurrency warning
-            
-            // 4. Also call the enhanced method for additional safety (but don't wait for it)
-            performEnhancedProgressSave(reason: reason)
             
             print("🚨 CRITICAL Force Close Save: Completed immediate save for \(currentEpisode.title)")
         }
@@ -309,7 +304,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     updatedEpisode.state.isPlayed = false
                     podcastViewModel.updateEpisode(updatedEpisode)
                     
-                    EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
+                    EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress, feedId: currentEpisode.feedId)
                 }
                 
                 print("🛡️ Enhanced Progress Save: Successfully saved progress for \(currentEpisode.title)")
@@ -353,7 +348,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                         
                         if fileExists {
                             // File exists, ensure EpisodeStateManager knows about it
-                            EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, reason: "force_close_sync")
+                            EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, feedId: managedEpisode.feedId, reason: "force_close_sync")
                             print("✅ Synced download state for episode: \(managedEpisode.title ?? "Unknown")")
                         } else {
                             // UPGRADE PROTECTION: Be more conservative about cleaning up missing files
@@ -421,32 +416,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
              
              DebugLogger.logInfo("Background task started - ID: \(backgroundTaskID.rawValue), Station: \(radioPlayer.currentlyPlayingStation?.name ?? "Unknown")", category: "BackgroundTask")
              
-             // CRITICAL FIX: Use background queue for audio session maintenance to prevent main thread blocking
-             DispatchQueue.global(qos: .background).async {
-                 do {
-                     // Maintain audio session on background thread to prevent blocking
-                     let audioSession = AVAudioSession.sharedInstance()
-                     try audioSession.setActive(true, options: [])
-                     print("✅ AppDelegate: Audio session maintained for background radio playback")
-                     DebugLogger.logInfo("Background audio session successfully maintained for radio playback", category: "BackgroundTask")
-                     
-                     // CRITICAL FIX: Use Timer instead of DispatchQueue.main.asyncAfter to prevent deadlocks
-                     // Schedule background task completion on a background timer
-                     Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
-                         if backgroundTaskID != .invalid {
-                             application.endBackgroundTask(backgroundTaskID)
-                             print("✅ AppDelegate: Background task for radio completed via timer")
-                             DebugLogger.logInfo("Radio background task completed successfully via background timer - app should remain stable", category: "BackgroundTask")
-                         }
-                     }
-                 } catch {
-                     print("❌ AppDelegate: Failed to maintain background audio session: \(error)")
-                     DebugLogger.logError("CRITICAL: Background audio session maintenance failed - app may terminate: \(error.localizedDescription)", category: "BackgroundTask")
-                     
-                     // End background task immediately on error
-                     if backgroundTaskID != .invalid {
-                         application.endBackgroundTask(backgroundTaskID)
-                     }
+             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                 if backgroundTaskID != .invalid {
+                     application.endBackgroundTask(backgroundTaskID)
+                     print("✅ AppDelegate: Background task for radio completed")
+                     DebugLogger.logInfo("Radio background task completed successfully - app should remain stable", category: "BackgroundTask")
                  }
              }
          } else {
@@ -468,32 +442,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
              let episodeTitle = podcastPlayer.currentEpisode?.title ?? "Unknown"
              DebugLogger.logInfo("Podcast background task started - ID: \(backgroundTaskID.rawValue), Episode: \(episodeTitle)", category: "BackgroundTask")
              
-             // Use background queue for audio session maintenance to prevent main thread blocking
-             DispatchQueue.global(qos: .background).async {
-                 do {
-                     // Maintain audio session on background thread to prevent blocking
-                     let audioSession = AVAudioSession.sharedInstance()
-                     try audioSession.setActive(true, options: [])
-                     print("✅ AppDelegate: Audio session maintained for background podcast playback")
-                     DebugLogger.logInfo("Background audio session successfully maintained for podcast playback", category: "BackgroundTask")
-                     
-                     // Use Timer instead of DispatchQueue.main.asyncAfter to prevent deadlocks
-                     // Schedule background task completion on a background timer
-                     Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
-                         if backgroundTaskID != .invalid {
-                             application.endBackgroundTask(backgroundTaskID)
-                             print("✅ AppDelegate: Background task for podcast completed via timer")
-                             DebugLogger.logInfo("Podcast background task completed successfully via background timer - app should remain stable", category: "BackgroundTask")
-                         }
-                     }
-                 } catch {
-                     print("❌ AppDelegate: Failed to maintain background audio session for podcast: \(error)")
-                     DebugLogger.logError("CRITICAL: Background audio session maintenance failed for podcast - app may terminate: \(error.localizedDescription)", category: "BackgroundTask")
-                     
-                     // End background task immediately on error
-                     if backgroundTaskID != .invalid {
-                         application.endBackgroundTask(backgroundTaskID)
-                     }
+             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                 if backgroundTaskID != .invalid {
+                     application.endBackgroundTask(backgroundTaskID)
+                     print("✅ AppDelegate: Background task for podcast completed")
+                     DebugLogger.logInfo("Podcast background task completed successfully - app should remain stable", category: "BackgroundTask")
                  }
              }
          } else {
@@ -752,7 +705,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // Configure podcast data for CarPlay and ensure data is loaded
         let carPlayManager = CarPlayManager.shared
-        carPlayManager.configurePodcastData(podcastViewModel.podcastFeeds, feedOrder: podcastViewModel.podcastFeedOrder)
+        if !podcastViewModel.podcastFeeds.isEmpty {
+            carPlayManager.configurePodcastData(
+                podcastViewModel.podcastFeeds,
+                feedOrder: podcastViewModel.podcastFeedOrder
+            )
+        }
         
         // Ensure radio station data is available for CarPlay
         carPlayManager.updateContent()

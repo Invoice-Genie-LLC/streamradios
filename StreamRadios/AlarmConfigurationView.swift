@@ -32,7 +32,7 @@ struct AlarmConfigurationView: View {
     @State private var calendarAccessStatus = "Not requested"
     @AppStorage("isSingleTimeAlert") private var isSingleTimeAlert = false
     
-    @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var podcastViewModel = PodcastViewModel.shared
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     @StateObject private var radioPlayer = RadioPlayer.shared
     @State private var selectedPodcast: PodcastFeed?

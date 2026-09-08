@@ -585,7 +585,10 @@ struct PodcastChaptersNotesView: View {
 		let context = CoreDataStack.shared.context
 		context.perform {
 			let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-			request.predicate = NSPredicate(format: "id == %@", episode.id)
+            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "id == %@", episode.id),
+                NSPredicate(format: "feedId == %@", episode.feedId)
+            ])
 			request.fetchLimit = 1
 			if let model = try? context.fetch(request).first {
 				if let data = try? JSONEncoder().encode(chapters) {

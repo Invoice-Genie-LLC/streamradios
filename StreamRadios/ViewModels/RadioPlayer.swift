@@ -10,12 +10,20 @@ import UIKit
 import WidgetKit
 import Network
 import MediaPlayer
-import BackgroundTasks
 import SwiftUI
 import Reachability
 import SystemConfiguration
 import Foundation
-import MusicKit
+
+private struct ITunesArtworkSearchResponse: Decodable {
+    let results: [ITunesArtworkSearchResult]
+}
+
+private struct ITunesArtworkSearchResult: Decodable {
+    let trackName: String
+    let artistName: String
+    let artworkUrl100: URL?
+}
 
 enum ConnectionState {
     case connected
@@ -107,6 +115,8 @@ class RadioPlayer: NSObject, ObservableObject {
         streamQualityManager = StreamQualityManager()
         
         super.init()
+
+        removeLegacyArtworkPreferences()
         
         // Initialize Now Playing and CarPlay support
         configureAudioSession()
@@ -138,9 +148,6 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         NotificationCenter.default.addObserver(self, selector: #selector(self.handleShazamVerifiedArtwork(_:)), name: Notification.Name("ShazamVerifiedArtwork"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.handleShazamNoMatch), name: Notification.Name("ShazamNoMatch"), object: nil)
-        
-        // Initialize Shazam integration
-        setupShazamIntegration()
         
         // Do not auto-restore on init; wait until user explicitly presses play
         // Start-up UI/auto-restore will be handled explicitly by the app only when desired
@@ -254,128 +261,6 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Shazam Integration
-    private var shazamTimer: Timer?
-    private var lastShazamAttempt: Date?
-    private let shazamCooldown: TimeInterval = 15.0 // 15 seconds between attempts (reduced for faster recognition)
-    
-    private func setupShazamIntegration() {
-        // Initialize Shazam integration - timer will start when playback begins
-        print("🎵 Shazam integration initialized - ready for automatic recognition")
-    }
-    
-    private func startShazamTimer() {
-        shazamTimer?.invalidate()
-        // Check every 30 seconds for new songs to get artwork more quickly
-        shazamTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.attemptShazamRecognition()
-        }
-        print("🎵 Started automatic Shazam recognition timer (every 30 seconds)")
-    }
-    
-    private func stopShazamTimer() {
-        shazamTimer?.invalidate()
-        shazamTimer = nil
-    }
-    
-    private func attemptShazamRecognition() {
-        guard isPlaying,
-              let player = player,
-              player.timeControlStatus == .playing else {
-            print("🔄 Shazam recognition skipped - not playing or player unavailable")
-            print("   - isPlaying: \(isPlaying)")
-            print("   - player: \(player != nil ? "available" : "nil")")
-            print("   - player status: \(player?.timeControlStatus.rawValue ?? -1)")
-            return
-        }
-        
-        // Rate limiting - but allow immediate recognition for new songs
-        let now = Date()
-        let hasNewMetadata = metadata != lastMetadataSearched
-        
-        if let lastAttempt = lastShazamAttempt,
-           now.timeIntervalSince(lastAttempt) < shazamCooldown,
-           !hasNewMetadata {
-            print("🔄 Shazam rate limited - waiting \(Int(shazamCooldown - now.timeIntervalSince(lastAttempt))) more seconds")
-            return
-        }
-        
-        lastShazamAttempt = now
-        
-        // Clear previous Shazam metadata for new song detection
-        if let currentMetadata = metadata, currentMetadata != lastMetadataSearched {
-            displayTitle = nil
-            displayArtist = nil
-            // Only clear artwork if we're confident this is truly a different song
-            // Avoid clearing artwork for minor metadata variations that cause UI flicker
-            let metadataWords = Set(currentMetadata.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
-            let lastSearchedWords = Set((lastMetadataSearched ?? "").lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
-            
-            // Only clear artwork if the songs are significantly different (less than 50% word overlap)
-            let commonWords = metadataWords.intersection(lastSearchedWords)
-            let similarity = metadataWords.isEmpty ? 0.0 : Double(commonWords.count) / Double(metadataWords.count)
-            
-            if similarity < 0.3 { // Reduced threshold for more conservative clearing
-                // Store current artwork as fallback before clearing
-                if let currentArtwork = iTunesAlbumArt {
-                    lastKnownGoodArtwork = currentArtwork
-                    lastKnownGoodMetadata = lastMetadataSearched
-                    
-                    // Cache artwork with station ID for persistence
-                    if let stationIndex = currentStationIndex, let viewModel = viewModel,
-                       stationIndex < viewModel.stations.count {
-                        let stationId = viewModel.stations[stationIndex].id
-                        persistentArtworkCache[stationId] = currentArtwork
-                    }
-                }
-                
-                // Only clear artwork if it's genuinely old artwork from a different song
-                // AND we don't have fresh iTunes artwork for the current metadata
-                let shouldClearArtwork = (iTunesAlbumArt != nil && !iTunesArtworkJustSet)
-                
-                if shouldClearArtwork {
-                    iTunesAlbumArt = nil
-                    print("🔄 New song detected: '\(currentMetadata)' - clearing previous artwork (similarity: \(String(format: "%.2f", similarity)))")
-                    iTunesArtworkJustSet = false
-                } else {
-                    print("🔄 New song detected: '\(currentMetadata)' - keeping fresh iTunes artwork (similarity: \(String(format: "%.2f", similarity)))")
-                }
-            } else {
-                print("🔄 Similar song metadata: '\(currentMetadata)' - keeping existing artwork (similarity: \(String(format: "%.2f", similarity)))")
-                // Extend artwork protection for similar metadata
-                if iTunesAlbumArt != nil {
-                    startArtworkProtectionTimer()
-                }
-            }
-            
-            updateNowPlayingInfo()
-            updateWidget()
-        }
-        
-        // Get current station URL for Shazam recognition
-        if let currentItem = player.currentItem,
-           let url = (currentItem.asset as? AVURLAsset)?.url {
-            
-            print("🎵 STARTING Shazam recognition for: '\(metadata ?? "Unknown")' at URL: \(url.absoluteString)")
-            let stationName = (currentStationIndex != nil && viewModel != nil && currentStationIndex! < viewModel!.stations.count) ? viewModel!.stations[currentStationIndex!].name : "Unknown"
-            print("   - Station: \(stationName)")
-            print("   - Current iTunesAlbumArt: \(iTunesAlbumArt != nil ? "present" : "nil")")
-            
-            // SHAZAM FIX: Temporarily disabled - method doesn't exist in current ShazamViewModel
-            // Task {
-            //     await ShazamViewModel.shared.matchCurrentStationStreamURL(url.absoluteString, seconds: 10)
-            // }
-            
-            // Update the search tracker to prevent immediate re-search of same metadata
-            if let currentMetadata = metadata {
-                lastMetadataSearched = currentMetadata
-            }
-        } else {
-            print("❌ Shazam recognition failed - no current item or URL available")
-            print("   - currentItem: \(player.currentItem != nil ? "available" : "nil")")
-        }
-    }
-    
     // MARK: - Network Reconnection Setup
     private func setupReachability() {
         do {
@@ -420,7 +305,7 @@ class RadioPlayer: NSObject, ObservableObject {
     
     private func attemptReconnection() {
         guard currentReconnectionAttempt < maxReconnectionAttempts else {
-            stopReconnectionAttempts()
+            stopReconnectionAttempts(reportFailure: true)
             return
         }
         
@@ -472,13 +357,13 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    private func stopReconnectionAttempts() {
+    private func stopReconnectionAttempts(reportFailure: Bool = false) {
         reconnectionTimer?.invalidate()
         reconnectionTimer = nil
         isAttemptingReconnection = false
         currentReconnectionAttempt = 0
         
-        if player?.timeControlStatus != .playing {
+        if reportFailure && player?.timeControlStatus != .playing {
             print("❌ RadioPlayer: Failed to reconnect after \(maxReconnectionAttempts) attempts")
             connectionState = .error
             // GPS FIX: Track multiple reconnection failures
@@ -694,43 +579,19 @@ class RadioPlayer: NSObject, ObservableObject {
     /// Ensures audio session is properly activated before executing playback
     private func ensureAudioSessionActivatedThenPlay(completion: @escaping () -> Void) {
         print("🔊 Auto-play: Ensuring audio session is activated before playback")
-        
-        // Explicitly activate audio session for auto-play
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                
-                // Set category and activate in one go for auto-play
-                try audioSession.setCategory(.playback, 
-                                           mode: .default, 
-                                           options: PlaybackManager.playbackCategoryOptions)
-                
-                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-                
+
+        PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true) { activated in
+            if activated {
                 print("✅ Auto-play: Audio session explicitly activated")
-                
-                // Set radio as active player after audio session is confirmed active
-                DispatchQueue.main.async {
-                    PlaybackManager.shared.setActivePlayer(.radio)
-                    
-                    // Small delay to ensure everything is ready
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        print("✅ Auto-play: Proceeding with playback after explicit activation")
-                        completion()
-                    }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    print("✅ Auto-play: Proceeding with playback after explicit activation")
+                    completion()
                 }
-                
-            } catch {
-                print("❌ Auto-play: Failed to explicitly activate audio session: \(error)")
-                
-                // Fallback to original approach
-                DispatchQueue.main.async {
-                    PlaybackManager.shared.setActivePlayer(.radio)
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        print("⚠️ Auto-play: Using fallback activation approach")
-                        completion()
-                    }
+            } else {
+                print("❌ Auto-play: Failed to explicitly activate audio session")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    print("⚠️ Auto-play: Using fallback activation approach")
+                    completion()
                 }
             }
         }
@@ -867,9 +728,15 @@ class RadioPlayer: NSObject, ObservableObject {
     
     func addInterruptionObserver() {
         NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
-        
-        // CRITICAL: Add app lifecycle observers for background audio session maintenance
-        NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleAppDidEnterBackground()
+                }
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
@@ -881,38 +748,7 @@ class RadioPlayer: NSObject, ObservableObject {
             DebugLogger.logInfo("App entering background with active radio playback - delegating to AppDelegate for centralized background task management", category: "BackgroundAudio")
             DebugLogger.setUserAction("Radio Background Transition")
             
-            // CRITICAL FIX: Don't create competing background tasks - let AppDelegate handle this centrally
-            // Move audio session configuration to background queue to avoid main thread IPC delays
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    
-                    // The session is active and routed at this point. Changing the category options
-                    // on it - .allowAirPlay in particular needs a route change - is what returns -50,
-                    // and it buys nothing since playback is already running. Only an outright wrong
-                    // category is worth correcting, and Shazam legitimately owns .playAndRecord.
-                    guard audioSession.category != .playback,
-                          audioSession.category != .playAndRecord else {
-                        print("✅ RadioPlayer: Audio session category is fine for background (\(audioSession.category.rawValue)) - leaving it alone")
-                        return
-                    }
-                    
-                    // MAIN THREAD FIX: Configure audio session on background queue to avoid IPC delays
-                    try audioSession.setCategory(.playback, 
-                                               mode: .default, 
-                                               options: PlaybackManager.playbackCategoryOptions)
-                    
-                    DispatchQueue.main.async {
-                        print("✅ RadioPlayer: Background transition handled - audio session category set")
-                        DebugLogger.logInfo("Radio background transition completed - centralized task management active", category: "BackgroundAudio")
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        print("❌ RadioPlayer: Audio session check failed: \(error)")
-                        DebugLogger.logError("Audio session verification failed during background transition: \(error.localizedDescription)", category: "BackgroundAudio")
-                    }
-                }
-            }
+            DebugLogger.logInfo("Radio background transition completed - centralized audio session remains active", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering background with no active radio playback - no background maintenance needed", category: "BackgroundAudio")
         }
@@ -938,26 +774,24 @@ class RadioPlayer: NSObject, ObservableObject {
                         DebugLogger.logError("RadioPlayer instance lost during foreground restoration", category: "BackgroundAudio")
                         return 
                     }
-                    
-                    do {
-                        // Reactivate audio session
-                        PlaybackManager.shared.setActivePlayer(.radio)
-                        
-                        // Resume playback only if user wants it and it wasn't manually paused
+
+                    PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true) { [weak self] activated in
+                        guard let self, activated else {
+                            DebugLogger.logError("Audio session unavailable during radio foreground restoration", category: "BackgroundAudio")
+                            return
+                        }
+
                         if self.userWantsToPlay && !self.wasManuallyPaused {
                             self.player?.play()
                             self.isPlaying = true
-                            
-                            // CRITICAL FIX: Update Now Playing info after foreground resume to restore lock screen display
+
                             self.updateNowPlayingInfo()
                             self.updateWidget()
-                            
+
                             print("✅ RadioPlayer: Radio playback resumed after foreground transition")
                             print("🔄 RadioPlayer: Updated Now Playing info after foreground resume")
                             DebugLogger.logInfo("Radio playback successfully restored after foreground transition", category: "BackgroundAudio")
                         }
-                    } catch {
-                        DebugLogger.logError("Failed to restore radio playback during foreground transition: \(error.localizedDescription)", category: "BackgroundAudio")
                     }
                 }
             }
@@ -1123,18 +957,6 @@ class RadioPlayer: NSObject, ObservableObject {
             player?.pause()
             isPlaying = false
             
-            // CRITICAL: Also ensure no audio session mixing by deactivating briefly
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    // Briefly deactivate to ensure complete audio stop for phone calls
-                    try audioSession.setActive(false, options: [])
-                    print("✅ RadioPlayer: Audio session deactivated for phone call")
-                } catch {
-                    print("⚠️ RadioPlayer: Could not deactivate audio session: \(error)")
-                }
-            }
-            
             print("✅ RadioPlayer: Playback paused due to interruption")
             
             DebugLogger.logInfo("Audio interruption handled - Radio was playing: \(wasPlayingBeforeInterruption), Station: \(currentlyPlayingStation?.name ?? "None")", category: "AudioInterruption")
@@ -1157,7 +979,7 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     /// Resumes playback after an audio interruption (e.g., alarm, phone call, other apps)
-    func resumeAfterInterruption() {
+    func resumeAfterInterruption(audioSessionActivated: Bool = false) {
         print("🔊 RadioPlayer: Attempting to resume playback after interruption")
         DebugLogger.logInfo("Resuming radio playback after audio interruption", category: "AudioInterruption")
         
@@ -1169,34 +991,17 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
-        // PHONE CALL FIX: Check if audio session is already active to prevent OSStatus -50 errors
-        // PlaybackManager may have already activated the session successfully
-        let audioSession = AVAudioSession.sharedInstance()
-        let isSessionActive = audioSession.category == .playback
-        
-        if !isSessionActive {
-            // Only activate session if it's not already in the correct state
-            do {
-                // First, ensure the category is correct and take control of audio
-                try audioSession.setCategory(.playback, 
-                                           mode: .default, 
-                                           options: PlaybackManager.playbackCategoryOptions)
-                
-                // Aggressively activate audio session to reclaim audio from other apps
-                try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-                
-                print("✅ RadioPlayer: Audio session reactivated, attempting playback resume")
-            } catch {
-                print("❌ RadioPlayer: Failed to activate audio session: \(error)")
-                DebugLogger.logError("Failed to activate audio session for radio resume: \(error.localizedDescription)", category: "AudioInterruption")
-                
-                // Continue anyway - PlaybackManager might have already activated it
-                print("🔄 RadioPlayer: Continuing with resume despite session activation error")
+        guard audioSessionActivated else {
+            PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true) { [weak self] activated in
+                guard activated else {
+                    print("❌ RadioPlayer: Audio session unavailable for interruption resume")
+                    return
+                }
+                self?.resumeAfterInterruption(audioSessionActivated: true)
             }
-        } else {
-            print("✅ RadioPlayer: Audio session already active, proceeding with resume")
+            return
         }
-        
+
         // Resume playback with small delay to ensure session is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
@@ -1450,7 +1255,7 @@ class RadioPlayer: NSObject, ObservableObject {
             print("No current item found in player.")
             return
         }
-        
+
         // Remove any existing metadata outputs
         for output in currentItem.outputs {
             if output is AVPlayerItemMetadataOutput {
@@ -1499,6 +1304,10 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func play() {
+        play(audioSessionActivated: false)
+    }
+
+    private func play(audioSessionActivated: Bool) {
         guard isPlaybackEntitled(retry: { [weak self] in self?.play() }) else {
             print("🔒 Radio playback blocked - no active subscription")
             return
@@ -1519,7 +1328,18 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
-        // Only stop podcast playback if we're actually going to start radio
+        guard audioSessionActivated else {
+            PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true) { [weak self] activated in
+                guard activated else {
+                    print("❌ Radio playback blocked - audio session activation failed")
+                    return
+                }
+                self?.play(audioSessionActivated: true)
+            }
+            return
+        }
+
+        // Only stop podcast playback after radio has secured the audio session.
         stopPodcastPlayback()
         
         // CARPLAY COMPATIBILITY: Don't disrupt ongoing CarPlay if it's playing the same content
@@ -1533,7 +1353,7 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
-        // Set radio as the active player FIRST - this will handle audio session activation
+        // Audio session activation completed before entering this playback path.
         PlaybackManager.shared.setActivePlayer(.radio)
         print("📻 Play: Set radio as active player")
         
@@ -1597,21 +1417,12 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         
         updateWidget()
-        scheduleAppRefresh()
-        
-        // Start Shazam recognition when playback begins
-        startShazamTimer()
-        
-        // Also attempt immediate Shazam recognition after a short delay to get artwork quickly
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-            self?.attemptShazamRecognition()
-        }
     }
     
     private func stopPodcastPlayback() {
             if let podcastPlayer = podcastPlayer {
                 // Use stop() instead of pause() to clear user intent and properly dismiss podcast player
-                podcastPlayer.stop()
+                podcastPlayer.stop(deactivateAudioSession: false)
                 print("🛑 RadioPlayer: Stopped podcast playback and cleared user intent")
             }
         }
@@ -1683,6 +1494,10 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Cancel any pending iTunes searches when paused
         artworkSearchTimer?.invalidate()
+        shazamArtworkFallbackTask?.cancel()
+        shazamArtworkFallbackTask = nil
+        lastShazamArtworkFallbackKey = nil
+        shazamArtworkPlaybackID = UUID()
         
         // Cancel artwork protection timer when pausing
         artworkProtectionTimer?.invalidate()
@@ -1755,6 +1570,10 @@ class RadioPlayer: NSObject, ObservableObject {
            
            // Cancel any pending iTunes searches
            artworkSearchTimer?.invalidate()
+           shazamArtworkFallbackTask?.cancel()
+           shazamArtworkFallbackTask = nil
+           lastShazamArtworkFallbackKey = nil
+           shazamArtworkPlaybackID = UUID()
            
            // Clear the current station to fully reset player state
            currentlyPlayingStation = nil
@@ -1762,9 +1581,6 @@ class RadioPlayer: NSObject, ObservableObject {
            // Update all UI elements - this will now show default app info with no station artwork
            updateNowPlayingInfo()
            updateWidget()
-           
-           // Stop Shazam recognition when playback stops
-           stopShazamTimer()
            
         print("🛑 Radio player stopped - all metadata and iTunes artwork cleared")
         
@@ -1803,15 +1619,16 @@ class RadioPlayer: NSObject, ObservableObject {
         // Cancel any pending operations
         artworkSearchTimer?.invalidate()
         artworkSearchTimer = nil
+        shazamArtworkFallbackTask?.cancel()
+        shazamArtworkFallbackTask = nil
+        lastShazamArtworkFallbackKey = nil
+        shazamArtworkPlaybackID = UUID()
         artworkProtectionTimer?.invalidate()
         artworkProtectionTimer = nil
         iTunesArtworkJustSet = false
         
         // Stop reconnection attempts
         stopReconnectionAttempts()
-        
-        // Stop Shazam recognition
-        stopShazamTimer()
         
         // Clear elapsed time tracking
         playbackStartTime = nil
@@ -1845,14 +1662,34 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
+        playStation(at: index, from: stations, audioSessionActivated: false)
+    }
+
+    private func playStation(at index: Int, from stations: [RadioStation], audioSessionActivated: Bool) {
         // This path starts the AVPlayer directly rather than going through play(), so it needs its own gate.
         guard isPlaybackEntitled(retry: { [weak self] in self?.playStation(at: index, from: stations) }) else {
             print("🔒 Radio playback blocked - no active subscription")
             connectionState = .paused
             return
         }
+
+        guard index >= 0 && index < stations.count else {
+            print("Invalid station index: \(index)")
+            return
+        }
         
-        // CRITICAL: This is an explicit user action to play radio - stop podcast if active
+        guard audioSessionActivated else {
+            PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true) { [weak self] activated in
+                guard activated else {
+                    print("❌ Station playback blocked - audio session activation failed")
+                    return
+                }
+                self?.playStation(at: index, from: stations, audioSessionActivated: true)
+            }
+            return
+        }
+
+        // This is an explicit user action; hand over only after activation succeeds.
         stopPodcastPlayback()
         
         // CRITICAL FIX: Mark that user has played content for the first time
@@ -1864,11 +1701,6 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // CRITICAL: Configure Remote Command Center for radio to show station navigation buttons
         configureRadioRemoteCommands()
-        
-        guard index >= 0 && index < stations.count else {
-            print("Invalid station index: \(index)")
-            return
-        }
         
         let station = stations[index]
         print("🔄 Station Transition: Playing \(station.name) at index \(index)")
@@ -1940,6 +1772,10 @@ class RadioPlayer: NSObject, ObservableObject {
         artistName = ""
         lastMetadataSearched = ""
         artworkSearchTimer?.invalidate()
+        shazamArtworkFallbackTask?.cancel()
+        shazamArtworkFallbackTask = nil
+        lastShazamArtworkFallbackKey = nil
+        shazamArtworkPlaybackID = UUID()
         
         // Cancel artwork protection timer when switching stations
         artworkProtectionTimer?.invalidate()
@@ -1987,10 +1823,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private func playStationImmediately() {
         print("🚀 Station Transition: Starting immediate playback")
         
-        // Stop any existing podcast playback (this is an explicit station change)
-        stopPodcastPlayback()
-        
-        // Set radio as the active player
+        // Keep the active-player state current without reactivating the session.
         PlaybackManager.shared.setActivePlayer(.radio)
         
         // Track user intent
@@ -2005,6 +1838,7 @@ class RadioPlayer: NSObject, ObservableObject {
         // IMMEDIATE START: No delays, no protection checks for station transitions
         connectionState = .connecting
         player.play()
+        logPlaybackStartupSnapshots(for: player)
         
         // Start elapsed time tracking immediately
         playbackStartTime = Date()
@@ -2024,10 +1858,36 @@ class RadioPlayer: NSObject, ObservableObject {
                 self?.player?.play()
             }
         }
-        
-        scheduleAppRefresh()
+
     }
-    
+
+    private func logPlaybackStartupSnapshots(for startupPlayer: AVPlayer) {
+        for delay in [0.5, 2.0, 5.0, 10.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak startupPlayer] in
+                guard let self, let startupPlayer, self.player === startupPlayer else { return }
+
+                let session = AVAudioSession.sharedInstance()
+                let outputs = session.currentRoute.outputs
+                    .map { "\($0.portType.rawValue):\($0.portName)" }
+                    .joined(separator: ", ")
+                let item = startupPlayer.currentItem
+                let currentSeconds = CMTimeGetSeconds(startupPlayer.currentTime())
+                let loadedSeconds = item?.loadedTimeRanges
+                    .compactMap { $0.timeRangeValue }
+                    .map { CMTimeGetSeconds($0.end) }
+                    .filter(\.isFinite)
+                    .max() ?? 0
+                let waitingReason = startupPlayer.reasonForWaitingToPlay?.rawValue ?? "none"
+                let delayText = String(format: "%.1f", delay)
+                let currentTimeText = String(format: "%.2f", currentSeconds)
+                let loadedTimeText = String(format: "%.2f", loadedSeconds)
+                let outputLatencyText = String(format: "%.3f", session.outputLatency)
+
+                print("🔬 Radio Startup +\(delayText)s: status=\(startupPlayer.timeControlStatus), rate=\(startupPlayer.rate), mediaTime=\(currentTimeText), loadedTo=\(loadedTimeText), forwardBuffer=\(item?.preferredForwardBufferDuration ?? -1), waiting=\(waitingReason), likelyToKeepUp=\(item?.isPlaybackLikelyToKeepUp ?? false), bufferEmpty=\(item?.isPlaybackBufferEmpty ?? false), route=[\(outputs)], category=\(session.category.rawValue), mode=\(session.mode.rawValue), outputLatency=\(outputLatencyText)")
+            }
+        }
+    }
+
     func playStationForAlarm(station: RadioStation) {
         print("Playing station for alarm: \(station.name)")
         guard let url = URL(string: station.url) else {
@@ -2052,6 +1912,10 @@ class RadioPlayer: NSObject, ObservableObject {
         artistName = ""
         lastMetadataSearched = ""
         artworkSearchTimer?.invalidate()
+        shazamArtworkFallbackTask?.cancel()
+        shazamArtworkFallbackTask = nil
+        lastShazamArtworkFallbackKey = nil
+        shazamArtworkPlaybackID = UUID()
         
         // Use forceSetStationURL for alarm stations to work during CarPlay
         forceSetStationURL(url)
@@ -2078,6 +1942,10 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Cancel any pending iTunes searches
         artworkSearchTimer?.invalidate()
+        shazamArtworkFallbackTask?.cancel()
+        shazamArtworkFallbackTask = nil
+        lastShazamArtworkFallbackKey = nil
+        shazamArtworkPlaybackID = UUID()
         
         // Clear the current station reference
         currentlyPlayingStation = nil
@@ -2181,11 +2049,6 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
         
-        guard let viewModel = viewModel else { 
-            print("❌ Now Playing: No viewModel available")
-            return 
-        }
-        
         var nowPlayingInfo = [String: Any]()
         
         // Determine current station
@@ -2203,10 +2066,12 @@ class RadioPlayer: NSObject, ObservableObject {
             
             // COUNTRY CONTAMINATION FIX: Validate and update currentStationIndex to match currentlyPlayingStation
             // This prevents index contamination when country changes update the stations array
-            let correctIndex = viewModel.stations.firstIndex(where: { $0.id == playingStation.id })
-            if currentStationIndex != correctIndex {
-                print("🔧 CONTAMINATION FIX: Updating currentStationIndex from \(currentStationIndex?.description ?? "nil") to \(correctIndex?.description ?? "nil") to match currentlyPlayingStation '\(playingStation.name)'")
-                currentStationIndex = correctIndex
+            if let viewModel {
+                let correctIndex = viewModel.stations.firstIndex(where: { $0.id == playingStation.id })
+                if currentStationIndex != correctIndex {
+                    print("🔧 CONTAMINATION FIX: Updating currentStationIndex from \(currentStationIndex?.description ?? "nil") to \(correctIndex?.description ?? "nil") to match currentlyPlayingStation '\(playingStation.name)'")
+                    currentStationIndex = correctIndex
+                }
             }
             
             // Only log if station changed
@@ -2215,7 +2080,8 @@ class RadioPlayer: NSObject, ObservableObject {
                 print("🎵 Now Playing: Using station '\(playingStation.name)' at index \(currentStationIndex)")
                 lastLoggedStationIndex = currentStationIndex
             }
-        } else if let currentStationIndex = currentStationIndex,
+        } else if let viewModel,
+              let currentStationIndex = currentStationIndex,
                   currentStationIndex < viewModel.stations.count {
             // CONTAMINATION PREVENTION: Only use index-based lookup if we're confident the index is valid
             // Avoid using potentially stale currentStationIndex when currentlyPlayingStation is nil
@@ -2294,8 +2160,16 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         
         // Set stream properties
+        let shouldAdvertisePlayback: Bool
+        switch connectionState {
+        case .connecting, .buffering:
+            shouldAdvertisePlayback = userWantsToPlay
+        default:
+            shouldAdvertisePlayback = isPlaying
+        }
+
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = shouldAdvertisePlayback ? 1.0 : 0.0
         nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
         
         // Add elapsed time for CarPlay display (only when playing)
@@ -2628,21 +2502,15 @@ class RadioPlayer: NSObject, ObservableObject {
         print("🔍 getCurrentStationList: Cache cleared")
     }
     
-    private func scheduleAppRefresh() {
-        let request = BGAppRefreshTaskRequest(identifier: "com.radio.refresh")
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // Refresh every 15 minutes.
-        
-        do {
-            try BGTaskScheduler.shared.submit(request)
-        } catch {
-            print("Could not schedule app refresh: \(error)")
-        }
-    }
-    
     var lastMetadataSearched: String = ""
     private var lastArtworkFetched: UIImage?
     private var artworkSearchTimer: Timer?
     private var artworkCache: [String: UIImage?] = [:]
+    private var lastShazamArtworkFallbackKey: String?
+    private var shazamArtworkFallbackTask: Task<Void, Never>?
+    private var shazamArtworkPlaybackID = UUID()
+    private let metadataFreeShazamRetryInterval: UInt64 = 45_000_000_000
+    private let metadataFreeShazamCarPlayStartupDelay: UInt64 = 15_000_000_000
     
     // Artwork persistence tracking
     private var currentTrackArtwork: UIImage?
@@ -2748,6 +2616,9 @@ class RadioPlayer: NSObject, ObservableObject {
             print("🔄 Skipping duplicate iTunes search for same song: \(cacheKey)")
             return
         }
+
+        shazamArtworkFallbackTask?.cancel()
+        shazamArtworkFallbackTask = nil
         
         // Check cache first using normalized key
         if let cachedImage = artworkCache[cacheKey] {
@@ -2823,6 +2694,8 @@ class RadioPlayer: NSObject, ObservableObject {
                                 
                                 print("🚀 INSTANT: CarPlay artwork synced immediately with zero delay")
                             }
+                        } else {
+                            self.fetchShazamArtworkFallback(metadata: metadata, cacheKey: cacheKey)
                         }
                         
                         self.updateNowPlayingInfo()
@@ -2831,6 +2704,170 @@ class RadioPlayer: NSObject, ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    func fetchArtworkForCarPlay() {
+        guard isPlaying, let station = currentlyPlayingStation else { return }
+
+        let currentMetadata = metadata?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !currentMetadata.isEmpty,
+           currentMetadata.caseInsensitiveCompare(station.name) != .orderedSame,
+           currentMetadata != "No song or album title available" {
+            fetchITunesAlbumArt(for: currentMetadata)
+        } else {
+            fetchShazamArtworkFallback(metadata: nil, cacheKey: "no_metadata")
+        }
+    }
+
+    private func fetchShazamArtworkFallback(metadata: String?, cacheKey: String) {
+        guard isPlaying, let stationId = currentlyPlayingStation?.id else { return }
+
+        let playbackID = shazamArtworkPlaybackID
+        let fallbackKey = "\(playbackID.uuidString)|\(stationId)|\(cacheKey)"
+        guard lastShazamArtworkFallbackKey != fallbackKey else { return }
+        lastShazamArtworkFallbackKey = fallbackKey
+
+        shazamArtworkFallbackTask?.cancel()
+        shazamArtworkFallbackTask = Task { [weak self] in
+            let repeatsForMetadataFreeStation = metadata == nil
+
+            if repeatsForMetadataFreeStation, CarPlayManager.shared.isCarPlayConnected {
+                guard let startupDelay = self?.metadataFreeShazamCarPlayStartupDelay else { return }
+                do {
+                    try await Task.sleep(nanoseconds: startupDelay)
+                } catch {
+                    return
+                }
+            }
+
+            while !Task.isCancelled {
+                guard let self,
+                      self.isPlaying,
+                      self.currentlyPlayingStation?.id == stationId,
+                      self.shazamArtworkPlaybackID == playbackID else {
+                    return
+                }
+
+                if let match = await ShazamViewModel.shared.matchCurrentStreamForArtwork(
+                    expectedStationId: stationId
+                ), !Task.isCancelled {
+                    let recognizedMetadata = "\(match.artist) - \(match.title)"
+                    let shouldApplyArtwork = await MainActor.run {
+                        guard self.isPlaying,
+                              self.currentlyPlayingStation?.id == stationId,
+                              self.shazamArtworkPlaybackID == playbackID else {
+                            return false
+                        }
+
+                        if metadata != nil {
+                            guard self.lastMetadataSearched.caseInsensitiveCompare(cacheKey) == .orderedSame else {
+                                return false
+                            }
+                        }
+
+                        return self.displayTitle != match.title
+                            || self.displayArtist != match.artist
+                            || self.iTunesAlbumArt == nil
+                    }
+
+                    if shouldApplyArtwork {
+                        var image = await self.searchITunesArtworkForRecognizedTrack(recognizedMetadata)
+                        var artworkSource = "iTunes"
+
+                        if image == nil {
+                            image = await self.downloadArtwork(from: match.artworkURL)
+                            artworkSource = "Shazam"
+                        }
+
+                        guard !Task.isCancelled, let image else { return }
+
+                        await MainActor.run {
+                            guard self.isPlaying,
+                                  self.currentlyPlayingStation?.id == stationId,
+                                  self.shazamArtworkPlaybackID == playbackID else {
+                                return
+                            }
+
+                            let recognizedCacheKey = recognizedMetadata.lowercased()
+                            self.iTunesAlbumArt = image
+                            self.iTunesArtworkJustSet = true
+                            self.displayTitle = match.title
+                            self.displayArtist = match.artist
+                            self.metadata = recognizedMetadata
+                            self.lastMetadataSearched = recognizedCacheKey
+                            self.lastKnownGoodArtwork = image
+                            self.lastKnownGoodMetadata = recognizedMetadata
+                            self.persistentArtworkCache[stationId] = image
+                            self.cacheImage(image, for: recognizedCacheKey)
+                            self.startArtworkProtectionTimer()
+                            self.saveITunesArtworkToCurrentStation(image)
+                            self.updateNowPlayingInfo()
+                            self.updateWidget()
+
+                            DebugLogger.logInfo(
+                                "Shazam-identified track loaded artwork from \(artworkSource)",
+                                category: "Shazam"
+                            )
+
+                            if CarPlayManager.shared.isCarPlayConnected {
+                                self.forceUpdateNowPlayingInfo()
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("InstantCarPlayArtworkSync"),
+                                    object: nil,
+                                    userInfo: [
+                                        "metadata": recognizedMetadata,
+                                        "hasArtwork": true,
+                                        "syncType": "shazam_fallback"
+                                    ]
+                                )
+                            }
+                        }
+                    }
+                }
+
+                guard repeatsForMetadataFreeStation else { return }
+
+                do {
+                    try await Task.sleep(nanoseconds: self.metadataFreeShazamRetryInterval)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func searchITunesArtworkForRecognizedTrack(_ metadata: String) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                self.searchITunesForArtwork(metadata: metadata) { image in
+                    continuation.resume(returning: image)
+                }
+            }
+        }
+    }
+
+    private func downloadArtwork(from url: URL) async -> UIImage? {
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return nil
+            }
+            return UIImage(data: data)
+        } catch {
+            if !Task.isCancelled {
+                DebugLogger.logWarning(
+                    "Shazam artwork download failed - \(error.localizedDescription)",
+                    category: "Shazam"
+                )
+            }
+            return nil
         }
     }
     
@@ -2874,6 +2911,7 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             searchQueries.insert(q, at: 0)
         }
+        searchQueries = Array(searchQueries.prefix(6))
         
         print("🎯 Generated \(searchQueries.count) search queries for '\(metadata)':")
         for (index, query) in searchQueries.enumerated() {
@@ -2896,103 +2934,59 @@ class RadioPlayer: NSObject, ObservableObject {
     /// Smart detection of artist-title order in radio metadata
     private func smartDetectArtistTitleOrder(left: String, right: String) -> (artist: String, title: String) {
         print("🔍 Smart detection: left='\(left)', right='\(right)'")
-        
-        // Common artist indicators
+
+        let normalizedLeft = " \(left.lowercased()) "
+        let normalizedRight = " \(right.lowercased()) "
         let artistIndicators = [
-            "feat.", "featuring", "ft.", "with", "&", "and",
-            "vs", "versus", "x", "collaboration"
+            " feat. ", " featuring ", " ft. ", " with ", " & ", " and ",
+            " vs ", " versus ", " x ", " collaboration "
         ]
-        
-        // Common title indicators
         let titleIndicators = [
-            "(", ")", "[", "]", "remix", "radio edit", "extended", "version",
-            "live", "acoustic", "instrumental", "remastered"
+            "(", ")", "[", "]", " remix", "radio edit", " extended", " version",
+            " live", " acoustic", " instrumental", " remastered"
         ]
-        
+
         var leftArtistScore = 0
         var rightArtistScore = 0
         var leftTitleScore = 0
         var rightTitleScore = 0
-        
-        // Check for artist indicators
+
         for indicator in artistIndicators {
-            if left.lowercased().contains(indicator.lowercased()) { leftArtistScore += 1 }
-            if right.lowercased().contains(indicator.lowercased()) { rightArtistScore += 1 }
+            if normalizedLeft.contains(indicator) { leftArtistScore += 1 }
+            if normalizedRight.contains(indicator) { rightArtistScore += 1 }
         }
-        
-        // Check for title indicators
+
         for indicator in titleIndicators {
-            if left.lowercased().contains(indicator.lowercased()) { leftTitleScore += 1 }
-            if right.lowercased().contains(indicator.lowercased()) { rightTitleScore += 1 }
+            if normalizedLeft.contains(indicator) { leftTitleScore += 1 }
+            if normalizedRight.contains(indicator) { rightTitleScore += 1 }
         }
-        
-        // Strong indicator: Multiple artists separated by commas (like "DJ KHALED, VYBZ KARTEL, BUJU BANTON")
+
         let leftCommaCount = left.components(separatedBy: ",").count - 1
         let rightCommaCount = right.components(separatedBy: ",").count - 1
-        
-        if leftCommaCount >= 2 { leftArtistScore += 3 }  // Strong artist indicator
-        if rightCommaCount >= 2 { rightArtistScore += 3 } // Strong artist indicator
-        
-        // Artist name patterns (DJ, MC, common suffixes)
+        if leftCommaCount >= 2 { leftArtistScore += 3 }
+        if rightCommaCount >= 2 { rightArtistScore += 3 }
+
         let leftLower = left.lowercased()
         let rightLower = right.lowercased()
-        
         if leftLower.hasPrefix("dj ") || leftLower.hasPrefix("mc ") || leftLower.contains(" dj ") { leftArtistScore += 2 }
         if rightLower.hasPrefix("dj ") || rightLower.hasPrefix("mc ") || rightLower.contains(" dj ") { rightArtistScore += 2 }
-        
-        // Heuristic: Longer text is more likely to be the title
-        if left.count > Int(Double(right.count) * 1.5) { leftTitleScore += 1 }
-        if right.count > Int(Double(left.count) * 1.5) { rightTitleScore += 1 }
-        
-        // Heuristic: All caps text is more likely to be metadata formatting (could be either)
-        // But if one is mixed case and other is all caps, mixed case is more likely the artist name
-        let leftIsAllCaps = left.uppercased() == left && left != left.lowercased()
-        let rightIsAllCaps = right.uppercased() == right && right != right.lowercased()
-        
-        if !leftIsAllCaps && rightIsAllCaps { leftArtistScore += 1 }
-        if !rightIsAllCaps && leftIsAllCaps { rightArtistScore += 1 }
-        
-        // Common knowledge: if one part is a well-known artist name pattern
+
         let leftIsLikelyArtist = isLikelyArtistName(left)
         let rightIsLikelyArtist = isLikelyArtistName(right)
-        
         if leftIsLikelyArtist { leftArtistScore += 2 }
         if rightIsLikelyArtist { rightArtistScore += 2 }
-        
+
         print("🔍 Scores - Left: artist=\(leftArtistScore), title=\(leftTitleScore) | Right: artist=\(rightArtistScore), title=\(rightTitleScore)")
-        
-        // Decide based on scores
-        if leftArtistScore > rightArtistScore {
-            print("🔍 ✅ Detected format: ARTIST - TITLE")
-            return (left, right)  // left=artist, right=title
-        } else if rightArtistScore > leftArtistScore {
+
+        let standardOrderScore = leftArtistScore + rightTitleScore
+        let reversedOrderScore = rightArtistScore + leftTitleScore
+        if reversedOrderScore > standardOrderScore {
             print("🔍 ✅ Detected format: TITLE - ARTIST")
-            return (right, left)  // right=artist, left=title  
-        } else if leftTitleScore > rightTitleScore {
-            print("🔍 ✅ Detected format: TITLE - ARTIST (by title indicators)")
-            return (right, left)  // right=artist, left=title
-        } else if rightTitleScore > leftTitleScore {
-            print("🔍 ✅ Detected format: ARTIST - TITLE (by title indicators)")
-            return (left, right)  // left=artist, right=title
-        } else {
-            // Final tie-breaker: Check for collaboration patterns
-            let leftHasArtistPattern = leftLower.contains(" feat") || leftLower.contains(" ft") || 
-                                     leftLower.contains(" & ") || leftLower.contains(" and ")
-            let rightHasArtistPattern = rightLower.contains(" feat") || rightLower.contains(" ft") || 
-                                      rightLower.contains(" & ") || rightLower.contains(" and ")
-            
-            if rightHasArtistPattern && !leftHasArtistPattern {
-                print("🔍 ✅ Detected format: TITLE - ARTIST (by collaboration indicators)")
-                return (right, left)  // right=artist, left=title
-            } else if leftHasArtistPattern && !rightHasArtistPattern {
-                print("🔍 ✅ Detected format: ARTIST - TITLE (by collaboration indicators)")
-                return (left, right)  // left=artist, right=title
-            }
-            
-            // Final fallback: Most radio metadata follows "ARTIST - TITLE" format
-            print("🔍 ⚖️ True tie - defaulting to ARTIST - TITLE (standard radio format)")
-            return (left, right)  // left=artist, right=title
+            return (right, left)
         }
+
+        print("🔍 ✅ Detected format: ARTIST - TITLE")
+        return (left, right)
     }
     
     /// Check if a string is likely an artist name
@@ -3007,16 +3001,6 @@ class RadioPlayer: NSObject, ObservableObject {
         
         for pattern in artistPatterns {
             if normalized.contains(pattern) { return true }
-        }
-        
-        // Name patterns (First Last, First Middle Last, etc.)
-        let nameComponents = normalized.components(separatedBy: " ")
-        if nameComponents.count >= 2 && nameComponents.count <= 4 {
-            // Check if it looks like a name (starts with capital letters)
-            let hasNamePattern = nameComponents.allSatisfy { component in
-                component.first?.isUppercase == true || component.first?.isLetter == true
-            }
-            if hasNamePattern { return true }
         }
         
         return false
@@ -3968,39 +3952,19 @@ class RadioPlayer: NSObject, ObservableObject {
     
     /// Caches iTunes artwork for CarPlay independent operation
     private func cacheITunesArtworkForCarPlay(image: UIImage, station: RadioStation) {
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            print("Failed to compress iTunes artwork for CarPlay cache")
-            return
+        persistentArtworkCache[station.id] = image
+        print("🚗 Cached iTunes artwork in memory for CarPlay: \(station.name)")
+    }
+
+    private func removeLegacyArtworkPreferences() {
+        let defaults = UserDefaults.standard
+        let legacyKeys = defaults.dictionaryRepresentation().keys.filter {
+            $0.hasPrefix("CarPlayArtwork_") || $0.hasPrefix("iTunesArtwork_")
         }
-        
-        let userDefaults = UserDefaults.standard
-        
-        // Cache by station name for easy lookup
-        let stationKey = station.name.lowercased()
-            .replacingOccurrences(of: " ", with: "_")
-            .replacingOccurrences(of: "[^a-zA-Z0-9_]", with: "", options: .regularExpression)
-        
-        userDefaults.set(imageData, forKey: "CarPlayArtwork_\(stationKey)")
-        
-        // Also cache by current metadata if available
-        if let currentMetadata = self.metadata, !currentMetadata.isEmpty {
-            let metadataComponents = currentMetadata.components(separatedBy: " - ")
-            if metadataComponents.count >= 2 {
-                let artist = metadataComponents[0].trimmingCharacters(in: .whitespacesAndNewlines)
-                let title = metadataComponents[1].trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                let metadataKey = "\(artist.lowercased())_\(title.lowercased())"
-                    .replacingOccurrences(of: " ", with: "_")
-                    .replacingOccurrences(of: "[^a-zA-Z0-9_]", with: "", options: .regularExpression)
-                
-                userDefaults.set(imageData, forKey: "iTunesArtwork_\(metadataKey)")
-                
-                print("🚗 Cached iTunes artwork for CarPlay - Station: \(stationKey), Metadata: \(metadataKey)")
-            }
-        }
-        
-        userDefaults.synchronize()
-        print("🚗 iTunes artwork cached for CarPlay independent operation")
+        guard !legacyKeys.isEmpty else { return }
+
+        legacyKeys.forEach(defaults.removeObject(forKey:))
+        print("🧹 Removed \(legacyKeys.count) legacy artwork blobs from UserDefaults")
     }
     
     /// Enhanced query generation with machine learning-inspired strategies
@@ -4252,204 +4216,86 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    /// Search Apple Music API with specific session (replacement for failed iTunes Search API)
+    /// Search the public iTunes catalog without requiring MusicKit authorization.
     private func searchITunes(query: String, using session: URLSession, completion: @escaping (UIImage?) -> Void) {
-        print("🔍 Apple Music API: Searching for artwork with query: '\(query)'")
-        
-        // Parse the search query to extract artist and title
+        print("🔍 iTunes Search API: Searching for artwork with query: '\(query)'")
+
+        let finish: (UIImage?) -> Void = { image in
+            DispatchQueue.main.async {
+                completion(image)
+            }
+        }
+
         let (artist, title) = parseSearchQuery(query)
-        print("🎵 Apple Music Search: Looking for '\(title)' by '\(artist)'")
-        
-        // Try Apple Music search using the existing ShazamViewModel functionality
-        Task {
+        var components = URLComponents(string: "https://itunes.apple.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "term", value: query),
+            URLQueryItem(name: "media", value: "music"),
+            URLQueryItem(name: "entity", value: "song"),
+            URLQueryItem(name: "limit", value: "10")
+        ]
+
+        guard let url = components?.url else {
+            finish(nil)
+            return
+        }
+
+        session.dataTask(with: url) { [weak self] data, response, error in
+            guard let self else {
+                finish(nil)
+                return
+            }
+
             do {
-                // Use the existing Apple Music search infrastructure
-                if let song = try await self.searchAppleMusicForArtwork(title: title, artist: artist) {
-                    print("✅ Apple Music API: Found song: \(song.title) by \(song.artistName)")
-                    
-                    // Get artwork URL
-                    if let artwork = song.artwork, let artworkURL = artwork.url(width: 600, height: 600) {
-                        print("🎨 Apple Music API: Found artwork URL: \(artworkURL)")
-                        
-                        // Download the artwork
-                        do {
-                            let (data, _) = try await URLSession.shared.data(from: artworkURL)
-                            if let image = UIImage(data: data) {
-                                print("✅ Apple Music API: Successfully downloaded artwork (\(data.count) bytes)")
-                                DispatchQueue.main.async {
-                                    completion(image)
-                                }
-                            } else {
-                                print("❌ Apple Music API: Failed to create image from artwork data")
-                                DispatchQueue.main.async {
-                                    completion(nil)
-                                }
-                            }
-                        } catch {
-                            print("❌ Apple Music API: Artwork download error: \(error.localizedDescription)")
-                            DispatchQueue.main.async {
-                                completion(nil)
-                            }
-                        }
-                    } else {
-                        print("❌ Apple Music API: No artwork URL found")
-                        DispatchQueue.main.async {
-                            completion(nil)
-                        }
-                    }
-                } else {
-                    print("❌ Apple Music API: No results found for query '\(query)'")
-                    DispatchQueue.main.async {
-                        completion(nil)
-                    }
+                if let error {
+                    throw error
                 }
-            } catch {
-                print("❌ Apple Music API: Search failed for query '\(query)': \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    completion(nil)
+
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode),
+                      let data else {
+                                        finish(nil)
+                    return
                 }
-            }
-        }
-    }
-    
-    /// Search Apple Music for artwork using MusicKit with enhanced artist name handling
-    private func searchAppleMusicForArtwork(title: String, artist: String) async throws -> MusicKit.Song? {
-        print("🎵 Apple Music Search: Looking for '\(title)' by '\(artist)'")
-        
-        // Check authorization first
-        let authStatus = MusicAuthorization.currentStatus
-        if authStatus != .authorized {
-            print("🎵 ❌ Apple Music not authorized (status: \(authStatus)) - requesting authorization")
-            let newStatus = await MusicAuthorization.request()
-            if newStatus != .authorized {
-                print("🎵 ❌ Apple Music authorization denied - cannot search for artwork")
-                throw NSError(domain: "MusicKitError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Apple Music access required for artwork search"])
-            }
-        }
-        
-        // Strategy 1: Generate artist name variations to handle different ordering
-        var artistVariations = [artist]
-        
-        // Handle cases like "Arta Kabashi & Anso" vs "Anso & Arta Kabashi"
-        if artist.contains("&") || artist.contains(" and ") || artist.contains(", ") {
-            let separators = ["&", " and ", ", "]
-            for separator in separators {
-                if artist.contains(separator) {
-                    let parts = artist.components(separatedBy: separator).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    if parts.count == 2 {
-                        // Add reversed order version
-                        let reversedArtist = "\(parts[1]) \(separator) \(parts[0])"
-                        artistVariations.append(reversedArtist)
-                        
-                        // Add individual artists as fallback
-                        artistVariations.append(parts[0])
-                        artistVariations.append(parts[1])
-                    }
-                }
-            }
-        }
-        
-        // Remove duplicates and empty entries
-        artistVariations = Array(Set(artistVariations)).filter { !$0.isEmpty }
-        
-        // Strategy 2: Create multiple search strategies including word joining
-        var searchStrategies: [String] = []
-        
-        // Generate title variations (handle cases like "pa pritur" -> "Papritur")
-        var titleVariations = [title]
-        
-        // If title has spaces, try joining words together
-        if title.contains(" ") {
-            let joinedTitle = title.replacingOccurrences(of: " ", with: "")
-            titleVariations.append(joinedTitle)
-            
-            // Also try capitalizing each word and joining
-            let capitalizedJoined = title.components(separatedBy: " ")
-                .map { $0.capitalized }
-                .joined()
-            if capitalizedJoined != joinedTitle {
-                titleVariations.append(capitalizedJoined)
-            }
-        }
-        
-        // If title is one word, try splitting it for common patterns
-        if !title.contains(" ") && title.count > 4 {
-            // Try splitting at common points (this is speculative)
-            let midPoint = title.index(title.startIndex, offsetBy: title.count / 2)
-            let firstHalf = String(title[..<midPoint])
-            let secondHalf = String(title[midPoint...])
-            if firstHalf.count >= 2 && secondHalf.count >= 2 {
-                titleVariations.append("\(firstHalf) \(secondHalf)")
-            }
-        }
-        
-        // Remove duplicates
-        titleVariations = Array(Set(titleVariations)).filter { !$0.isEmpty }
-        
-        for artistVar in artistVariations {
-            for titleVar in titleVariations {
-                // Exact title + artist combinations
-                searchStrategies.append("\(titleVar) \(artistVar)")
-                searchStrategies.append("\"\(titleVar)\" \"\(artistVar)\"")
-                searchStrategies.append("\"\(titleVar)\" \(artistVar)")
-            }
-        }
-        
-        // Add title-only searches as fallback
-        for titleVar in titleVariations {
-            searchStrategies.append(titleVar)
-        }
-        
-        print("🎵 Apple Music Search: Trying \(searchStrategies.count) search strategies")
-        
-        // Strategy 3: Try each search strategy and score results
-        for (index, searchTerm) in searchStrategies.enumerated() {
-            print("🎵 Apple Music Search: Strategy \(index + 1): '\(searchTerm)'")
-            
-            do {
-                let request = MusicCatalogSearchRequest(term: searchTerm, types: [Song.self])
-                let response = try await request.response()
-                let songs = response.songs
-                
-                print("🎵 Apple Music Search: Found \(songs.count) results")
-                
-                if !songs.isEmpty {
-                    // Score and find best match
-                    var bestMatch: (song: Song, score: Double)?
-                    
-                    for song in songs {
-                        let score = calculateAppleMusicMatchScore(
+
+                let results = try JSONDecoder().decode(ITunesArtworkSearchResponse.self, from: data).results
+                let bestMatch = results
+                    .compactMap { result -> (result: ITunesArtworkSearchResult, score: Double)? in
+                        let score = self.calculateArtworkMatchScore(
                             queriedTitle: title,
                             queriedArtist: artist,
-                            resultTitle: song.title,
-                            resultArtist: song.artistName
+                            resultTitle: result.trackName,
+                            resultArtist: result.artistName
                         )
-                        
-                        print("🎵 Candidate: '\(song.title)' by '\(song.artistName)' - Score: \(String(format: "%.2f", score))")
-                        
-                        if score > (bestMatch?.score ?? 0.0) && score > 0.3 {
-                            bestMatch = (song, score)
-                        }
+                        return score >= 0.75 ? (result, score) : nil
                     }
-                    
-                    if let match = bestMatch {
-                        print("🎵 Apple Music Search: ✅ Best match: '\(match.song.title)' by '\(match.song.artistName)' (Score: \(String(format: "%.2f", match.score)))")
-                        return match.song
-                    }
+                    .max { $0.score < $1.score }
+
+                guard let bestMatch, let artworkURL = bestMatch.result.artworkUrl100 else {
+                    finish(nil)
+                    return
                 }
+
+                let highResolutionURL = URL(
+                    string: artworkURL.absoluteString.replacingOccurrences(
+                        of: "100x100bb",
+                        with: "600x600bb"
+                    )
+                ) ?? artworkURL
+
+                session.dataTask(with: highResolutionURL) { data, _, _ in
+                    finish(data.flatMap { UIImage(data: $0) })
+                }.resume()
             } catch {
-                print("🎵 Apple Music Search: Strategy \(index + 1) error: \(error)")
-                continue
+                print("❌ iTunes Search API failed for query '\(query)': \(error.localizedDescription)")
+                finish(nil)
             }
-        }
-        
-        print("🎵 Apple Music Search: ❌ No suitable matches found after all strategies")
-        return nil
+        }.resume()
     }
     
     /// Calculate match score for Apple Music results to ensure accuracy
-    private func calculateAppleMusicMatchScore(queriedTitle: String, queriedArtist: String, 
-                                            resultTitle: String, resultArtist: String) -> Double {
+    private func calculateArtworkMatchScore(queriedTitle: String, queriedArtist: String,
+                                           resultTitle: String, resultArtist: String) -> Double {
         let normalizedQueryTitle = smartNormalization(queriedTitle)
         let normalizedQueryArtist = smartNormalization(queriedArtist)
         let normalizedResultTitle = smartNormalization(resultTitle)
@@ -5325,18 +5171,6 @@ class RadioPlayer: NSObject, ObservableObject {
         return 1.0 - Double(distance) / Double(max(len1, len2))
     }
     
-    private func handleAppRefresh(task: BGAppRefreshTask) {
-        scheduleAppRefresh()
-        
-        task.expirationHandler = {
-            // Clean up any resources before the task expires.
-        }
-        
-        // Network retry is handled by StreamQualityManager automatically
-        
-        task.setTaskCompleted(success: true)
-    }
-    
     /// GPS FIX: Track network failures to help GPS protection system
     private func trackNetworkFailure() {
         let currentFailures = UserDefaults.standard.integer(forKey: "RecentNetworkFailures")
@@ -5536,18 +5370,14 @@ class RadioPlayer: NSObject, ObservableObject {
                 let cleanedMetadata = self.cleanHTMLMetadata(rawMetadata)
                 
                 if !cleanedMetadata.isEmpty {
-                    // Update metadata and trigger both iTunes artwork search and Shazam recognition
+                    // Update metadata and trigger the iTunes artwork search
                     DispatchQueue.main.async { [weak self] in
                         self?.metadata = cleanedMetadata
                         
                         // Trigger iTunes artwork search for new metadata
                         self?.fetchITunesAlbumArt(for: cleanedMetadata)
                         
-                        print("📻 Metadata found: \(cleanedMetadata) - triggering iTunes artwork search and Shazam recognition")
-                        // Trigger immediate Shazam recognition for detected metadata
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                            self?.attemptShazamRecognition()
-                        }
+                        print("📻 Metadata found: \(cleanedMetadata) - triggering iTunes artwork search")
                         self?.updateNowPlayingInfo()
                         self?.updateWidget()
                     }
@@ -5567,43 +5397,22 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
         
-        // If no immediate metadata found, set up enhanced monitoring for new metadata
+        // If no immediate metadata is available, let the existing output keep observing while
+        // Shazam supplies the fallback. Rebuilding outputs on a playing item interrupts audio.
         print("🔍 No immediate metadata found, setting up enhanced monitoring...")
         
         // Reset metadata search state to allow fresh searches
         lastMetadataSearched = ""
         
-        // If we still don't have metadata after a short delay, try refreshing the stream connection
+        // If metadata is still absent after a short delay, start the non-destructive fallback.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self = self else { return }
             
-            // If still no metadata after 3 seconds, force a metadata output refresh
             if self.metadata == nil || self.metadata?.isEmpty == true {
-                print("🔍 Still no metadata after 3 seconds, refreshing metadata output...")
-                self.refreshMetadataOutput()
+                print("🔍 Still no metadata after 3 seconds, starting Shazam fallback...")
+                self.fetchShazamArtworkFallback(metadata: nil, cacheKey: "no_metadata")
             }
         }
-    }
-    
-    /// Refreshes the metadata output to ensure we capture new metadata
-    private func refreshMetadataOutput() {
-        guard let playerItem = player?.currentItem else { return }
-        
-        print("🔄 Refreshing metadata output for fresh metadata capture...")
-        
-        // Remove existing metadata outputs
-        for output in playerItem.outputs {
-            if output is AVPlayerItemMetadataOutput {
-                playerItem.remove(output)
-            }
-        }
-        
-        // Add fresh metadata output
-        let metadataOutput = AVPlayerItemMetadataOutput(identifiers: nil)
-        metadataOutput.setDelegate(self, queue: DispatchQueue.main)
-        playerItem.add(metadataOutput)
-        
-        print("✅ Metadata output refreshed - ready to capture new metadata")
     }
     
     /// Enhanced AI iTunes search with machine learning-inspired matching
@@ -6048,18 +5857,14 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                 // This protects iTunes artwork from being cleared by repeated metadata
             }
             
-            // Trigger both iTunes artwork search and Shazam recognition
+            // Trigger iTunes artwork search for new metadata
             if !value.isEmpty {
                 if isNewSongContent {
-                    print("📻 New metadata detected: \(value) - triggering iTunes artwork search and Shazam recognition")
+                    print("📻 New metadata detected: \(value) - triggering iTunes artwork search")
                     
                     // Trigger immediate iTunes artwork search for new songs
                     fetchITunesAlbumArt(for: value)
                     
-                    // Trigger immediate Shazam recognition for new songs
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                        self?.attemptShazamRecognition()
-                    }
                 } else {
                     print("📻 Same metadata repeated: \(value) - no new search needed")
                 }
@@ -6314,12 +6119,14 @@ extension RadioPlayer {
             output.portType == .carAudio
         }
         
-        let wasCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
-        
+        let carPlayManager = CarPlayManager.shared
+        let wasCarPlayConnected = carPlayManager.isCarPlayConnected
+        carPlayManager.setCarAudioRouteActive(isCarPlayCurrentlyConnected)
+        let isCarPlayConnected = carPlayManager.isCarPlayConnected
+
         // CARPLAY CONNECTION DETECTION
-        if isCarPlayCurrentlyConnected && !wasCarPlayConnected {
+        if isCarPlayConnected && !wasCarPlayConnected {
             print("🚗 RadioPlayer: CarPlay CONNECTED - enhancing experience")
-            CarPlayManager.shared.isCarPlayConnected = true
             
             if isPlaying && iTunesAlbumArt == nil {
                 if let metadata = self.metadata, !metadata.isEmpty {
@@ -6332,9 +6139,8 @@ extension RadioPlayer {
         }
         
         // CARPLAY DISCONNECTION DETECTION - CRITICAL FIX
-        else if !isCarPlayCurrentlyConnected && wasCarPlayConnected {
+        else if !isCarPlayConnected && wasCarPlayConnected {
             print("🚗 RadioPlayer: CarPlay DISCONNECTED - ensuring seamless transition to main app")
-            CarPlayManager.shared.isCarPlayConnected = false
             
             // CRITICAL: Only handle radio resumption if radio was actually playing and podcast isn't active
             let podcastPlayer = PodcastPlayer.shared
@@ -6354,28 +6160,24 @@ extension RadioPlayer {
                 // Ensure audio session remains active for main app playback
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                     guard let self = self else { return }
-                    
-                    // Force audio session to remain active for main app
-                    do {
-                        try AVAudioSession.sharedInstance().setActive(true, options: [])
+
+                    PlaybackManager.shared.setActivePlayer(.radio, shouldActivateSession: true) { [weak self] activated in
+                        guard let self else { return }
+                        guard activated else {
+                            print("⚠️ CarPlay Disconnect: Audio session unavailable for main app radio")
+                            return
+                        }
+
                         print("✅ CarPlay Disconnect: Audio session kept active for main app radio")
-                    } catch {
-                        print("⚠️ CarPlay Disconnect: Failed to maintain audio session: \(error)")
+                        if self.userWantsToPlay && !self.isPlaying && PlaybackManager.shared.activePlayer == .radio {
+                            print("🔄 CarPlay Disconnect: Resuming radio playback in main app")
+                            self.player?.play()
+                        }
+
+                        self.forceUpdateNowPlayingInfo()
+                        self.updateWidget()
+                        print("✅ CarPlay Disconnect: Seamless radio transition to main app completed")
                     }
-                    
-                    // Ensure player continues if it was playing
-                    if self.userWantsToPlay && !self.isPlaying && PlaybackManager.shared.activePlayer == .radio {
-                        print("🔄 CarPlay Disconnect: Resuming radio playback in main app")
-                        self.player?.play()
-                    }
-                    
-                    // Force update Now Playing info for main app
-                    self.forceUpdateNowPlayingInfo()
-                    
-                    // Update widget for main app
-                    self.updateWidget()
-                    
-                    print("✅ CarPlay Disconnect: Seamless radio transition to main app completed")
                 }
             }
         }

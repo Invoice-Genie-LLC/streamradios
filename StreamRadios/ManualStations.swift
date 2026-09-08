@@ -64,7 +64,7 @@ struct ManualStationsData {
             ),
             ManualStationInfo(
                 name: "OraNews",
-                url: "https://radio.oranews.tv:8443/stream",
+                url: "https://live1.mediadesk.al/oranews.m3u8",
                 iconURL: nil
             ),
             ManualStationInfo(

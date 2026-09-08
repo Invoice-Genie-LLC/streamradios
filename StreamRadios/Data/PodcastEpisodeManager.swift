@@ -5,13 +5,15 @@ import os.log
 /// Struct for bulk episode state updates
 struct EpisodeStateUpdate {
     let episodeId: String
+    let feedId: String?
     let progress: Double?
     let isFavorite: Bool?
     let isDownloaded: Bool?
     let isPlayed: Bool?
     
-    init(episodeId: String, progress: Double? = nil, isFavorite: Bool? = nil, isDownloaded: Bool? = nil, isPlayed: Bool? = nil) {
+    init(episodeId: String, feedId: String? = nil, progress: Double? = nil, isFavorite: Bool? = nil, isDownloaded: Bool? = nil, isPlayed: Bool? = nil) {
         self.episodeId = episodeId
+        self.feedId = feedId
         self.progress = progress
         self.isFavorite = isFavorite
         self.isDownloaded = isDownloaded
@@ -227,7 +229,7 @@ class PodcastEpisodeManager {
                     countRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
                     countRequest.includesPropertyValues = false
                     countRequest.includesSubentities = false
-                    
+
                     let count = try backgroundContext.count(for: countRequest)
                     continuation.resume(returning: count)
                 } catch {
@@ -331,18 +333,81 @@ class PodcastEpisodeManager {
                     ]
                     
                     let allEpisodes = try backgroundContext.fetch(fetchRequest)
-                    var seenIds = Set<String>()
+                    let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    let activeFeedIds = Set(try backgroundContext.fetch(feedRequest).compactMap { $0.id })
+                    let activeEpisodesById = Dictionary(
+                        grouping: allEpisodes.filter { episode in
+                            guard let feedId = episode.feedId else { return false }
+                            return activeFeedIds.contains(feedId)
+                        },
+                        by: { $0.id ?? "" }
+                    )
+                    var retainedEpisodesByKey: [String: PodcastModel] = [:]
                     var duplicatesToDelete: [PodcastModel] = []
-                    var episodeIdCounts: [String: Int] = [:]
-                    
-                    // First pass: Count occurrences of each episode ID
+                    var episodeKeyCounts: [String: Int] = [:]
+                    var migratedOrphanCount = 0
+                    var removedStateFreeOrphanCount = 0
+                    var preservedOrphanCount = 0
+
+                    let hasUserData: (PodcastModel) -> Bool = { episode in
+                        episode.progress > 0 || episode.isPlayed || episode.isFavorite ||
+                            episode.isDownloaded || !(episode.localFilePath ?? "").isEmpty
+                    }
+
                     for episode in allEpisodes {
-                        guard let episodeId = episode.id, !episodeId.isEmpty else {
-                            // Delete episodes without valid IDs
-                            duplicatesToDelete.append(episode)
+                        guard let feedId = episode.feedId, activeFeedIds.contains(feedId) else {
+                            if let episodeId = episode.id,
+                               !episodeId.isEmpty,
+                               let candidates = activeEpisodesById[episodeId],
+                               let target = candidates.first,
+                               Set(candidates.compactMap { $0.feedId }).count == 1 {
+                                target.progress = max(target.progress, episode.progress)
+                                target.isPlayed = target.isPlayed || episode.isPlayed
+                                target.isFavorite = target.isFavorite || episode.isFavorite
+
+                                if target.localFilePath?.isEmpty != false,
+                                   let orphanPath = episode.localFilePath,
+                                   !orphanPath.isEmpty,
+                                   FileManager.default.fileExists(atPath: orphanPath) {
+                                    target.localFilePath = orphanPath
+                                    target.fileSize = max(target.fileSize, episode.fileSize)
+                                    target.isDownloaded = true
+                                }
+
+                                duplicatesToDelete.append(episode)
+                                migratedOrphanCount += 1
+                            } else if !hasUserData(episode) {
+                                duplicatesToDelete.append(episode)
+                                removedStateFreeOrphanCount += 1
+                            } else {
+                                preservedOrphanCount += 1
+                            }
                             continue
                         }
-                        episodeIdCounts[episodeId, default: 0] += 1
+
+                        guard let episodeId = episode.id, !episodeId.isEmpty else {
+                            if !hasUserData(episode) {
+                                duplicatesToDelete.append(episode)
+                            } else {
+                                preservedOrphanCount += 1
+                            }
+                            continue
+                        }
+
+                        let storageKey = "\(feedId)\u{1F}\(episodeId)"
+                        episodeKeyCounts[storageKey, default: 0] += 1
+                    }
+
+                    // First pass: Count occurrences of each episode within its owning feed.
+                    if migratedOrphanCount > 0 || removedStateFreeOrphanCount > 0 || preservedOrphanCount > 0 {
+                        os_log(
+                            "🧹 Orphan episode review: migrated %d, removable %d, preserved with user data %d",
+                            log: self.log,
+                            type: .info,
+                            migratedOrphanCount,
+                            removedStateFreeOrphanCount,
+                            preservedOrphanCount
+                        )
                     }
                     
                     // CRITICAL SAFETY CHECK: Don't delete more than 10% of episodes to prevent data loss
@@ -353,22 +418,37 @@ class PodcastEpisodeManager {
                     
                     // Second pass: Mark only true duplicates for deletion (keep most recent)
                     for episode in allEpisodes {
-                        guard let episodeId = episode.id, !episodeId.isEmpty else {
+                        guard let episodeId = episode.id, !episodeId.isEmpty,
+                            let feedId = episode.feedId, activeFeedIds.contains(feedId) else {
                             continue // Already handled above
                         }
+                        let storageKey = "\(feedId)\u{1F}\(episodeId)"
                         
                         // Only consider for deletion if there are actually multiple episodes with this ID
-                        if episodeIdCounts[episodeId] ?? 0 > 1 {
-                            if seenIds.contains(episodeId) {
+                        if episodeKeyCounts[storageKey] ?? 0 > 1 {
+                            if let retainedEpisode = retainedEpisodesByKey[storageKey] {
                                 // This is a duplicate, mark for deletion but only if we haven't exceeded our safety limit
                                 if duplicatesToDelete.count < maxAllowedDeletions {
+                                    retainedEpisode.progress = max(retainedEpisode.progress, episode.progress)
+                                    retainedEpisode.isPlayed = retainedEpisode.isPlayed || episode.isPlayed
+                                    retainedEpisode.isFavorite = retainedEpisode.isFavorite || episode.isFavorite
+
+                                    if retainedEpisode.localFilePath?.isEmpty != false,
+                                       let duplicatePath = episode.localFilePath,
+                                       !duplicatePath.isEmpty,
+                                       FileManager.default.fileExists(atPath: duplicatePath) {
+                                        retainedEpisode.localFilePath = duplicatePath
+                                        retainedEpisode.fileSize = max(retainedEpisode.fileSize, episode.fileSize)
+                                        retainedEpisode.isDownloaded = true
+                                    }
+
                                     duplicatesToDelete.append(episode)
-                                    os_log("🗑️ Marking duplicate episode for deletion: %@ (occurrence %d)", log: self.log, type: .debug, episodeId, episodeIdCounts[episodeId] ?? 0)
+                                    os_log("🗑️ Marking duplicate episode for deletion: %@ (occurrence %d)", log: self.log, type: .debug, episodeId, episodeKeyCounts[storageKey] ?? 0)
                                 } else {
                                     os_log("⚠️ Reached maximum deletion limit, skipping duplicate: %@", log: self.log, type: .info, episodeId)
                                 }
                             } else {
-                                seenIds.insert(episodeId)
+                                retainedEpisodesByKey[storageKey] = episode
                             }
                         }
                     }
@@ -419,30 +499,39 @@ class PodcastEpisodeManager {
                     
                     let episodes = try backgroundContext.fetch(fetchRequest)
                     
-                    // Handle duplicate episode IDs gracefully - use the most recent one
-                    var episodeDict: [String: PodcastModel] = [:]
+                    var episodesById: [String: [PodcastModel]] = [:]
                     for episode in episodes {
                         guard let episodeId = episode.id else { continue }
-                        
-                        if let existingEpisode = episodeDict[episodeId] {
-                            // Keep the episode with the most recent date or the one with more data
-                            let existingDate = existingEpisode.publicationDate ?? Date.distantPast
-                            let newDate = episode.publicationDate ?? Date.distantPast
-                            
-                            if newDate > existingDate {
-                                episodeDict[episodeId] = episode
-                                print("⚠️ Found duplicate episode ID \(episodeId), keeping newer one")
-                            } else {
-                                print("⚠️ Found duplicate episode ID \(episodeId), keeping existing one")
-                            }
-                        } else {
-                            episodeDict[episodeId] = episode
-                        }
+                        episodesById[episodeId, default: []].append(episode)
                     }
                     
                     // Apply updates efficiently
                     for update in updates {
-                        guard let episode = episodeDict[update.episodeId] else { continue }
+                        let candidates = episodesById[update.episodeId] ?? []
+                        let episode: PodcastModel?
+
+                        if let feedId = update.feedId, !feedId.isEmpty {
+                            if let exactMatch = candidates.first(where: { $0.feedId == feedId }) {
+                                episode = exactMatch
+                            } else if candidates.count == 1 {
+                                episode = candidates[0]
+                                print("🛡️ STATE UPDATE: Remapped stale feed \(feedId) to the only local owner for episode \(update.episodeId)")
+                            } else {
+                                episode = nil
+                                if candidates.count > 1 {
+                                    print("🚫 STATE UPDATE SKIPPED: Episode ID \(update.episodeId) has no match for feed \(feedId) and is locally ambiguous")
+                                }
+                            }
+                        } else if candidates.count == 1 {
+                            episode = candidates[0]
+                        } else {
+                            episode = nil
+                            if candidates.count > 1 {
+                                print("🚫 STATE UPDATE SKIPPED: Episode ID \(update.episodeId) exists in multiple feeds and no feedId was provided")
+                            }
+                        }
+
+                        guard let episode else { continue }
                         
                         if let progress = update.progress {
                             episode.progress = progress
@@ -528,13 +617,16 @@ class PodcastEpisodeManager {
     }
     
     /// Update the local file path for a downloaded episode
-    func updateEpisodeLocalPath(_ episodeId: String, localPath: String?) async {
+    func updateEpisodeLocalPath(_ episodeId: String, feedId: String, localPath: String?) async {
         await withCheckedContinuation { continuation in
             let backgroundContext = CoreDataStack.shared.newBackgroundContext()
             
             backgroundContext.perform {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "id == %@", episodeId),
+                    NSPredicate(format: "feedId == %@", feedId)
+                ])
                 fetchRequest.fetchLimit = 1
                 
                 do {
@@ -704,18 +796,12 @@ class PodcastEpisodeManager {
         // PERFORMANCE: Early exit for empty arrays
         guard !managedEpisodes.isEmpty else { return [] }
         
-        // BATCH OPTIMIZATION: Get all episode IDs at once for batch state lookup
-        let episodeIds = managedEpisodes.compactMap { $0.id }
-        
-        // BATCH STATE LOADING: Get all episode states in one operation
-        let episodeStatesData = EpisodeStateManager.shared.getBatchEpisodeData(for: episodeIds)
         let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
         
         // DEBUG: Check if state manager has any data
-        let stateCount = episodeStatesData.count
         let progressCount = EpisodeStateManager.shared.episodeProgress.count
         let favoritesCount = EpisodeStateManager.shared.episodeFavorites.count
-        print("🔍 EPISODE STATE DEBUG: StateManager Ready=\(EpisodeStateManager.shared.isReady), States=\(stateCount), Progress=\(progressCount), Favorites=\(favoritesCount)")
+        print("🔍 EPISODE STATE DEBUG: StateManager Ready=\(EpisodeStateManager.shared.isReady), Progress=\(progressCount), Favorites=\(favoritesCount)")
         
         // PARALLEL PROCESSING: Use concurrent map for conversion
         let convertedEpisodes: [PodcastEpisode] = managedEpisodes.compactMap { managedEpisode -> PodcastEpisode? in
@@ -732,11 +818,12 @@ class PodcastEpisodeManager {
                 return nil
             }
             
-            // FAST STATE LOOKUP: Get pre-fetched state data
-            guard let stateData = episodeStatesData[episodeId] else {
-                // Episode not in state manager, use Core Data only
-                return episode
-            }
+            let stateData = EpisodeStateData(
+                progress: EpisodeStateManager.shared.getProgress(for: episodeId, feedId: episode.feedId),
+                state: EpisodeStateManager.shared.getState(for: episodeId, feedId: episode.feedId),
+                isFavorite: EpisodeStateManager.shared.isFavorite(episodeId, feedId: episode.feedId),
+                isDownloaded: EpisodeStateManager.shared.isDownloaded(episodeId, feedId: episode.feedId)
+            )
             
             let coreDataProgress = episode.state.progress
             let finalProgress: Double
@@ -782,11 +869,6 @@ class PodcastEpisodeManager {
         // PERFORMANCE: Early exit for empty arrays
         guard !managedEpisodes.isEmpty else { return [] }
         
-        // BATCH OPTIMIZATION: Get all episode IDs at once for batch state lookup
-        let episodeIds = managedEpisodes.compactMap { $0.id }
-        
-        // BATCH STATE LOADING: Get all episode states in one operation
-        let episodeStatesData = EpisodeStateManager.shared.getBatchEpisodeData(for: episodeIds)
         let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
         
         // PARALLEL PROCESSING: Use concurrent map for conversion
@@ -814,11 +896,12 @@ class PodcastEpisodeManager {
                 return nil
             }
             
-            // FAST STATE LOOKUP: Get pre-fetched state data
-            guard let stateData = episodeStatesData[episodeId] else {
-                // Episode not in state manager, use Core Data only
-                return episode
-            }
+            let stateData = EpisodeStateData(
+                progress: EpisodeStateManager.shared.getProgress(for: episodeId, feedId: episode.feedId),
+                state: EpisodeStateManager.shared.getState(for: episodeId, feedId: episode.feedId),
+                isFavorite: EpisodeStateManager.shared.isFavorite(episodeId, feedId: episode.feedId),
+                isDownloaded: EpisodeStateManager.shared.isDownloaded(episodeId, feedId: episode.feedId)
+            )
             
             let coreDataProgress = episode.state.progress
             let finalProgress: Double
