@@ -2504,6 +2504,8 @@ class EpisodeStateManager: ObservableObject {
         
         saveCurrentStates(for: [stateKey])
         sendThrottledUpdate()
+
+        performRealTimeSyncForEpisode(episodeId, reason: "episode_replayed", feedId: feedId)
     }
     
     func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool, currentTime: Double? = nil, feedId: String? = nil) {

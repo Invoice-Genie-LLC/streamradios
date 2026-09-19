@@ -140,7 +140,31 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                         episodeCountRequest.includesPropertyValues = false // Only count, don't load data
                         
                         do {
-                            let episodeCount = try context.count(for: episodeCountRequest)
+                            var episodeCount = try context.count(for: episodeCountRequest)
+
+                            if episodeCount == 0, !feed.url.isEmpty {
+                                let normalizedURL = feed.url.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                                let deterministicFeedId = "feed_\(StableHash.of(normalizedURL))"
+
+                                if deterministicFeedId != feed.id {
+                                    episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", deterministicFeedId)
+                                    let deterministicEpisodeCount = try context.count(for: episodeCountRequest)
+                                    if deterministicEpisodeCount > 0 {
+                                        os_log(
+                                            "🚗 CarPlay: Resolved feed ID mismatch for '%@': %@ -> %@ (%d episodes)",
+                                            log: self.log,
+                                            type: .info,
+                                            feed.title,
+                                            feed.id,
+                                            deterministicFeedId,
+                                            deterministicEpisodeCount
+                                        )
+                                        feed.id = deterministicFeedId
+                                        episodeCount = deterministicEpisodeCount
+                                    }
+                                }
+                            }
+
                             // Initialize with empty episodes array - will be loaded on-demand
                             feed.episodes = []
                             os_log("🚗 CarPlay: Feed '%@' has %d episodes (will load on-demand)", log: self.log, type: .debug, feed.title, episodeCount)
@@ -419,6 +443,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Store the interface controller
         self.interfaceController = interfaceController
+        PodcastPlayer.shared.prepareForCarPlay(with: PodcastViewModel.shared)
         startDataInitializationIfNeeded()
 
         // Configure the system Now Playing template before the head unit exposes its controls.
@@ -1605,7 +1630,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
             
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                self?.playEpisode(episode, completion: completion)
+                self?.playRecentEpisode(episode, completion: completion)
             }
             recentEpisodeItems.append(item)
             recentEpisodeRows.append((episode.id, item))
@@ -2514,6 +2539,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             completion()
         }
     }
+
+    private func stationIndex(matching station: RadioStation, in stations: [RadioStation]) -> Int? {
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            return index
+        }
+
+        guard let identityKey = RadioStationViewModel.stationIdentityKey(station.url) else {
+            return nil
+        }
+        return stations.firstIndex {
+            RadioStationViewModel.stationIdentityKey($0.url) == identityKey
+        }
+    }
     
     private func performPlayStation(_ station: RadioStation, completion: @escaping () -> Void) {
         os_log("CarPlay: Playing station %@", log: log, type: .info, station.name)
@@ -2549,15 +2587,22 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // CRITICAL: Create immediate Now Playing info for independent operation
             self.createImmediateRadioNowPlayingInfo(for: station)
             
-            if RadioStationViewModel.shared.stations.contains(where: { $0.id == station.id }) {
+            let currentStations = RadioStationViewModel.shared.stations
+            if self.stationIndex(matching: station, in: currentStations) != nil {
                 // Add longer delay to allow CarPlay to fully hand over audio session control
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                     // Re-resolve the index here: the list can change during the delay.
                     let stations = RadioStationViewModel.shared.stations
-                    guard let stationIndex = stations.firstIndex(where: { $0.id == station.id }) else { return }
-                    radioPlayer.playStation(at: stationIndex, from: stations)
-                    // Mirrors the phone app so the station lands in Recents and the indicator refreshes.
-                    RadioStationViewModel.shared.updateLastPlayed(for: station)
+                    if let stationIndex = self.stationIndex(matching: station, in: stations) {
+                        let resolvedStation = stations[stationIndex]
+                        radioPlayer.playStation(at: stationIndex, from: stations)
+                        // Mirrors the phone app so the station lands in Recents and the indicator refreshes.
+                        RadioStationViewModel.shared.updateLastPlayed(for: resolvedStation)
+                    } else {
+                        os_log("🚗 CarPlay: Station list changed during playback handoff; using tapped snapshot", log: self.log, type: .info)
+                        radioPlayer.playStation(at: 0, from: [station])
+                        RadioStationViewModel.shared.updateLastPlayed(for: station)
+                    }
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         self.triggerImmediateITunesArtworkFetch()
@@ -2577,7 +2622,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     os_log("🚗 CarPlay: Final gentle Now Playing info update for station: %@", log: self.log, type: .info, station.name)
                 }
             } else {
-                os_log("🚗 CarPlay: Station not found in current stations list, creating independent Now Playing info", log: self.log, type: .error)
+                os_log("🚗 CarPlay: Station not found in current stations list, playing tapped snapshot directly", log: self.log, type: .info)
+
+                radioPlayer.playStation(at: 0, from: [station])
+                RadioStationViewModel.shared.updateLastPlayed(for: station)
                 
                 // Force create Now Playing info for independent operation (safe version)
                 for delay in [0.5, 1.0, 2.0] {
@@ -2616,6 +2664,50 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         } otherwise: {
             self.handleBlockedPlayback(reason: "episode tapped without an active subscription")
             completion()
+        }
+    }
+
+    private func playRecentEpisode(_ episode: PodcastEpisode, completion: @escaping () -> Void) {
+        completion()
+
+        Task { [weak self] in
+            guard let self else { return }
+            let resolvedEpisode = await self.resolveEpisodeFromCoreData(episode) ?? episode
+            await MainActor.run {
+                self.playEpisode(resolvedEpisode, completion: {})
+            }
+        }
+    }
+
+    private func resolveEpisodeFromCoreData(_ episode: PodcastEpisode) async -> PodcastEpisode? {
+        let context = await CoreDataStack.shared.newBackgroundContextAfterStoreLoad()
+
+        return await context.perform {
+            let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", episode.id)
+
+            do {
+                let matches = try context.fetch(request)
+                let managedEpisode = matches.first(where: { $0.feedId == episode.feedId }) ?? matches.first
+                guard let managedEpisode else { return nil }
+
+                os_log(
+                    "🚗 CarPlay: Hydrated recent episode '%@' from Core Data before playback",
+                    log: self.log,
+                    type: .info,
+                    episode.title
+                )
+                return managedEpisode.toPodcastEpisode()
+            } catch {
+                os_log(
+                    "🚗 CarPlay: Failed to hydrate recent episode '%@': %@",
+                    log: self.log,
+                    type: .error,
+                    episode.title,
+                    error.localizedDescription
+                )
+                return nil
+            }
         }
     }
     
@@ -3431,7 +3523,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 }
                 
                 item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                    self?.playEpisode(episode, completion: completion)
+                    self?.playRecentEpisode(episode, completion: completion)
                 }
                 recentEpisodeItems.append(item)
                 recentEpisodeRows.append((episode.id, item))

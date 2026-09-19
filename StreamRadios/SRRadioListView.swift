@@ -207,7 +207,9 @@ private struct SRRadioListContent: View {
                 flag: flagImage
             )
             .equatable()
-            .simultaneousGesture(scrollTrackingGesture)
+            .onScrollPhaseChange { _, newPhase in
+                isScrolling = newPhase.isScrolling
+            }
             .onChange(of: scrollTargetId) { _, newValue in
                 guard let newValue, !isEditing else { return }
                 withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(newValue, anchor: .center) }
@@ -469,16 +471,6 @@ private struct SRRadioListContent: View {
                 }
             }
         )
-    }
-
-    private var scrollTrackingGesture: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { _ in
-                if !isScrolling { isScrolling = true }
-            }
-            .onEnded { _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { isScrolling = false }
-            }
     }
 
     private func scrollToCurrent(_ proxy: ScrollViewProxy) {

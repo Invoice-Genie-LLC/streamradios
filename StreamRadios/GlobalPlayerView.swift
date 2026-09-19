@@ -115,18 +115,6 @@ struct GlobalPlayerView: View {
                             podcastPlayer.pause()
                         }
                     )
-                    .onTapGesture {
-                        // Only allow tap when Home button is not showing to prevent conflicts
-                        if !isScrolling, let currentFeed = podcastPlayer.currentFeed {
-                            // Switch to podcast tab and set the current feed
-                            selectedPodcast = currentFeed
-                            podcastViewModel.requestFeedRefresh(currentFeed.id)
-                            selectedTab = .podcast
-                        }
-                    }
-                    // Must stay outside the tap gesture, or the gesture keeps swallowing taps while
-                    // the player itself is disabled.
-                    .allowsHitTesting(!isScrolling) // Disable podcast player taps when Home button is showing
                     .zIndex(0) // Player is below home button
                 }
                 .padding(.horizontal, playerHorizontalPadding)
@@ -144,7 +132,6 @@ struct GlobalPlayerView: View {
                         CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
-                            .allowsHitTesting(!isScrolling) // Disable radio player taps when Home button is showing
                             .zIndex(0) // Player is below home button
                     }
                     .padding(.horizontal, playerHorizontalPadding)
@@ -161,7 +148,6 @@ struct GlobalPlayerView: View {
                         CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
-                            .allowsHitTesting(!isScrolling) // Disable radio player taps when Home button is showing
                             .zIndex(0) // Player is below home button
                     }
                     .padding(.horizontal, playerHorizontalPadding)

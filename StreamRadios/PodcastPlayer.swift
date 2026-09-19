@@ -1073,6 +1073,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         if currentEpisode?.id == episode.id {
             // Same episode - rewind to beginning and play
+            var rewoundEpisode = episode
+            rewoundEpisode.state.progress = 0
+            rewoundEpisode.state.isPlayed = false
+            currentEpisode = rewoundEpisode
             seek(to: 0)
             currentTime = 0
             currentProgress = 0
@@ -1128,6 +1132,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // UI will update naturally through other mechanisms
     }
     
+    func prepareForCarPlay(with viewModel: PodcastViewModel) {
+        self.viewModel = viewModel
+    }
+
     func configure(with viewModel: PodcastViewModel) {
         self.viewModel = viewModel
 
@@ -1351,7 +1359,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             await initializePlayerForRestoredEpisode(episode: episode)
             
             // Load saved progress and ensure it's set correctly
-            let savedProgress = stateManager.getProgress(for: episode.id)
+            let savedProgress = stateManager.getProgress(for: episode.id, feedId: episode.feedId)
             if savedProgress > 0 {
                 currentProgress = savedProgress
                 if duration > 0 {
@@ -1434,7 +1442,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     currentEpisode = episode
                     
                     // Restore progress
-                    let savedProgress = stateManager.getProgress(for: episode.id)
+                    let savedProgress = stateManager.getProgress(for: episode.id, feedId: episode.feedId)
                     if savedProgress > 0 {
                         currentProgress = savedProgress
                         print("✅ Podcast: Restored progress: \(savedProgress * 100)%")
@@ -1486,7 +1494,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                                 self.currentEpisode = episode
                                 
                                 // Restore progress
-                                let savedProgress = self.stateManager.getProgress(for: episode.id)
+                                let savedProgress = self.stateManager.getProgress(for: episode.id, feedId: episode.feedId)
                                 if savedProgress > 0 {
                                     self.currentProgress = savedProgress
                                     print("✅ Podcast: Restored progress: \(savedProgress * 100)%")
@@ -1616,7 +1624,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private func seekToSavedPositionForRestoredEpisode(episode: PodcastEpisode) async {
         print("🔧 PodcastPlayer: Seeking to saved position for restored episode: \(episode.title)")
         
-        let savedProgress = stateManager.getProgress(for: episode.id)
+        let savedProgress = stateManager.getProgress(for: episode.id, feedId: episode.feedId)
         print("🔧 PodcastPlayer: Saved progress: \(savedProgress * 100)%, duration: \(duration)s")
         
         if savedProgress > 0 && duration > 0 {
@@ -1977,7 +1985,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 } else {
                     // ENHANCED PROTECTION: Only reset to 0 if we're sure there's no progress anywhere
                     // Check EpisodeStateManager as backup before resetting
-                    let stateManagerProgress = stateManager.getProgress(for: episode.id)
+                    let stateManagerProgress = stateManager.getProgress(for: episode.id, feedId: episode.feedId)
                     let episodeStateProgress = episode.state.progress
                     let maxProgress = max(stateManagerProgress, episodeStateProgress)
                     
@@ -2123,6 +2131,31 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                        self.loadingEpisodeId == currentEpisode.id {
                         self.loadingEpisodeId = nil
                     }
+                } else if playerItem.status == .failed {
+                    DispatchQueue.main.async {
+                        guard self.player?.currentItem === playerItem else { return }
+
+                        let episodeId = self.currentEpisode?.id
+                        self.loadingEpisodeId = nil
+                        self.isPlaying = false
+                        self.userWantsToPlay = false
+                        self.connectionState = .error
+
+                        os_log(
+                            "Podcast item failed to load: %@",
+                            log: self.log,
+                            type: .error,
+                            playerItem.error?.localizedDescription ?? "Unknown error"
+                        )
+
+                        if let episodeId {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("PodcastPlaybackStateChanged"),
+                                object: nil,
+                                userInfo: ["episodeId": episodeId, "isPlaying": false]
+                            )
+                        }
+                    }
                 }
             }
 
@@ -2220,7 +2253,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         if isPlaying && currentTime > 0 && !isAppStartup {
             let expectedProgress = max(
-                stateManager.getProgress(for: currentEpisode.id),
+                stateManager.getProgress(for: currentEpisode.id, feedId: currentEpisode.feedId),
                 currentEpisode.state.progress
             )
             let expectedTime = expectedProgress * duration
@@ -2307,7 +2340,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         else {
             // ENHANCED PROTECTION: Before resetting to beginning, check all possible progress sources
-            let stateManagerProgress = stateManager.getProgress(for: currentEpisode.id)
+            let stateManagerProgress = stateManager.getProgress(
+                for: currentEpisode.id,
+                feedId: currentEpisode.feedId
+            )
             let episodeStateProgress = currentEpisode.state.progress
             let maxAlternateProgress = max(stateManagerProgress, episodeStateProgress)
             
@@ -2387,6 +2423,13 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 os_log("No current episode or feed available", log: OSLog.default, type: .error)
                 return
             }
+
+        if currentProgress >= 0.999 {
+            guard let currentFeed else { return }
+            os_log("Restarting completed episode from beginning: %@", log: log, type: .info, currentEpisode.title)
+            performRewindAndPlay(episode: currentEpisode, feed: currentFeed)
+            return
+        }
         
         // LOADING STATE: Keep loading state active until playback actually starts
         // loadingEpisodeId will be cleared when playback begins in the time observer
@@ -2412,7 +2455,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // BUT: Skip this if the same episode is already restored in CarPlay
         if !isAlreadyRestoredInCarPlay {
             let currentPlayerTime = player.currentTime().seconds
-            let savedProgress = stateManager.getProgress(for: currentEpisode.id)
+            let savedProgress = stateManager.getProgress(
+                for: currentEpisode.id,
+                feedId: currentEpisode.feedId
+            )
             let expectedTime = savedProgress * duration
             
             // CRITICAL FIX: Prevent progress reset when returning from lock screen
@@ -2467,15 +2513,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     /// Helper method to continue play logic after progress restoration
     private func continuePlayAfterProgressRestore() {
         guard let currentEpisode = currentEpisode else { return }
+
+        if loadingEpisodeId == currentEpisode.id {
+            loadingEpisodeId = nil
+        }
         
         // Apply current audio settings
         applyCurrentAudioSettings()
         
         // SELECTIVE CROSS-DEVICE SYNC: Enable deferred sync mode during playback
         stateManager.enableDeferredCloudKitSync()
-        
-        // NOTE: Don't clear loading state here - it should only be cleared when playback actually starts
-        // This will be handled by the time observer when playback begins
         
         // Update connection state when starting playback
         connectionState = .connected
@@ -3892,7 +3939,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // CRITICAL: Preserve maximum progress to prevent reset during force close
             // Get existing progress from StateManager and use the maximum value
-            let existingProgress = stateManager.getProgress(for: currentEpisode.id)
+            let existingProgress = stateManager.getProgress(
+                for: currentEpisode.id,
+                feedId: currentEpisode.feedId
+            )
             
             // CHAPTER SEEK FIX: If we're in chapter protection period, use currentProgress directly
             let now = Date()
@@ -4039,7 +4089,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let calculatedProgress = duration > 0 ? currentTime / duration : 0
             
             // CRITICAL: Preserve maximum progress during deallocation
-            let existingProgress = stateManager.getProgress(for: currentEpisode.id)
+            let existingProgress = stateManager.getProgress(
+                for: currentEpisode.id,
+                feedId: currentEpisode.feedId
+            )
             let maxProgress = max(calculatedProgress, existingProgress, currentProgress)
             
             // Update in-memory cache directly without triggering CloudKit saves

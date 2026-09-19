@@ -13,7 +13,6 @@ import AVKit
 // MARK: - Notification Names
 extension Notification.Name {
     static let episodeListScrolling = Notification.Name("episodeListScrolling")
-    static let episodeListScrollingStopped = Notification.Name("episodeListScrollingStopped")
 }
 
 // MARK: - Feed Deletion Progress View
@@ -424,16 +423,6 @@ struct PodcastListView: View {
                    isScrolling.wrappedValue = true
                    // FIRST-TIME PLAYBACK PROTECTION: Only set scroll state, let ContentView handle TabView hiding
                    // REMOVED: Direct isFooterMenuHidden assignment - let ContentView shouldHideFooterMenu logic handle this
-               }
-           }
-           .onReceive(NotificationCenter.default.publisher(for: .episodeListScrollingStopped)) { _ in
-               // Episode list stopped scrolling - hide home button after delay
-               DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                   isScrolling.wrappedValue = false
-                   // Note: Don't reset isFooterMenuHidden here - let home button control it
-                   
-                   // Post notification for episode title scrolling
-                   NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
                }
            }
     }
@@ -3352,7 +3341,7 @@ struct PodcastPlayerView: View {
     @State private var lastAppearanceTime = Date()
     
     @State private var isLoadingMore = false
-    @State private var scrollDebounceTimer: Timer?
+    @State private var isEpisodeListScrolling = false
     
     // Animation states for enhanced UI feedback
     @State private var endIndicatorScale: CGFloat = 1.0
@@ -3475,9 +3464,7 @@ struct PodcastPlayerView: View {
         }
                 .onAppear(perform: handleOnAppear)
                         .onDisappear {
-            // Clean up timers to prevent memory leaks
-            scrollDebounceTimer?.invalidate()
-            scrollDebounceTimer = nil
+            updateEpisodeListScrollState(isScrolling: false)
             
             // Save progress for currently playing/paused episode before leaving
             if let currentEpisode = podcastPlayer.currentEpisode,
@@ -3900,6 +3887,9 @@ struct PodcastPlayerView: View {
                     )
             }
             }
+            .onScrollPhaseChange { _, newPhase in
+                updateEpisodeListScrollState(isScrolling: newPhase.isScrolling)
+            }
             .refreshable {
                 // Pull to refresh - fetch new episodes from RSS with enhanced feedback
                 let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
@@ -3987,30 +3977,6 @@ struct PodcastPlayerView: View {
                 }
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 10)
-                .onChanged { value in
-                    // Only trigger for primarily vertical scrolling (not horizontal swipes)
-                    let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
-                    if isVerticalScroll {
-                        // Post notification that episode list is scrolling
-                        NotificationCenter.default.post(name: .episodeListScrolling, object: nil)
-                    }
-                }
-                .onEnded { value in
-                    // Only trigger for primarily vertical scrolling (not horizontal swipes)
-                    let isVerticalScroll = abs(value.translation.height) > abs(value.translation.width)
-                    if isVerticalScroll {
-                        // Post notification that episode list stopped scrolling
-                        NotificationCenter.default.post(name: .episodeListScrollingStopped, object: nil)
-                        
-                        // Also post notification for episode title scrolling
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
-                        }
-                    }
-                }
-        )
         .overlay(
             // Success toast notification
             VStack {
@@ -4045,6 +4011,23 @@ struct PodcastPlayerView: View {
             .padding(.top, 50),
             alignment: .top
         )
+    }
+
+    private func updateEpisodeListScrollState(isScrolling: Bool) {
+        guard isEpisodeListScrolling != isScrolling else { return }
+        isEpisodeListScrolling = isScrolling
+        UserDefaults.standard.set(isScrolling, forKey: "isUserScrolling")
+
+        if isScrolling {
+            NotificationCenter.default.post(name: .episodeListScrolling, object: nil)
+            NotificationCenter.default.post(
+                name: .userIsScrolling,
+                object: nil,
+                userInfo: ["usesNativeScrollPhase": true]
+            )
+        } else {
+            NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+        }
     }
 
     /// Scrolls to currently playing episode when returning to the view

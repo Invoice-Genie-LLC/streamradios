@@ -364,21 +364,27 @@ struct ContentView: View {
             // SAFETY: Ensure TabView is visible on app appear
             ensureTabViewIsVisible()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .userIsScrolling)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .userIsScrolling)) { notification in
             // CRITICAL: Hide TabView when user starts scrolling
             guard PlaybackManager.shared.hasEverPlayedContent() else {
                 print("🏠 SCROLL: Ignoring scroll - user hasn't played content yet (fresh install protection)")
                 return
             }
-            
-            print("🏠 SCROLL: User started scrolling - hiding TabView")
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                isScrolling = true
+
+            if !isScrolling {
+                print("🏠 SCROLL: User started scrolling - hiding TabView")
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isScrolling = true
+                }
             }
-            
+
             // A cancelled drag never posts .userStoppedScrolling, which would otherwise leave the
             // global player hit-testing disabled forever.
             scrollingWatchdog?.cancel()
+            guard notification.userInfo?["usesNativeScrollPhase"] as? Bool != true else {
+                scrollingWatchdog = nil
+                return
+            }
             let watchdog = DispatchWorkItem {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                     isScrolling = false
@@ -388,11 +394,13 @@ struct ContentView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: watchdog)
         }
         .onReceive(NotificationCenter.default.publisher(for: .userStoppedScrolling)) { _ in
-            print("🏠 SCROLL: User stopped scrolling - showing TabView")
             scrollingWatchdog?.cancel()
             scrollingWatchdog = nil
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                isScrolling = false
+            if isScrolling {
+                print("🏠 SCROLL: User stopped scrolling - showing TabView")
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isScrolling = false
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ForceTabViewVisible"))) { _ in

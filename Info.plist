@@ -12,24 +12,8 @@
 		<string>com.streamradios.playalarm</string>
 		<string>com.radio.streamradios.carplay.artwork</string>
 	</array>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
-	<key>CFBundleDisplayName</key>
-	<string>StreamRadios</string>
-	<key>CFBundleExecutable</key>
-	<string>StreamRadios</string>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
-	<key>CFBundleIdentifier</key>
-	<string>com.radio.streamradios</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>StreamRadios</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>3.1.6</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -46,8 +30,6 @@
 			<string>com.yourdomain.StreamRadios</string>
 		</dict>
 	</array>
-	<key>CFBundleVersion</key>
-	<string>7</string>
 	<key>GIDClientID</key>
 	<string>833637905829-hd8dhr5k1adbji0mcn12lmqtgbvc0k3s.apps.googleusercontent.com</string>
 	<key>LSApplicationQueriesSchemes</key>
@@ -68,8 +50,6 @@
 			<true/>
 		</dict>
 	</dict>
-	<key>NSAppleMusicUsageDescription</key>
-	<string>StreamRadios needs access to your Apple Music library to add Shazam-identified songs to your playlists</string>
 	<key>NSCalendarUsageDescription</key>
 	<string>StreamRadios requires access to the calendar to schedule radio station program alerts.</string>
 	<key>NSDocumentTypes</key>
