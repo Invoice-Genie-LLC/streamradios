@@ -163,9 +163,6 @@ class NotificationManager: NSObject, ObservableObject {
         // Remove all delivered notifications from notification center
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         
-        // Remove all pending notifications
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
-        
         // Reset app badge count to 0
         DispatchQueue.main.async {
             UIApplication.shared.applicationIconBadgeNumber = 0

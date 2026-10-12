@@ -27,7 +27,9 @@ struct RadioStation: Identifiable, Codable, Equatable, Hashable {
         if isFavorite || favoritedAt != nil || favoriteOrder != nil { return true }
         if iconData != nil || iTunesArtworkData != nil { return true }
         if lastPlayed != nil { return true }
-        if id.hasPrefix("manual_") || id.hasPrefix("import_") { return true }
+        if id.hasPrefix("import_") { return true }
+        // Stations added in the app get an uppercase UUID; Radio Browser ids are lowercase.
+        if id != id.lowercased() { return true }
         return false
     }
     

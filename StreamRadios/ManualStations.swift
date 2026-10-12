@@ -195,7 +195,7 @@ struct ManualStationInfo {
     /// Convert to RadioStation model with proper ordering
     func toRadioStation(country: String, order: Int) -> RadioStation {
         return RadioStation(
-            id: UUID().uuidString,
+            id: Self.stableID(name: name, country: country),
             name: name,
             url: url,
             iconData: iconURL,
@@ -203,6 +203,15 @@ struct ManualStationInfo {
             isFavorite: false,
             order: order
         )
+    }
+    
+    /// Same id on every install and device. A random UUID here gave each fresh install a new copy of
+    /// every bundled station, which is where the duplicate CloudKit records came from.
+    static func stableID(name: String, country: String) -> String {
+        let slug = "\(country)_\(name)".lowercased().unicodeScalars.map { scalar -> Character in
+            scalar.isASCII && CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : "_"
+        }
+        return "manual_" + String(slug)
     }
 }
 

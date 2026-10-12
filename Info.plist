@@ -56,6 +56,10 @@
 	<array>
 		<string>public.text</string>
 	</array>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.radio.streamradios.contactSupport</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UISceneConfigurations</key>

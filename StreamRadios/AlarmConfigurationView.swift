@@ -593,7 +593,17 @@ struct AlarmConfigurationView: View {
             content.sound = UNNotificationSound.default
             content.userInfo = ["stationIndex": alarm.stationIndex, "alarmType": "streamRadiosAlarm"]
             
-            let triggerDate = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: alarm.time)
+            let calendar = Calendar.current
+            let timeComponents = calendar.dateComponents([.hour, .minute], from: alarm.time)
+            guard let nextAlarmDate = calendar.nextDate(
+                after: Date(),
+                matching: timeComponents,
+                matchingPolicy: .nextTime
+            ) else {
+                print("Error scheduling single time notification: unable to resolve the next alarm date")
+                return
+            }
+            let triggerDate = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: nextAlarmDate)
             let trigger = UNCalendarNotificationTrigger(dateMatching: triggerDate, repeats: false)
             let request = UNNotificationRequest(identifier: "singleTimeAlarm", content: content, trigger: trigger)
             

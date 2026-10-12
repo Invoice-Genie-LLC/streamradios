@@ -168,7 +168,11 @@ class PodcastSearchService: ObservableObject {
         }
         
         // A cancelled or superseded request must not clobber the results of the newer one.
-        guard generation == searchGeneration, !Task.isCancelled else { return }
+        guard generation == searchGeneration, !Task.isCancelled else {
+            // Cancelled with nothing newer behind it: don't leave the spinner up.
+            if generation == searchGeneration { self.isSearching = false }
+            return
+        }
         
         self.searchResults = combinedResults
         

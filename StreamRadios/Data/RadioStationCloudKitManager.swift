@@ -921,10 +921,119 @@ class RadioStationCloudKitManager: ObservableObject {
         return total
     }
     
+    /// Collapses `streamingRadios` records that hold the same stream into one, keeping the favourite copy
+    /// and folding in the newest `lastPlayed` and any artwork the kept record lacks. Returns records removed.
+    func mergeDuplicateStationRecords() async throws -> Int {
+        let query = CKQuery(recordType: RecordType.radioStation, predicate: NSPredicate(value: true))
+        var recordIDsByKey: [String: [CKRecord.ID]] = [:]
+        var cursor: CKQueryOperation.Cursor? = nil
+        
+        repeat {
+            let operation = CKQueryOperation(query: query)
+            operation.cursor = cursor
+            operation.resultsLimit = 400
+            // Scalars only. Naming the asset fields here would download every stored icon.
+            operation.desiredKeys = ["url"]
+            
+            let (records, nextCursor): ([CKRecord], CKQueryOperation.Cursor?) = try await withCheckedThrowingContinuation { continuation in
+                var fetched: [CKRecord] = []
+                operation.recordMatchedBlock = { _, result in
+                    if case .success(let record) = result { fetched.append(record) }
+                }
+                operation.queryResultBlock = { result in
+                    switch result {
+                    case .success(let next): continuation.resume(returning: (fetched, next))
+                    case .failure(let error): continuation.resume(throwing: error)
+                    }
+                }
+                privateDatabase.add(operation)
+            }
+            
+            for record in records {
+                guard let key = RadioStationViewModel.stationIdentityKey(record["url"] as? String) else { continue }
+                recordIDsByKey[key, default: []].append(record.recordID)
+            }
+            cursor = nextCursor
+        } while cursor != nil
+        
+        let duplicateGroups = recordIDsByKey.values.filter { $0.count > 1 }
+        guard !duplicateGroups.isEmpty else { return 0 }
+        
+        var recordsToSave: [CKRecord] = []
+        var recordIDsToDelete: [CKRecord.ID] = []
+        
+        for group in duplicateGroups {
+            // Full records (with artwork) only for the duplicated streams.
+            let records = try await privateDatabase.records(for: group).compactMap { try? $0.value.get() }
+            guard records.count > 1 else { continue }
+            
+            let sorted = records.sorted(by: Self.isPreferredDuplicate)
+            let keeper = sorted[0]
+            let losers = sorted.dropFirst()
+            var changed = false
+            
+            let newestPlayed = records.compactMap { $0["lastPlayed"] as? Date }.max()
+            if let newestPlayed, newestPlayed != keeper["lastPlayed"] as? Date {
+                keeper["lastPlayed"] = newestPlayed as CKRecordValue
+                changed = true
+            }
+            for field in ["iconData", "iTunesArtworkData"] where keeper[field] == nil {
+                // CloudKit throws if one CKAsset instance is set on two records, so copy the file.
+                if let sourceURL = losers.lazy.compactMap({ ($0[field] as? CKAsset)?.fileURL }).first {
+                    let copyURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension("jpg")
+                    guard (try? FileManager.default.copyItem(at: sourceURL, to: copyURL)) != nil else { continue }
+                    keeper[field] = CKAsset(fileURL: copyURL)
+                    changed = true
+                }
+            }
+            if changed {
+                keeper["lastUpdated"] = Date() as CKRecordValue
+                recordsToSave.append(keeper)
+            }
+            recordIDsToDelete.append(contentsOf: losers.map(\.recordID))
+        }
+        
+        // Save merged keepers before deleting, so an interrupted run never loses the only copy of a field.
+        for start in stride(from: 0, to: recordsToSave.count, by: 200) {
+            let batch = Array(recordsToSave[start..<min(start + 200, recordsToSave.count)])
+            let result = try await privateDatabase.modifyRecords(saving: batch, deleting: [], savePolicy: .changedKeys)
+            for (_, saveResult) in result.saveResults { _ = try saveResult.get() }
+        }
+        
+        guard !recordIDsToDelete.isEmpty else { return 0 }
+        try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDsToDelete) { _ in }
+        os_log("📡 🧹 DEDUPE Removed %d duplicate station records across %d streams", log: log, type: .info, recordIDsToDelete.count, duplicateGroups.count)
+        return recordIDsToDelete.count
+    }
+    
+    /// Favourite beats non-favourite (older fresh installs overwrote favourites with `false`), then the
+    /// newest favourite, then the most recently modified record.
+    private static func isPreferredDuplicate(_ lhs: CKRecord, _ rhs: CKRecord) -> Bool {
+        let lhsFavorite = recordIsFavorite(lhs)
+        let rhsFavorite = recordIsFavorite(rhs)
+        if lhsFavorite != rhsFavorite { return lhsFavorite }
+        if lhsFavorite {
+            let lhsAt = lhs["favoritedAt"] as? Date ?? .distantPast
+            let rhsAt = rhs["favoritedAt"] as? Date ?? .distantPast
+            if lhsAt != rhsAt { return lhsAt > rhsAt }
+        }
+        return (lhs.modificationDate ?? .distantPast) > (rhs.modificationDate ?? .distantPast)
+    }
+    
+    private static func recordIsFavorite(_ record: CKRecord) -> Bool {
+        if let text = record["isFavorite"] as? String { return text.lowercased() == "true" }
+        if let number = record["isFavorite"] as? NSNumber { return number.boolValue }
+        return false
+    }
+    
     /// A record is worth keeping only when it carries something the user cannot get back from the API.
     private static func recordIsUserOwned(_ record: CKRecord, customArtworkURLs: Set<String>) -> Bool {
         let recordName = record.recordID.recordName
         if recordName.hasPrefix("manual_") || recordName.hasPrefix("import_") { return true }
+        // Stations added in the app get an uppercase UUID; Radio Browser ids are lowercase.
+        if recordName != recordName.lowercased() { return true }
         
         if let favorite = record["isFavorite"] as? String, favorite.lowercased() == "true" { return true }
         if let favorite = record["isFavorite"] as? Int, favorite != 0 { return true }
@@ -1036,93 +1145,18 @@ class RadioStationCloudKitManager: ObservableObject {
             return []
         }
         
-        // OPTIMIZATION: Instead of fetching ALL CloudKit records (expensive!), 
-        // query only for the specific station IDs we want to check
-        // This reduces 23+ page queries to a single targeted query
-        
         do {
-            // Filter station IDs to only include valid CloudKit record names
-            // CloudKit record names must only contain alphanumeric, hyphen, and underscore
-            let validStationIds = stations.compactMap { station -> String? in
-                let id = station.id
-                // Check if ID contains only valid CloudKit characters
-                let validCharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-                if id.unicodeScalars.allSatisfy({ validCharacterSet.contains($0) }) {
-                    return id
-                } else {
-                    // Skip IDs with invalid characters for CloudKit query
-                    return nil
-                }
+            let existing = try await DataStore.shared.existingStationRecords(for: stations)
+            var seenKeys = Set<String>()
+            return stations.filter { station in
+                guard existing[station.id] == nil else { return false }
+                guard let key = RadioStationViewModel.stationIdentityKey(station.url) else { return true }
+                return seenKeys.insert(key).inserted
             }
-            
-            guard !validStationIds.isEmpty else {
-                return stations
-            }
-            
-            // CloudKit has limits on IN queries, so batch the checks
-            let batchSize = 50
-            var existingIds = Set<String>()
-            var existingURLs = Set<String>()
-            
-            for batchStart in stride(from: 0, to: validStationIds.count, by: batchSize) {
-                let batchEnd = min(batchStart + batchSize, validStationIds.count)
-                let batchIds = Array(validStationIds[batchStart..<batchEnd])
-                
-                // Use direct record fetch instead of query predicate (more reliable)
-                // This avoids the "Invalid predicate: recordKey contains invalid characters" error
-                do {
-                    let recordIDs = batchIds.map { CKRecord.ID(recordName: $0) }
-                    let fetchResults = try await privateDatabase.records(for: recordIDs)
-                    
-                    for (recordID, result) in fetchResults {
-                        switch result {
-                        case .success(let record):
-                            existingIds.insert(recordID.recordName)
-                            if let url = record["url"] as? String {
-                                existingURLs.insert(url.lowercased())
-                            }
-                        case .failure(let error):
-                            // Record doesn't exist or other error - that's fine, just skip it
-                            if (error as? CKError)?.code != .unknownItem {
-                                // Only log non-"not found" errors silently
-                            }
-                        }
-                    }
-                } catch {
-                    // If fetch fails, skip this batch - not fatal
-                    continue
-                }
-            }
-            
-            // Filter out stations that already exist by ID or URL
-            let newStations = stations.filter { station in
-                // Check if station ID already exists
-                if existingIds.contains(station.id) {
-                    return false
-                }
-                
-                // Check if station URL already exists (with normalization)
-                let normalizedURL = station.url.lowercased()
-                    .replacingOccurrences(of: "https://", with: "")
-                    .replacingOccurrences(of: "http://", with: "")
-                
-                let hasURLDuplicate = existingURLs.contains { existingURL in
-                    let existingWithoutProtocol = existingURL
-                        .replacingOccurrences(of: "https://", with: "")
-                        .replacingOccurrences(of: "http://", with: "")
-                    return existingWithoutProtocol == normalizedURL
-                }
-                
-                return !hasURLDuplicate
-            }
-            
-            let duplicatesFiltered = stations.count - newStations.count
-            
-            return newStations
-            
         } catch {
-            // On error, proceed with all stations to avoid losing data
-            return stations
+            // Saving blind is what created duplicate records; the next country load retries.
+            os_log("⚠️ RADIO Skipping batch save, existing-record lookup failed: %@", log: log, type: .error, error.localizedDescription)
+            return []
         }
     }
     
@@ -1229,29 +1263,9 @@ class RadioStationCloudKitManager: ObservableObject {
         // For favorite order updates (country == nil), fetch existing records first
         var existingRecordsMap: [String: CKRecord] = [:]
         if country == nil {
-            let recordIDs = finalStationsToProcess.map { CKRecord.ID(recordName: $0.id) }
-            
-            // Fetch existing records in batches
-            let fetchBatchSize = 100
-            for batchStart in stride(from: 0, to: recordIDs.count, by: fetchBatchSize) {
-                let batchEnd = min(batchStart + fetchBatchSize, recordIDs.count)
-                let batchIDs = Array(recordIDs[batchStart..<batchEnd])
-                
-                do {
-                    let fetchedRecords = try await privateDatabase.records(for: batchIDs)
-                    for (recordID, result) in fetchedRecords {
-                        switch result {
-                        case .success(let record):
-                            existingRecordsMap[recordID.recordName] = record
-                        case .failure:
-                            break
-                        }
-                    }
-                } catch {
-                    // Continue with next batch
-                }
-            }
+            existingRecordsMap = try await DataStore.shared.existingStationRecords(for: finalStationsToProcess)
         }
+        var preparedRecordNames = Set<String>()
         
         for chunkIndex in 0..<totalChunks {
             let startIndex = chunkIndex * preparationChunkSize
@@ -1268,6 +1282,8 @@ class RadioStationCloudKitManager: ObservableObject {
                 } else {
                     record = CKRecord(recordType: RecordType.radioStation, recordID: recordID)
                 }
+                // Two local copies of one stream resolve to the same record; save it once.
+                guard preparedRecordNames.insert(record.recordID.recordName).inserted else { continue }
                 
                 // Update record fields
                 record["name"] = station.name as CKRecordValue
@@ -1345,13 +1361,8 @@ class RadioStationCloudKitManager: ObservableObject {
     func saveRadioStationToCloudKit(_ station: RadioStation) async throws {
         let recordID = CKRecord.ID(recordName: station.id)
         
-        // Try to fetch existing record first
-        var record: CKRecord
-        do {
-            record = try await privateDatabase.record(for: recordID)
-        } catch CKError.unknownItem {
-            record = CKRecord(recordType: RecordType.radioStation, recordID: recordID)
-        }
+        let record = try await DataStore.shared.existingStationRecord(for: station)
+            ?? CKRecord(recordType: RecordType.radioStation, recordID: recordID)
         
         // Update record fields
         record["name"] = station.name as CKRecordValue

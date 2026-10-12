@@ -11,6 +11,17 @@
 		5AB1C0DE0000000000000003 /* StreamRadiosKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5AB1C0DE0000000000000002 /* StreamRadiosKit */; };
 		5AB1C0DE0000000000000011 /* NowPlayingCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000010 /* NowPlayingCenter.swift */; };
 		5AB1C0DE0000000000000021 /* SRRadioListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000020 /* SRRadioListView.swift */; };
+		5AB1C0DE0000000000000101 /* StreamRadios Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000110 /* StreamRadios Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5AB1C0DE0000000000000102 /* StreamRadiosCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5AB1C0DE0000000000000170 /* StreamRadiosCore */; };
+		5AB1C0DE0000000000000103 /* StreamRadiosWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000111 /* StreamRadiosWatchApp.swift */; };
+		5AB1C0DE0000000000000104 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000112 /* WatchRootView.swift */; };
+		5AB1C0DE0000000000000105 /* WatchNowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000113 /* WatchNowPlayingView.swift */; };
+		5AB1C0DE0000000000000106 /* WatchRadioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000114 /* WatchRadioPlayer.swift */; };
+		5AB1C0DE0000000000000107 /* WatchLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000115 /* WatchLibraryStore.swift */; };
+		5AB1C0DE0000000000000108 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000117 /* Assets.xcassets */; };
+		5AB1C0DE0000000000000109 /* StreamRadiosCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5AB1C0DE0000000000000170 /* StreamRadiosCore */; };
+		5AB1C0DE000000000000010A /* WatchPodcastLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000118 /* WatchPodcastLibrary.swift */; };
+		5AB1C0DE000000000000010B /* WatchRadioDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C0DE0000000000000119 /* WatchRadioDirectory.swift */; };
 		7706149B2E65F71D0022C94A /* StationSubmissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149A2E65F71D0022C94A /* StationSubmissionView.swift */; };
 		7706149D2E67DF9C0022C94A /* SyncStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149C2E67DF9C0022C94A /* SyncStateManager.swift */; };
 		7706149F2E67E16B0022C94A /* DetailedSyncProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149E2E67E16B0022C94A /* DetailedSyncProgressView.swift */; };
@@ -113,6 +124,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		5AB1C0DE0000000000000140 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7707DA2D2C152EF2006D5EBB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5AB1C0DE0000000000000150;
+			remoteInfo = "StreamRadios Watch App";
+		};
 		774617912C17411E00F442B3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7707DA2D2C152EF2006D5EBB /* Project object */;
@@ -123,6 +141,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		5AB1C0DE0000000000000133 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				5AB1C0DE0000000000000101 /* StreamRadios Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		774617972C17411E00F442B3 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -140,6 +169,16 @@
 		13EEBEE095834FD2A182D6544F831109 /* AudioSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsSheet.swift; sourceTree = "<group>"; };
 		5AB1C0DE0000000000000010 /* NowPlayingCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingCenter.swift; sourceTree = "<group>"; };
 		5AB1C0DE0000000000000020 /* SRRadioListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SRRadioListView.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000110 /* StreamRadios Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "StreamRadios Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5AB1C0DE0000000000000111 /* StreamRadiosWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamRadiosWatchApp.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000112 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000113 /* WatchNowPlayingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchNowPlayingView.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000114 /* WatchRadioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRadioPlayer.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000115 /* WatchLibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchLibraryStore.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000116 /* StreamRadiosWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamRadiosWatch.entitlements; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000117 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000118 /* WatchPodcastLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPodcastLibrary.swift; sourceTree = "<group>"; };
+		5AB1C0DE0000000000000119 /* WatchRadioDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRadioDirectory.swift; sourceTree = "<group>"; };
 		6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayManager.swift; sourceTree = "<group>"; };
 		7706149A2E65F71D0022C94A /* StationSubmissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSubmissionView.swift; sourceTree = "<group>"; };
 		7706149C2E67DF9C0022C94A /* SyncStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStateManager.swift; sourceTree = "<group>"; };
@@ -246,10 +285,19 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5AB1C0DE0000000000000130 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5AB1C0DE0000000000000102 /* StreamRadiosCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		7707DA322C152EF2006D5EBB /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5AB1C0DE0000000000000109 /* StreamRadiosCore in Frameworks */,
 				5AB1C0DE0000000000000003 /* StreamRadiosKit in Frameworks */,
 				77F50BBE2C63BAEF00187488 /* GoogleSignInSwift in Frameworks */,
 				77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */,
@@ -271,12 +319,29 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		5AB1C0DE0000000000000120 /* StreamRadiosWatch */ = {
+			isa = PBXGroup;
+			children = (
+				5AB1C0DE0000000000000111 /* StreamRadiosWatchApp.swift */,
+				5AB1C0DE0000000000000112 /* WatchRootView.swift */,
+				5AB1C0DE0000000000000113 /* WatchNowPlayingView.swift */,
+				5AB1C0DE0000000000000114 /* WatchRadioPlayer.swift */,
+				5AB1C0DE0000000000000115 /* WatchLibraryStore.swift */,
+				5AB1C0DE0000000000000116 /* StreamRadiosWatch.entitlements */,
+				5AB1C0DE0000000000000117 /* Assets.xcassets */,
+				5AB1C0DE0000000000000118 /* WatchPodcastLibrary.swift */,
+				5AB1C0DE0000000000000119 /* WatchRadioDirectory.swift */,
+			);
+			path = StreamRadiosWatch;
+			sourceTree = "<group>";
+		};
 		7707DA2C2C152EF2006D5EBB = {
 			isa = PBXGroup;
 			children = (
 				774617982C17425000F442B3 /* streamRadiosWidgetExtension.entitlements */,
 				7707DA4B2C153935006D5EBB /* Info.plist */,
 				7707DA372C152EF2006D5EBB /* StreamRadios */,
+				5AB1C0DE0000000000000120 /* StreamRadiosWatch */,
 				774617872C17411C00F442B3 /* streamRadiosWidget */,
 				774617822C17411C00F442B3 /* Frameworks */,
 				7707DA362C152EF2006D5EBB /* Products */,
@@ -287,6 +352,7 @@
 			isa = PBXGroup;
 			children = (
 				7707DA352C152EF2006D5EBB /* StreamRadios.app */,
+				5AB1C0DE0000000000000110 /* StreamRadios Watch App.app */,
 				774617812C17411C00F442B3 /* StreamRadioWidgets.appex */,
 			);
 			name = Products;
@@ -482,6 +548,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5AB1C0DE0000000000000150 /* StreamRadios Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5AB1C0DE0000000000000162 /* Build configuration list for PBXNativeTarget "StreamRadios Watch App" */;
+			buildPhases = (
+				5AB1C0DE0000000000000132 /* Sources */,
+				5AB1C0DE0000000000000130 /* Frameworks */,
+				5AB1C0DE0000000000000131 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "StreamRadios Watch App";
+			packageProductDependencies = (
+				5AB1C0DE0000000000000170 /* StreamRadiosCore */,
+			);
+			productName = "StreamRadios Watch App";
+			productReference = 5AB1C0DE0000000000000110 /* StreamRadios Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
 		7707DA342C152EF2006D5EBB /* StreamRadios */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7707DA432C152EF5006D5EBB /* Build configuration list for PBXNativeTarget "StreamRadios" */;
@@ -489,15 +575,18 @@
 				7707DA312C152EF2006D5EBB /* Sources */,
 				7707DA322C152EF2006D5EBB /* Frameworks */,
 				7707DA332C152EF2006D5EBB /* Resources */,
+				5AB1C0DE0000000000000133 /* Embed Watch Content */,
 				774617972C17411E00F442B3 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5AB1C0DE0000000000000141 /* PBXTargetDependency */,
 				774617922C17411E00F442B3 /* PBXTargetDependency */,
 			);
 			name = StreamRadios;
 			packageProductDependencies = (
+				5AB1C0DE0000000000000170 /* StreamRadiosCore */,
 				5AB1C0DE0000000000000002 /* StreamRadiosKit */,
 				77CC1EB42C2DBD8600F8FD5B /* Reachability */,
 				7780E9612C3CDEF2009CCF6F /* FlagKit */,
@@ -535,6 +624,9 @@
 				LastSwiftUpdateCheck = 1540;
 				LastUpgradeCheck = 1510;
 				TargetAttributes = {
+					5AB1C0DE0000000000000150 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 					7707DA342C152EF2006D5EBB = {
 						CreatedOnToolsVersion = 15.1;
 					};
@@ -563,12 +655,21 @@
 			projectRoot = "";
 			targets = (
 				7707DA342C152EF2006D5EBB /* StreamRadios */,
+				5AB1C0DE0000000000000150 /* StreamRadios Watch App */,
 				774617802C17411C00F442B3 /* StreamRadioWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5AB1C0DE0000000000000131 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5AB1C0DE0000000000000108 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		7707DA332C152EF2006D5EBB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -589,6 +690,20 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5AB1C0DE0000000000000132 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5AB1C0DE0000000000000103 /* StreamRadiosWatchApp.swift in Sources */,
+				5AB1C0DE0000000000000104 /* WatchRootView.swift in Sources */,
+				5AB1C0DE0000000000000105 /* WatchNowPlayingView.swift in Sources */,
+				5AB1C0DE0000000000000106 /* WatchRadioPlayer.swift in Sources */,
+				5AB1C0DE0000000000000107 /* WatchLibraryStore.swift in Sources */,
+				5AB1C0DE000000000000010A /* WatchPodcastLibrary.swift in Sources */,
+				5AB1C0DE000000000000010B /* WatchRadioDirectory.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		7707DA312C152EF2006D5EBB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -697,6 +812,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		5AB1C0DE0000000000000141 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5AB1C0DE0000000000000150 /* StreamRadios Watch App */;
+			targetProxy = 5AB1C0DE0000000000000140 /* PBXContainerItemProxy */;
+		};
 		774617922C17411E00F442B3 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 774617802C17411C00F442B3 /* StreamRadioWidgets */;
@@ -705,6 +825,65 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		5AB1C0DE0000000000000160 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = StreamRadiosWatch/StreamRadiosWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LH5V67498N;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StreamRadiosWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.radio.streamradios;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 3.1.8;
+				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		5AB1C0DE0000000000000161 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = StreamRadiosWatch/StreamRadiosWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LH5V67498N;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StreamRadiosWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.radio.streamradios;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 3.1.8;
+				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
 		7707DA412C152EF5006D5EBB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -853,7 +1032,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.1.7;
+				MARKETING_VERSION = 3.1.9;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -893,7 +1072,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.1.7;
+				MARKETING_VERSION = 3.1.9;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -922,7 +1101,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.1.5;
+				MARKETING_VERSION = 3.1.8;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios.widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -951,7 +1130,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.1.5;
+				MARKETING_VERSION = 3.1.8;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios.widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -965,6 +1144,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5AB1C0DE0000000000000162 /* Build configuration list for PBXNativeTarget "StreamRadios Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5AB1C0DE0000000000000160 /* Debug */,
+				5AB1C0DE0000000000000161 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		7707DA302C152EF2006D5EBB /* Build configuration list for PBXProject "StreamRadios" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1033,6 +1221,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5AB1C0DE0000000000000001 /* XCLocalSwiftPackageReference "Packages/StreamRadiosKit" */;
 			productName = StreamRadiosKit;
+		};
+		5AB1C0DE0000000000000170 /* StreamRadiosCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5AB1C0DE0000000000000001 /* XCLocalSwiftPackageReference "Packages/StreamRadiosKit" */;
+			productName = StreamRadiosCore;
 		};
 		7780E9612C3CDEF2009CCF6F /* FlagKit */ = {
 			isa = XCSwiftPackageProductDependency;

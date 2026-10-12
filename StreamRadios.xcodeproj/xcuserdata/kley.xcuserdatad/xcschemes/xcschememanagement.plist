@@ -14,6 +14,11 @@
 			<key>orderHint</key>
 			<integer>1</integer>
 		</dict>
+		<key>StreamRadios Watch App.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>2</integer>
+		</dict>
 		<key>StreamRadios.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>orderHint</key>
@@ -27,6 +32,11 @@
 	</dict>
 	<key>SuppressBuildableAutocreation</key>
 	<dict>
+		<key>5AB1C0DE0000000000000150</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
 		<key>7707DA342C152EF2006D5EBB</key>
 		<dict>
 			<key>primary</key>

@@ -17,6 +17,8 @@ class CoreDataStack {
     private var storedPersistentContainer: NSPersistentContainer?
     private var isPersistentStoreLoaded = false
     private var persistentStoreWaiters: [(NSPersistentContainer) -> Void] = []
+    private var storeLoadingThread: Thread?
+    private let storeLoadedCondition = NSCondition()
 
     /// Publish one configured container before loading its store so recursive access can safely
     /// reuse it and concurrent startup work cannot create multiple coordinators for the same file.
@@ -51,6 +53,7 @@ class CoreDataStack {
         container.persistentStoreDescriptions = [storeDescription]
 
         storedPersistentContainer = container
+        storeLoadingThread = Thread.current
         persistentContainerLock.unlock()
         
         container.loadPersistentStores { (storeDescription, error) in
@@ -107,12 +110,54 @@ class CoreDataStack {
     }
 
     var context: NSManagedObjectContext {
-        return persistentContainer.viewContext
+        let container = persistentContainer
+        waitForStoreLoadedOnOtherThread()
+        return container.viewContext
     }
     
     func newBackgroundContext() -> NSManagedObjectContext {
         let container = persistentContainer
+        waitForStoreLoadedOnOtherThread()
         return makeBackgroundContext(using: container)
+    }
+
+    private let backgroundContextQueue = DispatchQueue(label: "StreamRadios.coredata.background-context", qos: .utility)
+
+    /// Fire-and-forget work on a fresh background context. Creating a context touches the SQLite store,
+    /// so callers on the main thread should use this instead of `newBackgroundContext()` + `perform`.
+    func performInBackgroundContext(_ work: @escaping (NSManagedObjectContext) -> Void) {
+        backgroundContextQueue.async {
+            let context = self.newBackgroundContext()
+            context.perform { work(context) }
+        }
+    }
+
+    /// The container is published before its store loads; another thread saving in that window crashes
+    /// with "no persistent stores". The loading thread itself must not wait (re-entrant startup access).
+    private func waitForStoreLoadedOnOtherThread() {
+        // Never block main: a background loader may itself need the main thread, turning this into a
+        // 10s stall per call (blank launch screen). Main loads the store first via RadioStreamApp anyway.
+        guard !Thread.isMainThread else { return }
+        persistentContainerLock.lock()
+        let mustWait = !isPersistentStoreLoaded && storeLoadingThread != nil && storeLoadingThread !== Thread.current
+        persistentContainerLock.unlock()
+        guard mustWait else { return }
+
+        let deadline = Date().addingTimeInterval(10)
+        storeLoadedCondition.lock()
+        while !storeIsLoaded() {
+            if !storeLoadedCondition.wait(until: deadline) {
+                print("CoreData: Timed out waiting for the persistent store to load")
+                break
+            }
+        }
+        storeLoadedCondition.unlock()
+    }
+
+    private func storeIsLoaded() -> Bool {
+        persistentContainerLock.lock()
+        defer { persistentContainerLock.unlock() }
+        return isPersistentStoreLoaded
     }
 
     func newBackgroundContextAfterStoreLoad() async -> NSManagedObjectContext {
@@ -150,9 +195,14 @@ class CoreDataStack {
             return
         }
         isPersistentStoreLoaded = true
+        storeLoadingThread = nil
         let waiters = persistentStoreWaiters
         persistentStoreWaiters.removeAll()
         persistentContainerLock.unlock()
+
+        storeLoadedCondition.lock()
+        storeLoadedCondition.broadcast()
+        storeLoadedCondition.unlock()
 
         waiters.forEach { $0(container) }
     }

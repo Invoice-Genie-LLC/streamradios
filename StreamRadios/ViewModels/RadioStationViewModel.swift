@@ -259,7 +259,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
     
-            loadStationsFromCoreData()
+            // On a fresh install the store is empty; loading it asynchronously raced
+            // initializeStationsForFirstTime() and cleared the bundled stations it had just set.
+            if UserDefaults.standard.bool(forKey: "HasLaunchedBefore") {
+                loadStationsFromCoreData()
+            }
             
             // Migrate existing stations to use normalized country names (one-time migration)
             // CRITICAL: Run synchronously to prevent race conditions with API fetches
@@ -271,6 +275,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 await checkAndPerformContaminationCleanupIfNeeded()
                 
                 await pruneNonUserOwnedCloudKitStationsIfNeeded()
+                await mergeDuplicateCloudKitStationsIfNeeded()
             }
             
             let userDefaults = UserDefaults.standard
@@ -800,6 +805,32 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// One-time merge of duplicate `streamingRadios` records (several records for one stream URL).
+    private func mergeDuplicateCloudKitStationsIfNeeded() async {
+        let mergeKey = "CloudKitDuplicateStationMergeCompleted"
+        guard !UserDefaults.standard.bool(forKey: mergeKey) else { return }
+        guard !isImportInProgress && !isDeletionInProgress else { return }
+        // Deleting records mid fresh-install fetch would drop them from that fetch; retry next launch.
+        guard UserDefaults.standard.bool(forKey: "HasRadioStationsSynced") else { return }
+        
+        try? await Task.sleep(nanoseconds: 25_000_000_000)
+        
+        let taskID = await UIApplication.shared.beginBackgroundTask(withName: "CloudKitStationDedupe")
+        defer {
+            if taskID != .invalid {
+                Task { @MainActor in UIApplication.shared.endBackgroundTask(taskID) }
+            }
+        }
+        
+        do {
+            let removed = try await RadioStationCloudKitManager.shared.mergeDuplicateStationRecords()
+            UserDefaults.standard.set(true, forKey: mergeKey)
+            print("📡 🧹 DEDUPE: Removed \(removed) duplicate station records from iCloud")
+        } catch {
+            print("📡 🧹 DEDUPE: Failed, will retry on next launch: \(error)")
+        }
+    }
+    
     /// Mark that CloudKit changes are expected and should be checked on next launch
     @MainActor
     func markCloudKitChangesExpected() {
@@ -1170,6 +1201,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         if Self.applyPendingFavoriteOrder(to: &stations) {
             print("📡 💾 Reapplied pending local favorite order after CloudKit merge")
         }
+        normalizeFavoriteOrder()
         
         // Log recent stations count for verification
         let recentCount = stations.filter { $0.lastPlayed != nil }.count
@@ -2581,9 +2613,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 stations = allManualStations
             }
             
-            // Save locally first, then sync to CloudKit
+            // Bundled stations are NOT uploaded: they share deterministic `manual_` record ids with the user's
+            // CloudKit records, and re-saving them with isFavorite=false wiped favourites on fresh installs.
             saveStationsToCoreData()
-            saveStationsToCloudKit()
             
             // CRITICAL FIX: Mark all manual stations as already synced to prevent re-syncing during country selection
             let currentTime = Date().timeIntervalSince1970
@@ -2641,6 +2673,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             stations[index] = updatedStation
+            normalizeFavoriteOrder()
             
             if let key = Self.stationIdentityKey(updatedStation.url) {
                 var tombstones = unfavoritedStationURLs
@@ -2648,8 +2681,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 unfavoritedStationURLs = tombstones
             }
             
-            // Sync favorite changes to CloudKit using the comprehensive sync system
-            syncStationToCloudKit(updatedStation, reason: "Favorite status changed")
+            if updatedStation.isFavorite {
+                // Adding at the top shifts every other favourite, so upload the whole order.
+                saveStationsToCoreData()
+                Task { await syncFavoriteOrderChangesToCloudKit() }
+            } else {
+                syncStationToCloudKit(updatedStation, reason: "Favorite status changed")
+            }
             
             // Notify CarPlay immediately about favorite station changes
             NotificationCenter.default.post(
@@ -2758,30 +2796,39 @@ class RadioStationViewModel: NSObject, ObservableObject {
         let hiddenCountriesData = UserDefaults.standard.data(forKey: "hiddenCountries") ?? Data()
         let hiddenCountries = (try? JSONDecoder().decode(Set<String>.self, from: hiddenCountriesData)) ?? Set<String>()
         
-        // Filter out favorites from hidden countries
         return stations.filter { $0.isFavorite && !hiddenCountries.contains($0.country) }
-            .sorted { (station1, station2) in
-                // First, check if both stations have favoriteOrder values
-                if let order1 = station1.favoriteOrder, let order2 = station2.favoriteOrder {
-                    return order1 < order2
-                }
-                
-                // If only one has favoriteOrder, prioritize it
-                if station1.favoriteOrder != nil && station2.favoriteOrder == nil {
-                    return true
-                }
-                if station1.favoriteOrder == nil && station2.favoriteOrder != nil {
-                    return false
-                }
-                
-                // If neither has favoriteOrder, fall back to favoritedAt timestamp
-                if let date1 = station1.favoritedAt, let date2 = station2.favoritedAt {
-                    return date1 < date2
-                }
-                
-                // Final fallback: alphabetical by name
-                return station1.name.localizedCaseInsensitiveCompare(station2.name) == .orderedAscending
-            }
+            .sorted(by: Self.favoriteSortPrecedes)
+    }
+
+    /// The one favourite ordering shared by the Favorites tab, CarPlay and the Watch.
+    static func favoriteSortPrecedes(_ lhs: RadioStation, _ rhs: RadioStation) -> Bool {
+        switch (lhs.favoriteOrder, rhs.favoriteOrder) {
+        case let (left?, right?) where left != right: return left < right
+        case (.some, nil): return true
+        case (nil, .some): return false
+        default: break
+        }
+        let leftDate = lhs.favoritedAt ?? .distantPast
+        let rightDate = rhs.favoritedAt ?? .distantPast
+        if leftDate != rightDate { return leftDate < rightDate }
+        let byName = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+        if byName != .orderedSame { return byName == .orderedAscending }
+        return lhs.id < rhs.id
+    }
+
+    /// Gives every favourite a unique 0..<n position. Missing or duplicate orders (new favourites,
+    /// older CloudKit records) otherwise sort differently on each surface.
+    @discardableResult
+    func normalizeFavoriteOrder() -> Bool {
+        let ordered = stations.indices
+            .filter { stations[$0].isFavorite }
+            .sorted { Self.favoriteSortPrecedes(stations[$0], stations[$1]) }
+        var changed = false
+        for (position, index) in ordered.enumerated() where stations[index].favoriteOrder != position {
+            stations[index].favoriteOrder = position
+            changed = true
+        }
+        return changed
     }
 
     private func migrateFavoriteTimestamps() {
@@ -3006,6 +3053,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // ENHANCED CLOUDKIT SYNC: Delete from CloudKit and sync across all devices
             Task {
                 do {
+                    // After a fresh install the local id can differ from the record that holds the stream.
+                    if let record = try await DataStore.shared.existingStationRecord(for: station),
+                       record.recordID.recordName != station.id {
+                        try await RadioStationCloudKitManager.shared.deleteRadioStationFromCloudKit(record.recordID.recordName)
+                    }
                     try await RadioStationCloudKitManager.shared.deleteRadioStationFromCloudKit(station.id)
                     print("📡 ✅ RADIO CLOUDKIT SYNC: Successfully deleted station from CloudKit: \(station.name)")
                 } catch {
@@ -3133,8 +3185,27 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func setFavoriteStationOrder(_ orderedStationIds: [String]) {
         guard !orderedStationIds.isEmpty else { return }
 
+        // Row ids come from Core Data and can differ from the in-memory id of the same stream; an
+        // unmatched memory copy keeps its old order and the next full save writes it back.
+        let missingIDs = orderedStationIds.filter { id in !stations.contains { $0.id == id } }
+        var urlByRowID: [String: String] = [:]
+        if !missingIDs.isEmpty {
+            let context = CoreDataStack.shared.newBackgroundContext()
+            context.performAndWait {
+                let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                request.predicate = NSPredicate(format: "id IN %@", missingIDs)
+                for row in (try? context.fetch(request)) ?? [] {
+                    if let id = row.id, let url = row.url { urlByRowID[id] = url }
+                }
+            }
+        }
+
         for (order, stationId) in orderedStationIds.enumerated() {
-            guard let stationIndex = stations.firstIndex(where: { $0.id == stationId }) else { continue }
+            let stationIndex = stations.firstIndex(where: { $0.id == stationId })
+                ?? urlByRowID[stationId].flatMap(Self.stationIdentityKey).flatMap { key in
+                    stations.firstIndex { Self.stationIdentityKey($0.url) == key }
+                }
+            guard let stationIndex else { continue }
             let oldOrder = stations[stationIndex].favoriteOrder
             stations[stationIndex].favoriteOrder = order
             print("📡 🔢 FAVORITE ORDER: Updated \(stations[stationIndex].name) - old order: \(oldOrder ?? -1), new order: \(order)")
@@ -5194,14 +5265,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         print("🖼️ Downloading favicons for \(stations.count) stations (others already cached)")
         
-        // Handle duplicates when creating station-to-API mapping
-        var stationAPIMap: [String: RadioBrowserStation] = [:]
-        for (station, apiStation) in zip(stations, apiStations) {
-            if stationAPIMap[station.id] != nil {
-                print("🔄 Duplicate station ID '\(station.id)' found in favicon download - keeping first occurrence")
-            } else {
-                stationAPIMap[station.id] = apiStation
-            }
+        let apiStationsByID = Dictionary(
+            apiStations.map { ($0.stationuuid, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let downloads: [(station: RadioStation, url: URL)] = stations.compactMap { station in
+            guard let favicon = apiStationsByID[station.id]?.favicon, !favicon.isEmpty,
+                  let url = URL(string: favicon) else { return nil }
+            return (station, url)
         }
         
         // Create URLSession with timeout for favicon downloads
@@ -5210,46 +5281,40 @@ class RadioStationViewModel: NSObject, ObservableObject {
         config.timeoutIntervalForResource = 5.0 // 5 second total timeout
         let timeoutSession = URLSession(configuration: config)
         
-        // Download favicons with limited concurrency to avoid overwhelming the network
-        await withTaskGroup(of: (String, String?).self) { group in
-            var downloadCount = 0
-            
-            for station in stations {
-                // Limit concurrent downloads to avoid overwhelming network
-                guard downloadCount < 5 else { break }
-                
-                if let apiStation = stationAPIMap[station.id],
-                   let faviconURL = apiStation.favicon,
-                   !faviconURL.isEmpty,
-                   let url = URL(string: faviconURL) {
-                    
-                    downloadCount += 1
-                    group.addTask {
-                        do {
-                            let (data, _) = try await timeoutSession.data(from: url)
-                            if let image = UIImage(data: data),
-                               let jpegData = image.jpegData(compressionQuality: 0.6) {
-                                return (station.id, jpegData.base64EncodedString())
-                            }
-                        } catch {
-                            // Silently fail - station will just not have an icon
-                        }
-                        return (station.id, nil)
-                    }
+        await withTaskGroup(of: (RadioStation, String?).self) { group in
+            var nextIndex = 0
+            func enqueueNext() {
+                guard nextIndex < downloads.count else { return }
+                let (station, url) = downloads[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    guard let (data, _) = try? await timeoutSession.data(from: url),
+                          let image = UIImage(data: data),
+                          let jpegData = image.jpegData(compressionQuality: 0.6) else { return (station, nil) }
+                    return (station, jpegData.base64EncodedString())
                 }
             }
+            // At most 5 downloads in flight; each finished one starts the next.
+            for _ in 0..<5 { enqueueNext() }
             
-            // Update stations with downloaded favicons as they complete
-            for await (stationId, iconData) in group {
-                if let iconData = iconData,
-                   let index = self.stations.firstIndex(where: { $0.id == stationId }) {
-                    self.stations[index].iconData = iconData
-                    
-                    // Save to Core Data in background for persistent caching with weak self
-                    Task.detached { [weak self] in
-                        await self?.updateStationIconInCoreData(stationId: stationId, iconData: iconData)
-                    }
+            while let (station, iconData) = await group.next() {
+                enqueueNext()
+                guard let iconData else { continue }
+                // The same stream may already be held under another id (CloudKit record, bundled station).
+                let urlKey = Self.stationIdentityKey(station.url)
+                guard let index = self.stations.firstIndex(where: { $0.id == station.id })
+                        ?? self.stations.firstIndex(where: { urlKey != nil && Self.stationIdentityKey($0.url) == urlKey }),
+                      self.stations[index].iconData == nil else { continue }
+                self.stations[index].iconData = iconData
+                let target = self.stations[index]
+                
+                let saved = await self.updateStationIconInCoreData(stationId: target.id, url: target.url, iconData: iconData)
+                if !saved {
+                    // Row not inserted yet (new stations save asynchronously); the full save picks it up.
+                    self.saveStationsToCoreData()
                 }
+                SRStationSnapshots.shared.bumpIconRevision(for: target.id)
+                NotificationCenter.default.post(name: .stationDetailsUpdated, object: nil)
             }
         }
         
@@ -5257,7 +5322,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
         timeoutSession.invalidateAndCancel()
     }
     
-    private func updateStationIconInCoreData(stationId: String, iconData: String) async {
+    /// Returns false when no Core Data row exists yet for the station.
+    @discardableResult
+    private func updateStationIconInCoreData(stationId: String, url: String, iconData: String) async -> Bool {
         // Check if this station is already being processed to prevent duplicate updates
         let shouldProcess = await withCheckedContinuation { continuation in
             processingQueue.async {
@@ -5271,7 +5338,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
         }
         
-        guard shouldProcess else { return }
+        guard shouldProcess else { return true }
         
         // Ensure we clean up the processing state when done
         defer {
@@ -5286,9 +5353,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         context.automaticallyMergesChangesFromParent = true
         
-        await context.perform {
+        return await context.perform {
             let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", stationId)
+            fetchRequest.predicate = NSPredicate(format: "id == %@ OR url == %@", stationId, url)
             fetchRequest.returnsObjectsAsFaults = false // Ensure we get the full object
             
             do {
@@ -5309,6 +5376,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     }
                 } else {
                     print("⚠️ Station not found in Core Data for favicon caching: \(stationId)")
+                    return false
                 }
             } catch let error as NSError {
                 if error.code == 133020 { // NSMergeConflictError
@@ -5327,6 +5395,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     print("❌ Failed to cache favicon to Core Data: \(error)")
                 }
             }
+            return true
         }
     }
     
@@ -5425,11 +5494,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
 }
 
 extension RadioStationViewModel {
-    func saveStationsToCoreData() {
+    func saveStationsToCoreData(completion: (() -> Void)? = nil) {
         // Use a background context to avoid blocking main thread and reduce merge conflicts
-        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
-        
-        backgroundContext.perform {
+        CoreDataStack.shared.performInBackgroundContext { backgroundContext in
+            defer { if let completion { DispatchQueue.main.async(execute: completion) } }
             // Configure merge policy to handle conflicts automatically
             backgroundContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
             
@@ -5519,10 +5587,19 @@ extension RadioStationViewModel {
                     if existingStation.favoriteOrder != favoriteOrder { existingStation.favoriteOrder = favoriteOrder }
                     if existingStation.order != Int16(station.order) { existingStation.order = Int16(station.order) }
                     if existingStation.lastPlayed != station.lastPlayed { existingStation.lastPlayed = station.lastPlayed }
-                } else if let urlKey, stationsByURL[urlKey] != nil {
-                    // The store already holds this stream under a different id; inserting here is
-                    // what turned every sync into another visible copy of the same station.
-                    continue
+                } else if let urlKey, let existingStation = stationsByURL[urlKey] {
+                    // Same stream stored under another id (e.g. bundled row vs CloudKit record):
+                    // update that row rather than skipping, or the favourite/recent state is lost.
+                    // Adopt the in-memory id so list rows and `stations` agree from here on.
+                    if existingStation.id != station.id { existingStation.id = station.id }
+                    if existingStation.name != station.name { existingStation.name = station.name }
+                    if let iconData = station.iconData, existingStation.iconData != iconData { existingStation.iconData = iconData }
+                    if existingStation.country != station.country { existingStation.country = station.country }
+                    if existingStation.isFavorite != station.isFavorite { existingStation.isFavorite = station.isFavorite }
+                    if existingStation.favoritedAt != station.favoritedAt { existingStation.favoritedAt = station.favoritedAt }
+                    let favoriteOrder = station.favoriteOrder.map { Int32($0) } ?? -1
+                    if existingStation.favoriteOrder != favoriteOrder { existingStation.favoriteOrder = favoriteOrder }
+                    if let lastPlayed = station.lastPlayed, existingStation.lastPlayed != lastPlayed { existingStation.lastPlayed = lastPlayed }
                 } else {
                     // Create new station if it doesn't exist
                     let newStation = CDStation(context: backgroundContext)
@@ -5576,8 +5653,38 @@ extension RadioStationViewModel {
     /// Replacing `stations` wholesale used to drop any station that CloudKit didn't return —
     /// including local-only ones — and, before the save became non-destructive, deleted them.
     @MainActor
-    func mergeStationsFromCloudKit(_ incoming: [RadioStation]) {
-        guard !incoming.isEmpty else { return }
+    func mergeStationsFromCloudKit(_ fetched: [RadioStation]) {
+        guard !fetched.isEmpty else { return }
+
+        // CloudKit can hold several records for one stream URL (API uuid, manual_ id, import_ id);
+        // folding them in fetch order let a non-favourite copy overwrite the favourite one.
+        var incoming: [RadioStation] = []
+        var incomingIndexByURL: [String: Int] = [:]
+        for station in fetched {
+            guard let key = Self.stationIdentityKey(station.url) else {
+                incoming.append(station)
+                continue
+            }
+            guard let existingIndex = incomingIndexByURL[key] else {
+                incomingIndexByURL[key] = incoming.count
+                incoming.append(station)
+                continue
+            }
+            let current = incoming[existingIndex]
+            let preferNew: Bool
+            if station.isFavorite != current.isFavorite {
+                preferNew = station.isFavorite
+            } else if station.isFavorite {
+                preferNew = (station.favoritedAt ?? .distantPast) > (current.favoritedAt ?? .distantPast)
+            } else {
+                preferNew = Self.stationRichness(station) > Self.stationRichness(current)
+            }
+            var winner = preferNew ? station : current
+            let loser = preferNew ? current : station
+            winner.iconData = winner.iconData ?? loser.iconData
+            winner.lastPlayed = [winner.lastPlayed, loser.lastPlayed].compactMap { $0 }.max()
+            incoming[existingIndex] = winner
+        }
 
         var indexByID = Dictionary(
             stations.enumerated().map { ($0.element.id, $0.offset) },
@@ -5611,6 +5718,7 @@ extension RadioStationViewModel {
         }
 
         deduplicateStationsInMemory()
+        normalizeFavoriteOrder()
     }
 
     /// Identity of a station as the rest of the app treats it: the stream URL, normalised.
@@ -5777,6 +5885,7 @@ extension RadioStationViewModel {
 
                         self.stations = loadedStations
                         self.isLoading = false
+                        let normalizedFavoriteOrder = self.normalizeFavoriteOrder()
 
                         if restoredPendingFavoriteOrder {
                             print("📡 💾 Restored pending favorite order during startup")
@@ -5784,6 +5893,8 @@ extension RadioStationViewModel {
                             Task {
                                 await self.syncFavoriteOrderChangesToCloudKit()
                             }
+                        } else if normalizedFavoriteOrder {
+                            self.saveFavoriteOrderToCoreData()
                         }
 
                         // Repairs a store that accumulated URL-duplicate rows; the save collapses them for good.

@@ -7,6 +7,33 @@
 
 import UIKit
 import SwiftUI
+import StreamRadiosCore
+
+/// Opens Mail for the Watch's "Email Support" Handoff. Both SwiftUI and the scene delegate can deliver the
+/// activity, so this de-duplicates and waits for the app to be active (opening other apps earlier is ignored).
+enum SupportEmailHandoff {
+    private static var lastOpened = Date.distantPast
+
+    static func openComposer() {
+        DispatchQueue.main.async {
+            guard Date().timeIntervalSince(lastOpened) > 3, let url = SRSupportContact.mailtoURL else { return }
+            lastOpened = .now
+            open(url, attempt: 0)
+        }
+    }
+
+    private static func open(_ url: URL, attempt: Int) {
+        guard UIApplication.shared.applicationState == .active else {
+            if attempt < 20 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { open(url, attempt: attempt + 1) }
+            }
+            return
+        }
+        UIApplication.shared.open(url) { success in
+            if !success { print("[SupportHandoff] Unable to open Mail for \(SRSupportContact.email)") }
+        }
+    }
+}
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     
@@ -31,6 +58,18 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if let urlContext = connectionOptions.urlContexts.first {
             handleIncomingURL(urlContext.url)
         }
+        if let activity = connectionOptions.userActivities.first {
+            handleUserActivity(activity)
+        }
+    }
+
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        handleUserActivity(userActivity)
+    }
+
+    private func handleUserActivity(_ activity: NSUserActivity) {
+        guard activity.activityType == SRSupportContact.handoffActivityType else { return }
+        SupportEmailHandoff.openComposer()
     }
     
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {

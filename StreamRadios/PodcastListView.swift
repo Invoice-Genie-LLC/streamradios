@@ -1743,13 +1743,15 @@ struct EpisodeRowView: View {
             
             // ZStack for swipe-to-reveal action buttons
             ZStack(alignment: .trailing) {
-                // Action buttons behind the row
-                HStack(spacing: 0) {
-                    Spacer()
-                    swipeActionButtons
-                        .frame(width: swipeActionWidth)
+                // Mounted only while swiped: otherwise they show through the fading row during tab transitions.
+                if swipeOffset < 0 || isSwipeGestureActive {
+                    HStack(spacing: 0) {
+                        Spacer()
+                        swipeActionButtons
+                            .frame(width: swipeActionWidth)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .frame(maxWidth: .infinity, alignment: .trailing)
                 
                 // Main row content with opaque background
                 rowContent
@@ -1936,8 +1938,7 @@ struct EpisodeRowView: View {
                 let currentProgress = podcastPlayer.getCurrentProgress(for: episode)
                 
                 ZStack {
-                    // Circular progress ring around button when playing
-                    if isPlaying && currentProgress > 0 {
+                    if currentProgress > 0 {
                         Circle()
                             .stroke(Color.gray.opacity(0.2), lineWidth: 3)
                             .frame(width: 48, height: 48)
@@ -2765,13 +2766,15 @@ struct OptimizedEpisodeRowView: View, Equatable {
     // MARK: - Optimized Episode Card Design
     private var episodeCard: some View {
         ZStack(alignment: .trailing) {
-            // Action buttons behind the row
-            HStack(spacing: 0) {
-                Spacer()
-                swipeActionButtons
-                    .frame(width: swipeActionWidth)
+            // Mounted only while swiped: otherwise they show through the fading row during tab transitions.
+            if swipeOffset < 0 || isSwipeGestureActive {
+                HStack(spacing: 0) {
+                    Spacer()
+                    swipeActionButtons
+                        .frame(width: swipeActionWidth)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
             
             // Main card content with opaque background
             VStack(spacing: 0) {
@@ -2903,8 +2906,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             
             // COLUMN 1: Play button (Fixed width) with enhanced loading indicator and circular progress
             ZStack {
-                // Circular progress ring around button when playing
-                if isPlaying && currentProgress > 0 {
+                if currentProgress > 0 {
                     Circle()
                         .stroke(Color.gray.opacity(0.2), lineWidth: 3)
                         .frame(width: 48, height: 48)

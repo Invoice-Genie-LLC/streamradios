@@ -299,28 +299,7 @@ class CarPlayManager: ObservableObject {
         
         // Filter out favorites from hidden countries and use EXACT same sorting as main app
         return radioStations.filter { $0.isFavorite && !hiddenCountries.contains($0.country) }
-            .sorted { (station1, station2) in
-                // First, check if both stations have favoriteOrder values
-                if let order1 = station1.favoriteOrder, let order2 = station2.favoriteOrder {
-                    return order1 < order2
-                }
-                
-                // If only one has favoriteOrder, prioritize it
-                if station1.favoriteOrder != nil && station2.favoriteOrder == nil {
-                    return true
-                }
-                if station1.favoriteOrder == nil && station2.favoriteOrder != nil {
-                    return false
-                }
-                
-                // If neither has favoriteOrder, fall back to favoritedAt timestamp (ASCENDING like main app)
-                if let date1 = station1.favoritedAt, let date2 = station2.favoritedAt {
-                    return date1 < date2
-                }
-                
-                // Final fallback: alphabetical by name
-                return station1.name.localizedCaseInsensitiveCompare(station2.name) == .orderedAscending
-            }
+            .sorted(by: RadioStationViewModel.favoriteSortPrecedes)
     }
     
     func getRecentStations() -> [RadioStation] {
@@ -526,6 +505,11 @@ class CarPlayManager: ObservableObject {
         
         // Save to UserDefaults for persistence
         saveRecentlyPlayedEpisodes()
+
+        // Phone-started playback also lands here; CarPlay's Recent tab has no other trigger for it.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name("CarPlayRecentEpisodesChanged"), object: nil)
+        }
         
         os_log("CarPlay: Added episode to recently played list (now %d total)", log: log, type: .info, recentlyPlayedEpisodes.count)
     }

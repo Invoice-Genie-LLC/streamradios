@@ -301,7 +301,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             // Main app content - only show when sync is complete
-            if !dataSyncManager.isSyncing || dataSyncManager.isFreshInstallUIReady {
+            if (!dataSyncManager.isSyncing && !dataSyncManager.isAwaitingFreshInstallSync) || dataSyncManager.isFreshInstallUIReady {
                 // Always show TabView to preserve NavigationView stacks
                 // Use UIKit integration to hide/show tab bar dynamically
                 TabView(selection: $selectedTab) {
@@ -514,6 +514,8 @@ struct ContentView: View {
             
             // Full-screen data sync progress overlay for fresh installs - always show when syncing
             DataSyncProgressView()
+                // The tab UI (which also starts the sync) is hidden while a fresh-install sync is pending.
+                .onAppear { checkAndStartDataSync() }
                 .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("FreshInstallDataAvailable"))) { _ in
                     // Force UI refresh when sync completes
                     print("📢 ContentView: Received FreshInstallDataAvailable - forcing complete UI refresh")

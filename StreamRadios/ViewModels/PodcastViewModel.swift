@@ -1677,7 +1677,7 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// Update episode UI state immediately for automatic view refresh across tabs
-    private func updateEpisodeUIState(episodeId: String, feedId: String? = nil, isFavorite: Bool?, isDownloaded: Bool?, progress: Double? = nil) {
+    private func updateEpisodeUIState(episodeId: String, feedId: String? = nil, isFavorite: Bool?, isDownloaded: Bool?, progress: Double? = nil, isPlayed: Bool? = nil) {
         // For large feeds (>100 episodes), use batch update mechanism
         if currentEpisodes.count > 100 && feedId == nil {
             queueEpisodeUpdate(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: isDownloaded, progress: progress)
@@ -1701,6 +1701,7 @@ class PodcastViewModel: ObservableObject {
                 // Also update the episodeProgress cache
                 episodeProgress[episodeProgressCacheKey(episodeId: episodeId, feedId: feedId)] = progress
             }
+            if let isPlayed { updatedEpisode.state.isPlayed = isPlayed }
             
             currentEpisodes[index] = updatedEpisode
         }
@@ -1723,6 +1724,7 @@ class PodcastViewModel: ObservableObject {
                 if let progress = progress {
                     updatedFeed.episodes[episodeIndex].state.progress = progress
                 }
+                if let isPlayed { updatedFeed.episodes[episodeIndex].state.isPlayed = isPlayed }
                 
                 podcastFeeds[feedIndex] = updatedFeed
                 break
@@ -3747,7 +3749,10 @@ class PodcastViewModel: ObservableObject {
         
         do {
             // Step 1: Parse feed and create feed object with custom title if provided
-            let feed = try await feedManager.addFeed(from: feedURL, customTitle: customTitle)
+            var parsedFeed = try await feedManager.addFeed(from: feedURL, customTitle: customTitle)
+            // New feeds go to the end; the default order of 0 moved them to the top on the next reload.
+            parsedFeed.order = await MainActor.run { (self.podcastFeeds.map(\.order).max() ?? -1) + 1 }
+            let feed = parsedFeed
             print("📊 Parsed feed: \(feed.title)")
             
             // CRITICAL: Register new feed with isolation manager immediately
@@ -3760,6 +3765,7 @@ class PodcastViewModel: ObservableObject {
             await MainActor.run {
                 self.podcastFeeds.append(feed)
                 self.podcastFeedOrder.append(feed.id)
+                self.saveFeedsToCoreData()
                 self.throttledUIUpdate()
                 print("✅ Feed immediately added to UI: \(feed.title)")
                 
@@ -4177,13 +4183,26 @@ class PodcastViewModel: ObservableObject {
         
         // RSS FETCH: No cached data available, must fetch from network
         await MainActor.run {
+            selectedFeedId = feedId
             isLoadingEpisodes = true
             operationInProgress = true
         }
         
-        // TODO: Implement RSS fetch logic here
-        // For now, this will be handled by existing RSS loading code
         print("📡 RSS: Fetching episodes from network for feed \(feedId)")
+        // Writes the feed's episodes to Core Data and refreshes the list if this feed is still selected.
+        await backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
+        
+        await MainActor.run {
+            // Without this the "Loading episodes..." spinner never clears for a feed with nothing stored.
+            isLoadingEpisodes = false
+            operationInProgress = false
+            syncLock.lock()
+            let anotherSyncRunning = activeBackgroundSyncs.contains(feedId)
+            syncLock.unlock()
+            if selectedFeedId == feedId, !anotherSyncRunning, feedIsolationManager.getEpisodesForFeed(feedId).isEmpty {
+                error = "Couldn't load episodes for this podcast. Pull to refresh to try again."
+            }
+        }
     }
     /// Load more episodes (pagination)
     func loadMoreEpisodes() async {
@@ -4681,6 +4700,44 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    @MainActor private var watchStatePersistenceTask: Task<Void, Never>?
+
+    @MainActor
+    func applyWatchEpisodeState(_ episodeID: String, feedID: String, progress: Double? = nil, isFavorite: Bool? = nil) {
+        let states = EpisodeStateManager.shared
+        if let progress { states.setProgress(for: episodeID, progress: progress, feedId: feedID, allowRegression: true) }
+        if let isFavorite { states.setFavorite(episodeID, isFavorite: isFavorite, feedId: feedID) }
+        let position = states.getProgress(for: episodeID, feedId: feedID)
+        if progress != nil {
+            PodcastPlayer.shared.applyRemoteProgress(episodeId: episodeID, feedId: feedID, progress: position)
+        }
+        updateEpisodeUIState(episodeId: episodeID, feedId: feedID, isFavorite: isFavorite, isDownloaded: nil,
+            progress: progress, isPlayed: progress.map { $0 >= 0.99 })
+        let update = EpisodeStateUpdate(episodeId: episodeID, feedId: feedID,
+            progress: position, isFavorite: states.isFavorite(episodeID, feedId: feedID),
+            isDownloaded: states.isDownloaded(episodeID, feedId: feedID), isPlayed: position >= 0.99)
+        let previous = watchStatePersistenceTask
+        watchStatePersistenceTask = Task {
+            await previous?.value
+            do { try await episodeManager.updateEpisodeStates([update]) }
+            catch { print("[PhoneWatchSync] Core Data projection failed: \(error)") }
+        }
+        // CarPlay's episode screens only refresh from these notifications, not from the published state.
+        if let isFavorite {
+            NotificationCenter.default.post(name: NSNotification.Name("EpisodeStateChanged"), object: nil,
+                userInfo: ["episodeId": episodeID, "feedId": feedID, "isFavorite": isFavorite])
+        }
+        if let progress {
+            if progress >= 0.99 {
+                NotificationCenter.default.post(name: NSNotification.Name("EpisodePlayedChangedInstantly"), object: nil,
+                    userInfo: ["episodeId": episodeID, "feedId": feedID, "isPlayed": true])
+            } else {
+                NotificationCenter.default.post(name: NSNotification.Name("EpisodeStateChanged"), object: nil,
+                    userInfo: ["episodeId": episodeID, "feedId": feedID, "progress": progress])
+            }
+        }
+    }
+
     /// Update episode state efficiently with immediate CloudKit and Core Data sync
     func updateEpisodeState(_ episodeId: String, feedId explicitFeedId: String? = nil, progress: Double? = nil, isFavorite: Bool? = nil, isDownloaded: Bool? = nil, isPlayed: Bool? = nil) {
         Task {
@@ -9670,8 +9727,10 @@ extension PodcastViewModel {
     func saveFeedsToCoreData() {
         let context = CoreDataStack.shared.persistentContainer.viewContext
 
-        guard !podcastFeeds.isEmpty || !isLoadingFromCoreData else {
-            print("⚠️ Skipping destructive feed reconciliation while Core Data reload is in progress")
+        guard !podcastFeeds.isEmpty else {
+            // An empty list here means "not loaded yet" (e.g. CarPlay cold launch), never "delete all";
+            // the reconciliation below would otherwise wipe every feed from the store.
+            print("⚠️ Skipping feed reconciliation with an empty in-memory feed list")
             return
         }
         
@@ -9820,7 +9879,12 @@ extension PodcastViewModel {
             // CRITICAL: Assign to @Published properties on main thread to trigger UI updates
             Task { @MainActor in
                 // Sort feeds by order property to ensure correct display order
-                let sortedFeeds = loadedFeeds.sorted { $0.order < $1.order }
+                // Title breaks ties so every device resolves duplicate CloudKit orders the same way.
+                let sortedFeeds = loadedFeeds.sorted {
+                    $0.order != $1.order
+                        ? $0.order < $1.order
+                        : $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
                 print("📡 🔢 SORTED FEEDS BY ORDER:")
                 for (index, feed) in sortedFeeds.enumerated() {
                     print("📡 🔢 Sorted Feed [\(index)]: \(feed.title) - order: \(feed.order)")

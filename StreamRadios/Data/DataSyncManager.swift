@@ -52,6 +52,8 @@ class DataSyncManager: ObservableObject {
     @Published var overallProgress: Double = 0.0
     @Published var currentOperation = ""
     @Published var isFreshInstallUIReady = false
+    /// True from launch until a needed fresh-install sync actually starts, so the main UI can't flash first.
+    @Published var isAwaitingFreshInstallSync = false
 
     private var highestOverallProgress: Double = 0.0
     
@@ -175,6 +177,7 @@ class DataSyncManager: ObservableObject {
         } else {
             isFreshInstallUIReady = false
         }
+        isAwaitingFreshInstallSync = checkIfSyncNeeded()
     }
     
     // MARK: - Private Helper Methods
@@ -221,6 +224,7 @@ class DataSyncManager: ObservableObject {
         
         Task { @MainActor in
             isSyncing = true
+            isAwaitingFreshInstallSync = false
             isFreshInstallUIReady = false
             resetProgress()
             
@@ -325,9 +329,9 @@ class DataSyncManager: ObservableObject {
             
             if isFreshInstall || !hasRadioStationsSynced {
                 radioStationsOperation = "Fetching radio stations from iCloud..."
-                await syncRadioStationsFromCloudKitWithProgress()
-                // Mark radio stations as synced
-                UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+                if await syncRadioStationsFromCloudKitWithProgress() {
+                    UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+                }
             } else {
                 radioStationsOperation = "Loading radio stations from local storage..."
                 radioStationsTotalCount = await getLocalStationCount()
@@ -1420,6 +1424,7 @@ class DataSyncManager: ObservableObject {
         UserDefaults.standard.synchronize()
         isFreshInstallUIReady = true
         isSyncing = false
+        NotificationCenter.default.post(name: NSNotification.Name("FreshInstallSyncCompleted"), object: nil)
         print("✅ SYNC COMPLETE: Marked HasLaunchedBefore=true after successful sync")
         print("🚀 DataSyncProgressView hidden - all synchronized data is ready")
         print("🎉 Fresh install data synchronization completed successfully!")
@@ -1959,8 +1964,9 @@ class DataSyncManager: ObservableObject {
         }
     }
     
+    /// Returns false when the fetch failed or stopped early, so the next launch fetches again.
     @MainActor
-    private func syncRadioStationsFromCloudKitWithProgress() async {
+    private func syncRadioStationsFromCloudKitWithProgress() async -> Bool {
         let viewModel = RadioStationViewModel.shared
         
         return await withCheckedContinuation { continuation in
@@ -1982,6 +1988,9 @@ class DataSyncManager: ObservableObject {
                     Task { @MainActor in
                         if let stations = stations {
                             viewModel.mergeStationsFromCloudKit(stations)
+                            let fetchedFavorites = Set(stations.filter(\.isFavorite).map(\.name))
+                            let mergedFavorites = Set(viewModel.stations.filter(\.isFavorite).map(\.name))
+                            print("⭐️ FAVSYNC fetched=\(fetchedFavorites.count) merged=\(mergedFavorites.count) missing=\(fetchedFavorites.subtracting(mergedFavorites).sorted())")
                             viewModel.saveStationsToCoreData()
                             
                             // Update final counts
@@ -1991,14 +2000,15 @@ class DataSyncManager: ObservableObject {
                             
                             print("✅ Synced \(stations.count) radio stations with progress tracking")
                             
-                            // Mark radio stations as synced to prevent future CloudKit syncing on app launches
-                            UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+                            if let error {
+                                print("⚠️ Radio station fetch was partial; will retry next launch: \(error)")
+                            }
                             NotificationCenter.default.post(name: .stationsUpdated, object: nil)
                         } else if let error = error {
                             self?.radioStationsOperation = "❌ Failed to sync radio stations: \(error.localizedDescription)"
                             print("❌ Failed to sync radio stations: \(error)")
                         }
-                        continuation.resume()
+                        continuation.resume(returning: stations != nil && error == nil)
                     }
                 }
             )

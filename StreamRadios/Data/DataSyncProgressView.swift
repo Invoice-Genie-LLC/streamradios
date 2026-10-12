@@ -52,7 +52,7 @@ struct DataSyncProgressView: View {
     private let detailTick = Timer.publish(every: 0.6, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        if syncManager.isSyncing && !syncManager.isFreshInstallUIReady {
+        if (syncManager.isSyncing || syncManager.isAwaitingFreshInstallSync) && !syncManager.isFreshInstallUIReady {
             ZStack {
                 backdrop
 

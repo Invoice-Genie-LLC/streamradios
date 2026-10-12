@@ -18,6 +18,7 @@ struct SearchPodcastsView: View {
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
     @StateObject private var searchService = PodcastSearchService()
     @State private var searchText = ""
+    @State private var searchFieldID = UUID()
     @State private var isSearchPresented = false
     @State private var searchTask: Task<Void, Never>?
     @State private var showingAddPodcast = false
@@ -228,11 +229,16 @@ struct SearchPodcastsView: View {
                 .onChange(of: searchText) { _, newValue in
                     performSearch(query: newValue)
                 }
+                // Clearing a focused TextField from code can leave it no longer updating the binding
+                // (typed text shows but no search fires); a fresh field avoids that.
+                .id(searchFieldID)
 
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
-                    searchService.clearResults()
+                    performSearch(query: "")
+                    searchFieldID = UUID()
+                    DispatchQueue.main.async { isSearchFieldFocused = true }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.subheadline)

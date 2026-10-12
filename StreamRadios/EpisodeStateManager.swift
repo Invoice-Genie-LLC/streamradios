@@ -203,6 +203,8 @@ class EpisodeStateManager: ObservableObject {
     
     // Readiness indicator to help avoid cold-start races
     private(set) var isReady: Bool = false
+    // The launch-time load REPLACES the in-memory maps, so writes made before this is true are lost.
+    @MainActor private(set) var hasLoadedSavedStates = false
     
     // Track if we just restored from backup to prevent overwriting
     private var didRestoreFromBackup: Bool = false
@@ -1237,7 +1239,16 @@ class EpisodeStateManager: ObservableObject {
         // Sync download states from Core Data after loading
         syncDownloadStatesFromCoreData()
         
+        await MainActor.run { self.hasLoadedSavedStates = true }
         print("✅ EpisodeStateManager: Async state loading completed")
+    }
+
+    @MainActor
+    func waitUntilSavedStatesLoaded(timeout: TimeInterval = 20) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !hasLoadedSavedStates, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
     
     /// Check if emergency backup exists
@@ -1897,9 +1908,7 @@ class EpisodeStateManager: ObservableObject {
         isCoreDataSaveScheduled = true
         coreDataSaveLock.unlock()
 
-        let context = CoreDataStack.shared.newBackgroundContext()
-
-        context.perform {
+        CoreDataStack.shared.performInBackgroundContext { context in
             self.coreDataSaveLock.lock()
             let pendingKeys = self.pendingFullCoreDataSave ? nil : self.pendingCoreDataStateKeys
             self.pendingCoreDataStateKeys.removeAll()
@@ -2709,7 +2718,7 @@ class EpisodeStateManager: ObservableObject {
         }
     }
     
-    func setProgress(for episodeId: String, progress: Double, feedId: String? = nil) {
+    func setProgress(for episodeId: String, progress: Double, feedId: String? = nil, allowRegression: Bool = false) {
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
         let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
@@ -2722,7 +2731,9 @@ class EpisodeStateManager: ObservableObject {
         let finalProgress: Double
         
         // ENHANCED PROTECTION: Critical check for accidental reset to 0
-        if progress == 0.0 && existingProgress > 0.0 && !isRewindProtected {
+        if allowRegression {
+            finalProgress = min(max(progress, 0), 1)
+        } else if progress == 0.0 && existingProgress > 0.0 && !isRewindProtected {
             print("🛡️ CRITICAL PROTECTION: Blocked progress reset from \(String(format: "%.4f", existingProgress)) to 0.0 for episode \(episodeId) - preserving existing progress")
             finalProgress = existingProgress // Block accidental reset to 0
         } else if progress < existingProgress && !isChapterProtected && !isRewindProtected {
@@ -2847,6 +2858,13 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set favorite state for an episode with real-time CloudKit sync and known feedId
     func setFavorite(_ episodeId: String, isFavorite: Bool, feedId: String?) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.setFavorite(episodeId, isFavorite: isFavorite, feedId: feedId)
+            }
+            return
+        }
+
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         guard episodeFavorites[stateKey] != isFavorite else {
             print("📡 ⏭️ FAVORITE UPDATE SKIPPED: Episode \(episodeId) already has favorite=\(isFavorite)")
@@ -2970,6 +2988,13 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set played state for an episode with real-time CloudKit sync
     func setPlayed(_ episodeId: String, isPlayed: Bool, feedId: String? = nil) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.setPlayed(episodeId, isPlayed: isPlayed, feedId: feedId)
+            }
+            return
+        }
+
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         // Get episode title for banner display
         let episodeTitle = getEpisodeTitle(for: episodeId)
@@ -3023,6 +3048,13 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set download state for an episode with real-time CloudKit sync and known feedId
     func setDownloaded(_ episodeId: String, isDownloaded: Bool, feedId: String?) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.setDownloaded(episodeId, isDownloaded: isDownloaded, feedId: feedId)
+            }
+            return
+        }
+
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         guard episodeDownloads[stateKey] != isDownloaded else {
             print("📡 ⏭️ DOWNLOAD UPDATE SKIPPED: Episode \(episodeId) already has downloaded=\(isDownloaded)")
@@ -3074,6 +3106,18 @@ class EpisodeStateManager: ObservableObject {
     
     /// UPGRADE PROTECTION: Enhanced download state setting with backup
     func setDownloadedWithProtection(_ episodeId: String, isDownloaded: Bool, feedId: String? = nil, reason: String = "normal") {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.setDownloadedWithProtection(
+                    episodeId,
+                    isDownloaded: isDownloaded,
+                    feedId: feedId,
+                    reason: reason
+                )
+            }
+            return
+        }
+
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         let previousState = episodeDownloads[stateKey] ?? false
 
@@ -3481,6 +3525,21 @@ extension EpisodeStateManager {
         feedId: String? = nil,
         persistImmediately: Bool = true
     ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.applyStateSilently(
+                    for: episodeId,
+                    progress: progress,
+                    isFavorite: isFavorite,
+                    isDownloaded: isDownloaded,
+                    isPlayed: isPlayed,
+                    feedId: feedId,
+                    persistImmediately: persistImmediately
+                )
+            }
+            return
+        }
+
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         setProgressSilently(for: episodeId, progress: progress, feedId: feedId, persistImmediately: false)
         setFavoriteSilently(episodeId, isFavorite: isFavorite, feedId: feedId, persistImmediately: false)
@@ -3494,6 +3553,18 @@ extension EpisodeStateManager {
     
     /// Set progress silently without triggering CloudKit sync (for incoming CloudKit updates)
     func setProgressSilently(for episodeId: String, progress: Double, feedId: String? = nil, persistImmediately: Bool = true) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.setProgressSilently(
+                    for: episodeId,
+                    progress: progress,
+                    feedId: feedId,
+                    persistImmediately: persistImmediately
+                )
+            }
+            return
+        }
+
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
         let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
@@ -3615,6 +3686,18 @@ extension EpisodeStateManager {
     
     /// Set played state silently without triggering CloudKit sync
     func setPlayedSilently(_ episodeId: String, isPlayed: Bool, feedId: String? = nil, persistImmediately: Bool = true) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.setPlayedSilently(
+                    episodeId,
+                    isPlayed: isPlayed,
+                    feedId: feedId,
+                    persistImmediately: persistImmediately
+                )
+            }
+            return
+        }
+
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
         guard (episodeStates[stateKey] == .played) != isPlayed else { return }
 

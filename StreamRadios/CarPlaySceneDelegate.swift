@@ -42,6 +42,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var radioMetadataObserver: AnyCancellable?
     private var radioStationObserver: AnyCancellable?
     private var podcastDataObserver: AnyCancellable?
+    private var recentStationsObserver: AnyCancellable?
     
     // MARK: - Scene Delegate Methods
     
@@ -124,6 +125,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     
                     let managedFeeds = try context.fetch(feedRequest)
                     os_log("🚗 CarPlay: Found %d podcast feeds in Core Data", log: self.log, type: .info, managedFeeds.count)
+                    DebugLogger.logInfo("CarPlay podcast load: \(managedFeeds.count) feeds in Core Data", category: "CarPlay")
 
                     if managedFeeds.isEmpty {
                         let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
@@ -181,6 +183,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     
                 } catch {
                     os_log("🚗 CarPlay: Error loading podcast feeds from Core Data: %@", log: self.log, type: .error, error.localizedDescription)
+                    DebugLogger.logError("CarPlay podcast load failed", category: "CarPlay", error: error)
                     print("🚗 CarPlay: Error loading podcast feeds: \(error.localizedDescription)")
                     continuation.resume()
                 }
@@ -417,6 +420,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         radioStationObserver = nil
         podcastDataObserver?.cancel()
         podcastDataObserver = nil
+        recentStationsObserver?.cancel()
+        recentStationsObserver = nil
         
         // Clear CarPlay connection status for performance optimizations
         CarPlayManager.shared.setCarPlaySceneConnected(false)
@@ -452,32 +457,23 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         observeSubscriptionStatus()
         observeRadioListMetadata()
         observePodcastData()
+        observeRecentStations()
         
         // Install the root before restoration. Until this completion fires, CarPlay discards taps
         // on system affordances such as Now Playing while its template stack is transitioning.
-        setupRootTemplate { [weak self] in
+        // Wait (briefly) for the data first: tabs built empty had to be swapped or updated in place
+        // later, and CarPlay then dropped taps on them ("Failed to identify a local template").
+        Task { @MainActor [weak self] in
             guard let self else { return }
-
-            Task { [weak self] in
-                guard let self else { return }
-                await self.dataInitializationTask?.value
-                await MainActor.run {
-                    self.refreshRecentsTabTemplate()
-                    self.refreshStationsTemplate()
-                    self.refreshPodcastTabTemplate()
-                    self.refreshDownloadsTabTemplate()
-                }
+            let dataTask = self.dataInitializationTask
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await dataTask?.value }
+                group.addTask { try? await Task.sleep(nanoseconds: 3_000_000_000) }
+                await group.next()
+                group.cancelAll()
             }
-
-            self.schedulePodcastContentReconciliation()
-
-            // The templates are always available; only playback and restoration are gated, so an
-            // unsubscribed user can still browse and see why nothing plays.
-            self.withEntitlement {
-                self.restorePlaybackAfterConnect()
-            } otherwise: {
-                self.handleBlockedPlayback(reason: "CarPlay connected without an active subscription")
-            }
+            guard self.interfaceController === interfaceController else { return }
+            self.installRootTemplateAfterConnect()
         }
         
         // Validate CarPlay implementation compliance
@@ -489,6 +485,22 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         setupEnhancedArtworkMonitoring()
         
         os_log("🚗 CarPlay: Initial template setup complete with independent restoration", log: log, type: .info)
+    }
+    
+    private func installRootTemplateAfterConnect() {
+        setupRootTemplate { [weak self] in
+            guard let self else { return }
+
+            self.schedulePodcastContentReconciliation()
+
+            // The templates are always available; only playback and restoration are gated, so an
+            // unsubscribed user can still browse and see why nothing plays.
+            self.withEntitlement {
+                self.restorePlaybackAfterConnect()
+            } otherwise: {
+                self.handleBlockedPlayback(reason: "CarPlay connected without an active subscription")
+            }
+        }
     }
     
     private func restorePlaybackAfterConnect() {
@@ -1285,6 +1297,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         os_log("🚗 Setting up CarPlay root template", log: log, type: .info)
         print("🚗 CarPlay: Starting template setup...")
+        // Fresh tab templates start from their initial sections, so every refresh must apply again.
+        appliedSectionSignatures.removeAll()
         
         // Create the 4 main tabs
         print("🚗 CarPlay: Creating recents tab...")
@@ -1301,6 +1315,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Create tab bar template - Order: Recent, Radio, Podcast, Downloads
         let tabBarTemplate = CPTabBarTemplate(templates: [recentsTab, stationsTab, podcastsTab, downloadsTab])
+        tabBarTemplate.delegate = self
         
         print("🚗 CarPlay: Setting root template...")
         
@@ -1416,14 +1431,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 podcastsWithDownloads.append((feed: feed, episodes: downloadedEpisodes))
             }
         }
+        appliedSectionSignatures["downloads"] = podcastsWithDownloads
+            .flatMap { $0.episodes.map(\.id) }.joined(separator: ",")
         
         if podcastsWithDownloads.isEmpty {
+            tabsBuiltEmpty.insert(Self.downloadsTabIndex)
             // No downloads found
             let emptyItem = CPListItem(text: "No Downloaded Episodes", 
                                      detailText: "Downloaded podcast episodes will appear here")
             let emptySection = CPListSection(items: [emptyItem], header: "Downloads", sectionIndexTitle: nil)
             sections.append(emptySection)
         } else {
+            tabsBuiltEmpty.remove(Self.downloadsTabIndex)
             var downloadRows: [(episodeId: String, item: CPListItem)] = []
             // Create a section for each podcast with downloads
             for podcastWithDownloads in podcastsWithDownloads {
@@ -1492,6 +1511,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         var downloadedEpisodes: [PodcastEpisode] = []
         let restoredDownloadIds = EpisodeStateManager.shared.downloadedEpisodeIds(for: podcast.id)
         let liveDownloadStates = latestDownloadStates
+        // Files on disk are the ground truth: with the phone app closed, EpisodeStateManager may not have
+        // loaded yet and the Core Data flag is often stale. Files are named "<episode id>.<ext>".
+        let downloadsFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("DownloadedEpisodes")
+        let fileEpisodeIds = Set(((try? FileManager.default.contentsOfDirectory(atPath: downloadsFolder.path)) ?? [])
+            .map { ($0 as NSString).deletingPathExtension })
+        // Episodes can be stored under the feed's URL-derived id rather than its current id.
+        let normalizedURL = podcast.url.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let feedIds = [podcast.id, "feed_\(StableHash.of(normalizedURL))"]
         
         context.performAndWait {
             do {
@@ -1499,24 +1527,32 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 let newlyDownloadedEpisodeIds = liveDownloadStates.compactMap { episodeId, isDownloaded in
                     isDownloaded ? episodeId : nil
                 }
-                let downloadedEpisodeIds = restoredDownloadIds.union(newlyDownloadedEpisodeIds)
+                let downloadedEpisodeIds = restoredDownloadIds.union(newlyDownloadedEpisodeIds).union(fileEpisodeIds)
                 episodeRequest.predicate = NSPredicate(
-                    format: "feedId == %@ AND (isDownloaded == YES OR id IN %@)",
-                    podcast.id,
+                    format: "feedId IN %@ AND (isDownloaded == YES OR id IN %@ OR (localFilePath != nil AND localFilePath != ''))",
+                    feedIds,
                     Array(downloadedEpisodeIds)
                 )
                 episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
                 
                 let managedEpisodes = try context.fetch(episodeRequest)
                 downloadedEpisodes = managedEpisodes.compactMap { managedEpisode -> PodcastEpisode? in
+                    // Decide from cheap checks first: toPodcastEpisode() runs path recovery, a save and a
+                    // CloudKit sync for every stale path, which froze CarPlay on large feeds.
+                    let episodeId = managedEpisode.id ?? ""
+                    let storedPath = managedEpisode.localFilePath ?? ""
+                    let hasFile = fileEpisodeIds.contains(episodeId)
+                        || (!storedPath.isEmpty && FileManager.default.fileExists(atPath: storedPath))
+                    let flagged = liveDownloadStates[episodeId]
+                        ?? restoredDownloadIds.contains(episodeId)
+                        || managedEpisode.isDownloaded
+                    guard hasFile || flagged else { return nil }
+                    
                     var episode = managedEpisode.toPodcastEpisode()
                     episode.state.isPlayed = managedEpisode.isPlayed
                     episode.state.progress = managedEpisode.progress
                     episode.state.isFavorite = managedEpisode.isFavorite
-                    episode.state.isDownloaded = liveDownloadStates[episode.id]
-                        ?? restoredDownloadIds.contains(episode.id)
-                        || managedEpisode.isDownloaded
-                    guard episode.state.isDownloaded else { return nil }
+                    episode.state.isDownloaded = true
                     return episode
                 }
                 
@@ -1692,7 +1728,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Order feeds the same way as PodcastListView using podcastFeedOrder
         let orderedFeedIds = podcastViewModel.podcastFeedOrder
-        let feedsById = Dictionary(uniqueKeysWithValues: allPodcastFeeds.map { ($0.id, $0) })
+        let feedsById = Dictionary(allPodcastFeeds.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         
         // First add feeds in the user's custom order
         var orderedFeeds: [PodcastFeed] = []
@@ -1708,9 +1744,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         orderedFeeds.append(contentsOf: remainingFeeds)
         
         var podcastItems: [CPListItem] = []
+        var signatureParts: [String] = []
         for podcast in orderedFeeds {
             // Get episode count synchronously
             let episodeCount = getEpisodeCountSync(for: podcast)
+            signatureParts.append("\(podcast.id)|\(podcast.title)|\(episodeCount)")
             
             let item = CPListItem(text: podcast.title,
                                  detailText: "\(episodeCount) episodes",
@@ -1724,7 +1762,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         if podcastItems.isEmpty {
             let emptyItem = CPListItem(text: "No Podcasts", detailText: "Open the phone app to sync your podcasts")
             podcastItems.append(emptyItem)
+            tabsBuiltEmpty.insert(Self.podcastsTabIndex)
+        } else {
+            tabsBuiltEmpty.remove(Self.podcastsTabIndex)
         }
+        // Same format as refreshPodcastTabTemplate, so an identical refresh doesn't rebuild the rows.
+        appliedSectionSignatures["podcasts"] = signatureParts.joined(separator: ",")
         
         let podcastSection = CPListSection(items: podcastItems, header: "Your Podcasts", sectionIndexTitle: nil)
         sections.append(podcastSection)
@@ -1785,11 +1828,27 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func showPodcastDetails(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        // Extra taps while a feed is opening used to start parallel loads and stack several lists.
+        // Expires so a push that never calls back (e.g. a disconnect) can't block feeds for good.
+        if let since = podcastDetailsOpeningSince, Date().timeIntervalSince(since) < 10 {
+            DebugLogger.logInfo("CarPlay open '\(podcast.title)': ignored, another feed opening for \(String(format: "%.1f", Date().timeIntervalSince(since)))s", category: "CarPlay")
+            completion()
+            return
+        }
+        let openStarted = Date()
+        podcastDetailsOpeningSince = openStarted
+        DebugLogger.logInfo("CarPlay open '\(podcast.title)': start", category: "CarPlay")
+        let completion = { [weak self] in
+            DebugLogger.logInfo("CarPlay open '\(podcast.title)': done in \(String(format: "%.2f", Date().timeIntervalSince(openStarted)))s", category: "CarPlay")
+            self?.podcastDetailsOpeningSince = nil
+            completion()
+        }
         os_log("🚗 CarPlay: Showing podcast details for '%@'", log: log, type: .info, podcast.title)
         
         // First, get the total episode count from CoreData
         getEpisodeCount(for: podcast) { [weak self] totalEpisodes in
-            guard let self = self else { return }
+            guard let self = self else { return completion() }
+            DebugLogger.logInfo("CarPlay open '\(podcast.title)': count=\(totalEpisodes) after \(String(format: "%.2f", Date().timeIntervalSince(openStarted)))s", category: "CarPlay")
             let inMemoryEpisodes = self.validInMemoryEpisodes(for: podcast)
             
             if totalEpisodes == 0 {
@@ -1821,6 +1880,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             os_log("🚗 CarPlay: Podcast '%@' loading initial batch of %d episodes (effective total: %d)", log: self.log, type: .info, podcast.title, initialBatchSize, effectiveTotal)
             
             self.loadInitialEpisodesForPodcast(podcast, limit: initialBatchSize) { episodes in
+                DebugLogger.logInfo("CarPlay open '\(podcast.title)': loaded \(episodes.count) episodes after \(String(format: "%.2f", Date().timeIntervalSince(openStarted)))s", category: "CarPlay")
                 var updatedPodcast = podcast
                 let availableEpisodes = episodes.isEmpty ? inMemoryEpisodes : episodes
                 guard !availableEpisodes.isEmpty else {
@@ -2031,7 +2091,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         currentPodcastTemplate = listTemplate
         currentPodcastFeed = podcast
         
-        interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+        guard let interfaceController else {
+            DebugLogger.logWarning("CarPlay open '\(podcast.title)': no interface controller", category: "CarPlay")
+            completion()
+            return
+        }
+        interfaceController.pushTemplate(listTemplate, animated: true, completion: { success, error in
+            if !success {
+                DebugLogger.logWarning("CarPlay open '\(podcast.title)': push failed (depth \(interfaceController.templates.count))", category: "CarPlay", error: error)
+            }
             completion()
         })
     }
@@ -2320,6 +2388,27 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private var appliedSectionSignatures: [String: String] = [:]
+    private var episodeCountCache: [String: (count: Int, at: Date)] = [:]
+    private var podcastDetailsOpeningSince: Date?
+    private static let podcastsTabIndex = 2
+    private static let downloadsTabIndex = 3
+    /// Tabs created while their data wasn't loaded yet. CarPlay ignores `updateSections` on these
+    /// (log: "refreshed podcast tab with 11 feeds" while the screen still said No Podcasts).
+    private var tabsBuiltEmpty: Set<Int> = []
+    
+    /// Swaps in a freshly built tab, keeping the user's selected tab.
+    private func replaceTab(at index: Int, with template: CPListTemplate) {
+        guard let tabBar = interfaceController?.rootTemplate as? CPTabBarTemplate,
+              index < tabBar.templates.count else { return }
+        let selectedIndex = tabBar.templates.firstIndex { $0 === tabBar.selectedTemplate }
+        var templates = tabBar.templates
+        templates[index] = template
+        tabBar.updateTemplates(templates)
+        if let selectedIndex, #available(iOS 17.0, *) {
+            tabBar.selectTemplate(at: selectedIndex)
+        }
+        DebugLogger.logInfo("CarPlay: replaced tab \(index) that was built before its data loaded", category: "CarPlay")
+    }
     
     /// Rebuilding a list resets its scroll and selection, and `updateSections()` does not reliably
     /// repaint an item's `isPlaying` flag - which leaves two rows highlighted. So rebuild only when
@@ -2417,13 +2506,42 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
     }
 
+    /// Recents only refreshed from explicit notifications before, so plays from paths that don't post
+    /// them (or while the tab's data copy was stale) stayed hidden until CarPlay reconnected.
+    private func observeRecentStations() {
+        guard recentStationsObserver == nil else { return }
+
+        let stationRecents = RadioStationViewModel.shared.$stations
+            .map { stations in
+                stations.filter { $0.lastPlayed != nil }
+                    .sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
+                    .prefix(10)
+                    .map { "\($0.id)@\($0.lastPlayed?.timeIntervalSince1970 ?? 0)" }
+            }
+            .removeDuplicates()
+            .map { _ in () }
+        let episodeRecents = NotificationCenter.default
+            .publisher(for: NSNotification.Name("CarPlayRecentEpisodesChanged"))
+            .map { _ in () }
+
+        recentStationsObserver = stationRecents
+            .merge(with: episodeRecents)
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] in
+                CarPlayManager.shared.updateContent()
+                self?.refreshRecentsTabTemplate()
+            }
+    }
+
     private func observePodcastData() {
         guard podcastDataObserver == nil else { return }
 
         let viewModel = PodcastViewModel.shared
         podcastDataObserver = viewModel.$podcastFeeds
             .combineLatest(viewModel.$podcastFeedOrder)
-            .receive(on: DispatchQueue.main)
+            // The library republishes many times while loading; each refresh does blocking Core Data work
+            // on the main thread, which left CarPlay taps spinning after a cold launch.
+            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
             .sink { [weak self] feeds, feedOrder in
                 guard let self, !feeds.isEmpty else { return }
 
@@ -2942,6 +3060,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             queue: .main
         ) { [weak self] notification in
             self?.handleStationPlayedForRecents(notification)
+        }
+
+        // Plays on another device (Apple Watch) update Recents without touching the now-playing highlight.
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("RemoteStationPlayedForRecents"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            CarPlayManager.shared.updateContent()
+            self?.refreshRecentsTabTemplate()
         }
         
         // Listen for CarPlay refresh requests from CarPlayManager
@@ -3592,6 +3720,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Create new sections with updated data
             var newSections: [CPListSection] = []
             
+            if !podcastsWithDownloads.isEmpty, tabsBuiltEmpty.contains(Self.downloadsTabIndex) {
+                replaceTab(at: Self.downloadsTabIndex, with: createDownloadsTab())
+                appliedSectionSignatures["downloads"] = podcastsWithDownloads
+                    .flatMap { $0.episodes.map(\.id) }.joined(separator: ",")
+                return
+            }
+            
             guard shouldUpdateSections(key: "downloads",
                                        data: podcastsWithDownloads.flatMap { $0.episodes.map(\.id) }.joined(separator: ",")) else {
                 applyEpisodeHighlight()
@@ -3959,7 +4094,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Order feeds the same way as PodcastListView using podcastFeedOrder
         let orderedFeedIds = podcastViewModel.podcastFeedOrder
-        let feedsById = Dictionary(uniqueKeysWithValues: allPodcastFeeds.map { ($0.id, $0) })
+        let feedsById = Dictionary(allPodcastFeeds.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         
         // First add feeds in the user's custom order
         var orderedFeeds: [PodcastFeed] = []
@@ -3973,12 +4108,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let orderedFeedIds_set = Set(orderedFeedIds)
         let remainingFeeds = allPodcastFeeds.filter { !orderedFeedIds_set.contains($0.id) }
         orderedFeeds.append(contentsOf: remainingFeeds)
+
+        let episodeCounts = orderedFeeds.map { getEpisodeCountSync(for: $0) }
+
+        if !orderedFeeds.isEmpty, tabsBuiltEmpty.contains(Self.podcastsTabIndex) {
+            replaceTab(at: Self.podcastsTabIndex, with: createPodcastsTab())
+            appliedSectionSignatures["podcasts"] = zip(orderedFeeds, episodeCounts)
+                .map { "\($0.id)|\($0.title)|\($1)" }.joined(separator: ",")
+            return
+        }
+
+        // Episode progress edits republish podcastFeeds; only rebuild when the visible list changes.
+        guard shouldUpdateSections(key: "podcasts",
+                                   data: zip(orderedFeeds, episodeCounts).map { "\($0.id)|\($0.title)|\($1)" }.joined(separator: ",")) else {
+            return
+        }
         
         var podcastItems: [CPListItem] = []
-        for podcast in orderedFeeds {
-            // Get episode count synchronously
-            let episodeCount = getEpisodeCountSync(for: podcast)
-            
+        for (podcast, episodeCount) in zip(orderedFeeds, episodeCounts) {
             let item = CPListItem(text: podcast.title,
                                  detailText: "\(episodeCount) episodes",
                                  image: carPlayManager.getPodcastArtwork(for: podcast))
@@ -4436,34 +4583,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         context.perform {
             do {
+                // Count in SQLite: fetching every episode (thousands for daily shows) made opening a feed hang.
                 let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
-                
-                // Apply maxEpisodes limit if set
+                episodeCountRequest.predicate = NSPredicate(
+                    format: "feedId == %@ AND duration > 0 AND title != nil AND title != '' AND audioUrl != nil AND audioUrl != ''",
+                    podcastFeed.id
+                )
+                episodeCountRequest.includesPropertyValues = false
+                var validCount = try context.count(for: episodeCountRequest)
                 if let maxEpisodes = podcastFeed.maxEpisodes, maxEpisodes > 0 {
-                    episodeCountRequest.fetchLimit = maxEpisodes
-                    episodeCountRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
-                }
-                
-                // Fetch episodes to validate them (more accurate than simple count)
-                let managedEpisodes = try context.fetch(episodeCountRequest)
-                
-                // Count only valid episodes (same validation as loading)
-                var validCount = 0
-                for managedEpisode in managedEpisodes {
-                    // Apply same validation as loadEpisodesForPodcast
-                    if managedEpisode.duration > 0,
-                       let title = managedEpisode.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       let audioUrl = managedEpisode.audioUrl, !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        validCount += 1
-                    }
-                }
-                
-                let totalCount = managedEpisodes.count
-                let filteredCount = totalCount - validCount
-                
-                if filteredCount > 0 {
-                    os_log("🚗 CarPlay: Episode count for '%@': %d valid (filtered %d invalid)", log: self.log, type: .info, podcastFeed.title, validCount, filteredCount)
+                    validCount = min(validCount, maxEpisodes)
                 }
                 
                 DispatchQueue.main.async {
@@ -4483,39 +4612,33 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     /// Get total VALID episode count from CoreData synchronously (excludes 0-duration and invalid episodes)
     /// CRITICAL FIX: Only counts episodes that will actually be displayed after validation
     private func getEpisodeCountSync(for podcastFeed: PodcastFeed) -> Int {
+        // Runs on the main thread for every feed on every tab refresh; counts rarely change.
+        if let cached = episodeCountCache[podcastFeed.id], Date().timeIntervalSince(cached.at) < 60 {
+            return cached.count
+        }
         let context = CoreDataStack.shared.newBackgroundContext()
         var validCount = 0
         
         context.performAndWait {
             do {
                 let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
-                
-                // Apply maxEpisodes limit if set
+                // Count in SQLite: materialising every episode here blocked the main thread on large libraries.
+                episodeCountRequest.predicate = NSPredicate(
+                    format: "feedId == %@ AND duration > 0 AND title != nil AND title != '' AND audioUrl != nil AND audioUrl != ''",
+                    podcastFeed.id
+                )
+                episodeCountRequest.includesPropertyValues = false
+                validCount = try context.count(for: episodeCountRequest)
                 if let maxEpisodes = podcastFeed.maxEpisodes, maxEpisodes > 0 {
-                    episodeCountRequest.fetchLimit = maxEpisodes
-                    episodeCountRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                    validCount = min(validCount, maxEpisodes)
                 }
-                
-                // Fetch episodes to validate them (more accurate than simple count)
-                let managedEpisodes = try context.fetch(episodeCountRequest)
-                
-                // Count only valid episodes (same validation as loading)
-                for managedEpisode in managedEpisodes {
-                    // Apply same validation as loadEpisodesForPodcast
-                    if managedEpisode.duration > 0,
-                       let title = managedEpisode.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       let audioUrl = managedEpisode.audioUrl, !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        validCount += 1
-                    }
-                }
-                
             } catch {
                 os_log("🚗 CarPlay: Error counting episodes for podcast '%@': %@", log: self.log, type: .error, podcastFeed.title, error.localizedDescription)
                 validCount = 0
             }
         }
         
+        episodeCountCache[podcastFeed.id] = (validCount, Date())
         return validCount
     }
     
@@ -5165,3 +5288,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
 } 
+
+extension CarPlaySceneDelegate: CPTabBarTemplateDelegate {
+    func tabBarTemplate(_ tabBarTemplate: CPTabBarTemplate, didSelect selectedTemplate: CPTemplate) {
+        // Podcast (2) and Downloads (3) both depend on the feed list.
+        guard let index = tabBarTemplate.templates.firstIndex(where: { $0 === selectedTemplate }),
+              index == 2 || index == 3,
+              CarPlayManager.shared.getPodcastFeeds().isEmpty else { return }
+        // A cold launch with the phone app closed can come up empty; retry when the user asks for it.
+        DebugLogger.logInfo("CarPlay: empty podcast tab opened, reloading feeds", category: "CarPlay")
+        Task { await loadPodcastDataFromCoreData(scheduleColdStartRetry: false) }
+    }
+}

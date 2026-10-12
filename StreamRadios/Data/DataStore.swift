@@ -538,9 +538,97 @@ class DataStore {
         return nil
     }
 
+    // MARK: - Station record identity
+
+    /// Existing CloudKit records for these stations, keyed by local station id.
+    /// Local ids often differ from the record already holding the stream (fresh installs, bundled vs
+    /// API ids), so this matches on record name first and then on the stream URL.
+    func existingStationRecords(for stations: [RadioStation]) async throws -> [String: CKRecord] {
+        var result: [String: CKRecord] = [:]
+        guard !stations.isEmpty else { return result }
+
+        let idBatchSize = 100
+        for start in stride(from: 0, to: stations.count, by: idBatchSize) {
+            let ids = stations[start..<min(start + idBatchSize, stations.count)].map { CKRecord.ID(recordName: $0.id) }
+            for (recordID, fetch) in try await privateDatabase.records(for: ids) {
+                if case .success(let record) = fetch { result[recordID.recordName] = record }
+            }
+        }
+
+        let unmatched = stations.filter { result[$0.id] == nil }
+        let urlBatchSize = 25
+        for start in stride(from: 0, to: unmatched.count, by: urlBatchSize) {
+            let batch = Array(unmatched[start..<min(start + urlBatchSize, unmatched.count)])
+            let variants = Array(Set(batch.flatMap { Self.stationURLVariants($0.url) }))
+            guard !variants.isEmpty else { continue }
+
+            let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(format: "url IN %@", variants))
+            var byKey: [String: CKRecord] = [:]
+            var cursor: CKQueryOperation.Cursor?
+            repeat {
+                let page: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+                do {
+                    if let cursor {
+                        page = try await privateDatabase.records(continuingMatchFrom: cursor)
+                    } else {
+                        page = try await privateDatabase.records(matching: query)
+                    }
+                } catch let error as CKError where error.code == .invalidArguments {
+                    print("⚠️ Station URL lookup unavailable (is `url` queryable?): \(error.localizedDescription)")
+                    return result
+                }
+                for (_, fetch) in page.matchResults {
+                    guard case .success(let record) = fetch,
+                          let key = RadioStationViewModel.stationIdentityKey(record["url"] as? String) else { continue }
+                    if let current = byKey[key], !Self.isPreferredStationRecord(record, over: current) { continue }
+                    byKey[key] = record
+                }
+                cursor = page.queryCursor
+            } while cursor != nil
+
+            for station in batch {
+                if let key = RadioStationViewModel.stationIdentityKey(station.url), let record = byKey[key] {
+                    result[station.id] = record
+                }
+            }
+        }
+        return result
+    }
+
+    func existingStationRecord(for station: RadioStation) async throws -> CKRecord? {
+        try await existingStationRecords(for: [station])[station.id]
+    }
+
+    /// Exact-match spellings of one stream, since CloudKit `IN` can't normalise scheme or trailing slash.
+    private static func stationURLVariants(_ url: String) -> [String] {
+        guard let key = RadioStationViewModel.stationIdentityKey(url) else { return [] }
+        var variants: Set<String> = [url.trimmingCharacters(in: .whitespacesAndNewlines)]
+        for scheme in ["https://", "http://"] {
+            variants.insert(scheme + key)
+            variants.insert(scheme + key + "/")
+        }
+        return Array(variants)
+    }
+
+    private static func isPreferredStationRecord(_ candidate: CKRecord, over current: CKRecord) -> Bool {
+        let candidateFavorite = (candidate["isFavorite"] as? String)?.lowercased() == "true"
+        let currentFavorite = (current["isFavorite"] as? String)?.lowercased() == "true"
+        if candidateFavorite != currentFavorite { return candidateFavorite }
+        return (candidate.modificationDate ?? .distantPast) > (current.modificationDate ?? .distantPast)
+    }
+
     func saveNewStationToCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
         let iconFileName = iconImage.flatMap { saveImageToFileSystem(image: $0) }
-        let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
+        Task {
+        let record: CKRecord
+        do {
+            record = try await existingStationRecord(for: station)
+                ?? CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
+        } catch {
+            print("Error resolving existing CloudKit station record: \(error.localizedDescription)")
+            DispatchQueue.main.async { completion(false, nil) }
+            return
+        }
         record.setValue(station.name, forKey: "name")
         record.setValue(station.url, forKey: "url")
         record.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
@@ -565,6 +653,7 @@ class DataStore {
                     completion(true, savedRecord?.recordID.recordName)
                 }
             }
+        }
         }
     }
     
@@ -832,15 +921,26 @@ class DataStore {
     
     // Method specifically for import operations - handles both new and updated stations
     func saveImportedStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
-        fetchExistingStationURLs { existingURLs, error in
-            guard error == nil else {
-                print("Error fetching existing station URLs: \(error?.localizedDescription ?? "Unknown error")")
-                completion(false, nil)
+        Task {
+            let existingRecords: [String: CKRecord]
+            do {
+                existingRecords = try await self.existingStationRecords(for: stations)
+            } catch {
+                print("Error resolving existing CloudKit station records: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion(false, nil) }
                 return
             }
 
-            let newStations = stations.filter { !existingURLs.contains($0.url) }
-            let existingStations = stations.filter { existingURLs.contains($0.url) }
+            // One stream listed twice would otherwise create two records in the same batch.
+            var seenKeys = Set<String>()
+            let newStations = stations.filter { station in
+                guard existingRecords[station.id] == nil else { return false }
+                guard let key = RadioStationViewModel.stationIdentityKey(station.url) else { return true }
+                return seenKeys.insert(key).inserted
+            }
+            let existingStations = stations.compactMap { station in
+                existingRecords[station.id].map { (station: station, record: $0) }
+            }
             
             print("CloudKit Import: \(newStations.count) new stations, \(existingStations.count) existing stations to update")
             
@@ -948,36 +1048,13 @@ class DataStore {
     }
 
     // Method to merge iconData for existing stations only if missing
-    private func mergeIconDataForExistingStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
-        let database = CKContainer.default().privateCloudDatabase
-        
-        // Create a map of URL to imported station for quick lookup
-        let stationsByURL = Dictionary(uniqueKeysWithValues: stations.map { ($0.url, $0) })
-        
-        // Fetch existing records by URL
-        let predicate = NSPredicate(format: "url IN %@", stations.map { $0.url })
-        let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
-        
-        database.perform(query, inZoneWith: nil) { records, error in
-            if let error = error {
-                print("Error fetching existing CloudKit records for merge: \(error)")
-                completion(false, nil)
-                return
-            }
-            
-            guard let existingRecords = records else {
-                print("No existing records found for merge")
-                completion(true, [])
-                return
-            }
-            
+    private func mergeIconDataForExistingStations(_ matches: [(station: RadioStation, record: CKRecord)], completion: @escaping (Bool, [String]?) -> Void) {
+        do {
             var recordsToUpdate: [CKRecord] = []
+            var updatedRecordNames = Set<String>()
             
-            for record in existingRecords {
-                guard let recordURL = record["url"] as? String,
-                      let importedStation = stationsByURL[recordURL] else {
-                    continue
-                }
+            for (importedStation, record) in matches {
+                guard updatedRecordNames.insert(record.recordID.recordName).inserted else { continue }
                 
                 var needsUpdate = false
                 
@@ -1376,7 +1453,7 @@ class DataStore {
                             "🔧 Processing \(currentCount) stations (some records skipped due to errors)..."
                         progressCallback(0.95, currentCount, processingMessage)
                         
-                        self.processAndReturnStations(from: fetchedRecords) { stations, error in
+                        self.processAndReturnStations(from: fetchedRecords) { stations, _ in
                             DispatchQueue.main.async {
                                 if let stations = stations {
                                     let completionMessage = countryCount > 1 ?
@@ -1385,6 +1462,7 @@ class DataStore {
                                     progressCallback(1.0, stations.count, completionMessage)
                                 }
                             }
+                            // Pass the query error along with the partial result so callers can retry later.
                             completion(stations, error)
                         }
                     } else {
@@ -1401,14 +1479,22 @@ class DataStore {
         DispatchQueue.main.async {
             let stations = records.compactMap { record -> RadioStation? in
                 guard let name = record["name"] as? String,
-                      let url = record["url"] as? String,
-                      let country = record["country"] as? String else {
+                      let url = record["url"] as? String else {
                     print("Essential data missing in record; skipping...")
                     return nil
                 }
+                let country = (record["country"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown Region"
 
                 let iconData = self.decodeIconData(record: record)
-                let isFavorite = (record["isFavorite"] as? String)?.lowercased() == "true"
+                // Older builds wrote isFavorite as a number rather than the "true"/"false" string.
+                let isFavorite: Bool
+                if let text = record["isFavorite"] as? String {
+                    isFavorite = text.lowercased() == "true" || text == "1"
+                } else if let number = record["isFavorite"] as? NSNumber {
+                    isFavorite = number.boolValue
+                } else {
+                    isFavorite = false
+                }
                 let favoritedAt = record["favoritedAt"] as? Date
                 let favoriteOrder = record["favoriteOrder"] as? Int
                 let order = record["order"] as? Int ?? 0
@@ -1440,23 +1526,34 @@ class DataStore {
     }
 
     func deleteStationFromCloudKit(station: RadioStation, completion: @escaping (Bool) -> Void) {
-        let recordID = CKRecord.ID(recordName: station.id)
-
-            // Ensuring operation is on the main queue to handle UI updates or subsequent calls safely
-            DispatchQueue.main.async {
-                self.privateDatabase.delete(withRecordID: recordID) { deletedRecordID, error in
-                    DispatchQueue.main.async {
-                        if let error = error {
-                            self.handleCloudKitError(error, operation: "delete")
-                            completion(false)
-                        } else {
-                            print("CloudKit station record deleted successfully, Record ID: \(deletedRecordID?.recordName ?? "Unknown")")
-                            completion(true)
-                        }
+        Task {
+            // After a fresh install the local id can differ from the record that holds the stream.
+            var recordIDs = [CKRecord.ID(recordName: station.id)]
+            do {
+                if let resolved = try await existingStationRecord(for: station),
+                   resolved.recordID.recordName != station.id {
+                    recordIDs.append(resolved.recordID)
+                }
+                let result = try await privateDatabase.modifyRecords(saving: [], deleting: recordIDs)
+                var deletedAny = false
+                for (recordID, deleteResult) in result.deleteResults {
+                    switch deleteResult {
+                    case .success:
+                        deletedAny = true
+                        print("CloudKit station record deleted successfully, Record ID: \(recordID.recordName)")
+                    case .failure(let error) where (error as? CKError)?.code == .unknownItem:
+                        continue
+                    case .failure(let error):
+                        self.handleCloudKitError(error, operation: "delete")
                     }
                 }
+                DispatchQueue.main.async { completion(deletedAny) }
+            } catch {
+                self.handleCloudKitError(error, operation: "delete")
+                DispatchQueue.main.async { completion(false) }
             }
         }
+    }
 
         private func handleCloudKitError(_ error: Error, operation: String) {
             let ckError = error as? CKError

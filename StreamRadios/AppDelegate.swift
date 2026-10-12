@@ -33,6 +33,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             registerBackgroundTasks()
             configureAudioSession()
             setupCarPlay()
+            // A Watch request can launch the app in the background with no UI, so SwiftUI's onAppear never runs.
+            PhoneWatchSyncManager.shared.activate()
             
             let alarmCategory = UNNotificationCategory(identifier: "ALARM_CATEGORY", actions: [], intentIdentifiers: [], options: [])
             UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
@@ -825,9 +827,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         do {
             // Initialize the DebugLogger to set up crash reporting
             _ = DebugLogger.shared
-            
-            // Start main thread monitoring for hang detection
-            DebugLogger.startMainThreadMonitoring()
             
             // Set up additional crash context
             setupCrashContext()

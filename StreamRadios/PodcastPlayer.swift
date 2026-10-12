@@ -71,6 +71,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     // Track if position has been restored to prevent repeated calls during scrolling
     private var hasRestoredPositionForCurrentEpisode: Bool = false
     private var currentEpisodeIdForRestoration: String?
+    // AVPlayerItem's estimated duration often exceeds the real end, so time/duration at end-of-item can read < 99%.
+    private var completedEpisodeId: String?
+    private var lastPlayRequestAt = Date.distantPast
+    // A remote position newer than ours may still replace the playhead this long after the user hits play.
+    private let remoteProgressResumeWindow: TimeInterval = 30
     
     // Track restoration attempts to prevent infinite retries
     private var restorationAttempts: Int = 0
@@ -81,7 +86,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
     // MARK: - Performance Optimization Properties
     private var isUserScrolling = false
-    private var scrollDetectionTimer: Timer?
+    private var scrollResetWorkItem: DispatchWorkItem?
     private var lastScrollNotificationTime = Date()
     
     // Optimized update intervals for better performance
@@ -1799,6 +1804,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         
         // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps play
+        lastPlayRequestAt = Date()
         loadingEpisodeId = episode.id
         connectionState = .loading
         
@@ -1833,7 +1839,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let actualDuration = player?.currentItem?.duration.seconds ?? duration
             
             // Calculate progress with the most up-to-date values
-            let currentProgress = actualDuration > 0 ? actualCurrentTime / actualDuration : 0
+            let currentProgress = previousEpisode.id == completedEpisodeId
+                ? 1.0
+                : (actualDuration > 0 ? actualCurrentTime / actualDuration : 0)
             
             // Update our internal state to match the actual player state
             if actualCurrentTime.isFinite && actualCurrentTime >= 0 {
@@ -1855,6 +1863,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 previousProgress: currentProgress
             )
         }
+        completedEpisodeId = nil
         
         // NOW set the new episode information
         currentEpisode = episode
@@ -2166,6 +2175,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 os_log("🎵 Episode finished playing (AVPlayerItemDidPlayToEndTime): %@", log: self.log, type: .info, currentEpisode.title)
                 
                 // Update current time and progress to reflect completion
+                self.completedEpisodeId = currentEpisode.id
                 self.currentTime = self.duration
                 self.currentProgress = 1.0
                 
@@ -2413,6 +2423,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // CRITICAL: Set user intent when resuming playback
         userWantsToPlay = true
+        lastPlayRequestAt = Date()
         
         // CRITICAL FIX: Clear manual pause flag when user explicitly plays
         wasManuallyPaused = false
@@ -2924,6 +2935,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func seek(to time: Double) {
         guard let player = player, let currentEpisode = currentEpisode else { return }
+        completedEpisodeId = nil
         
         // CRITICAL FIX: Update time and progress IMMEDIATELY before seeking to prevent race conditions
         // Calculate progress before the actual seek operation
@@ -3071,6 +3083,47 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                log: log, type: .info, currentEpisode.title, progress * 100)
     }
 
+    /// Moves the loaded episode to a position reported by another device (Apple Watch); otherwise resuming
+    /// here, or the next background save, would reuse this player's stale position. Watch changes queued
+    /// while the iPhone was off arrive a few seconds after launch, often just after the user tapped play.
+    func applyRemoteProgress(episodeId: String, feedId: String, progress: Double, attempt: Int = 0) {
+        guard let currentEpisode, currentEpisode.id == episodeId, currentEpisode.feedId == feedId,
+              progress.isFinite else { return }
+        let itemReady = player?.currentItem?.status == .readyToPlay
+        if loadingEpisodeId != nil || (isPlaying && !itemReady) {
+            guard attempt < 10 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.applyRemoteProgress(episodeId: episodeId, feedId: feedId, progress: progress, attempt: attempt + 1)
+            }
+            return
+        }
+        let justResumed = Date().timeIntervalSince(lastPlayRequestAt) < remoteProgressResumeWindow
+        guard !isPlaying || justResumed else { return }
+        let clamped = min(max(progress, 0), 1)
+        completedEpisodeId = nil
+        currentProgress = clamped
+        hasRestoredPositionForCurrentEpisode = false
+        currentEpisodeIdForRestoration = nil
+        guard duration > 0 else { return }
+        let target = clamped * duration
+        currentTime = target
+        if let player, itemReady {
+            os_log("⌚️ Applying Watch position %.1fs to %@ (playing: %@)", log: log, type: .info,
+                   target, currentEpisode.title, isPlaying ? "yes" : "no")
+            player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+                guard finished else { return }
+                DispatchQueue.main.async {
+                    guard let self, self.currentEpisode?.id == episodeId else { return }
+                    self.hasRestoredPositionForCurrentEpisode = true
+                    self.currentEpisodeIdForRestoration = episodeId
+                    self.updateNowPlayingInfo()
+                }
+            }
+        }
+        updateNowPlayingInfo()
+    }
+
     func persistCurrentProgress(reason: String) {
         guard let currentEpisode, duration > 0 else { return }
 
@@ -3143,10 +3196,24 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     /// Save progress directly to Core Data for immediate persistence
+    private func saveProgressToCoreDataAndWait(episodeId: String, feedId: String, progress: Double) {
+        let context = CoreDataStack.shared.newBackgroundContext()
+        context.performAndWait {
+            let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@ AND feedId == %@", episodeId, feedId)
+            request.fetchLimit = 1
+            guard let episode = try? context.fetch(request).first else { return }
+            episode.progress = progress
+            episode.isPlayed = progress >= 0.99
+            do { try context.save() }
+            catch { os_log("Termination progress save failed: %@", log: self.log, type: .error, error.localizedDescription) }
+        }
+    }
+
+    /// Save progress directly to Core Data for immediate persistence
     private func saveProgressToCoreDataSync(episodeId: String, feedId: String, progress: Double) {
         // PERFORMANCE FIX: Use background context to prevent main thread I/O hangs
-        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
-        backgroundContext.perform {
+        CoreDataStack.shared.performInBackgroundContext { backgroundContext in
             do {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
@@ -3505,24 +3572,27 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     @objc private func handleScrollStart() {
-        isUserScrolling = true
-        lastScrollNotificationTime = Date()
-        
-        // Cancel any pending scroll detection timer
-        scrollDetectionTimer?.invalidate()
-        
-        // Reduce logging during scrolling for better performance
-        // os_log("🏃‍♂️ User started scrolling - pausing heavy updates for performance", log: log, type: .debug)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isUserScrolling = true
+            self.lastScrollNotificationTime = Date()
+            // A missed stop notification (list dismissed mid-scroll) used to freeze the elapsed time for good.
+            self.scheduleScrollReset(after: 4)
+        }
     }
     
     @objc private func handleScrollEnd() {
-        // Use a timer to detect when scrolling has truly stopped
-        scrollDetectionTimer?.invalidate()
-        scrollDetectionTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-            self?.isUserScrolling = false
-            // Reduce logging during scrolling for better performance
-            // os_log("🛑 User stopped scrolling - resuming normal updates", log: self?.log ?? OSLog.default, type: .debug)
+        DispatchQueue.main.async { [weak self] in
+            self?.scheduleScrollReset(after: 0.5)
         }
+    }
+
+    /// Main-queue work item rather than a Timer: a Timer scheduled from a background thread never fires.
+    private func scheduleScrollReset(after delay: TimeInterval) {
+        scrollResetWorkItem?.cancel()
+        let reset = DispatchWorkItem { [weak self] in self?.isUserScrolling = false }
+        scrollResetWorkItem = reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: reset)
     }
     
     // MARK: - Selective Cross-Device Sync Management
@@ -3559,6 +3629,25 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
+    private var lastBackgroundCheckpoint = Date.distantPast
+
+    /// UI time updates are skipped in the background, so keep EpisodeStateManager (Watch, CarPlay lists,
+    /// force-close saves) current at a low cadence.
+    @MainActor
+    private func checkpointBackgroundProgress(player: AVPlayer) {
+        guard isPlaying, let currentEpisode, !isInChapterProtectionPeriod(),
+              Date().timeIntervalSince(lastBackgroundCheckpoint) >= 15 else { return }
+        let seconds = player.currentTime().seconds
+        let itemDuration = player.currentItem?.duration.seconds ?? 0
+        let total = itemDuration.isFinite && itemDuration > 0 ? itemDuration : duration
+        guard seconds.isFinite, seconds > 0, total > 0 else { return }
+        lastBackgroundCheckpoint = Date()
+        currentTime = seconds
+        currentProgress = min(seconds / total, 1)
+        stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true,
+                                    currentTime: seconds, feedId: currentEpisode.feedId)
+    }
+
     // Lightweight method that only updates time values without heavy operations
     private func updateCurrentTimeOnly() {
         guard let player = player else { return }
@@ -3571,7 +3660,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // MAIN THREAD FIX: Check app state on main thread to prevent violations
     Task { @MainActor in
         // Skip updates if app is in background to save battery and resources
-        guard UIApplication.shared.applicationState == .active else { return }
+        guard UIApplication.shared.applicationState == .active else {
+            self.checkpointBackgroundProgress(player: player)
+            return
+        }
         
         Task { [weak self] in
                 guard let self = self else { return }
@@ -3929,9 +4021,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func handleAppWillTerminate(syncReason: String = "app_closed") {
         if let currentEpisode = currentEpisode {
-            // CRITICAL FIX: Prioritize currentTime over player time to prevent 3-4 second loss during force close
-            // The time observer (currentTime) is more accurate than AVPlayer's currentTime() during force close
-            let actualCurrentTime = currentTime // Use time observer value instead of player?.currentTime().seconds
+            // currentTime stops updating while backgrounded, so the live player time is usually further along.
+            let playerTime = player?.currentTime().seconds ?? 0
+            let actualCurrentTime = playerTime.isFinite ? max(currentTime, playerTime) : currentTime
             let calculatedProgress = duration > 0 ? actualCurrentTime / duration : 0
             
             os_log("🛑 FORCE CLOSE: Using currentTime=%.1fs instead of AVPlayer time to prevent progress loss", 
@@ -3951,7 +4043,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // CRITICAL FIX: Always prioritize currentProgress over calculated progress during force close
             // currentProgress is updated by time observer and is more reliable than AVPlayer time
-            let preferredProgress = currentProgress > 0 ? currentProgress : calculatedProgress
+            let preferredProgress = isProtectedFromChapterSeek
+                ? (currentProgress > 0 ? currentProgress : calculatedProgress)
+                : min(max(currentProgress, calculatedProgress), 1)
             
             os_log("🛑 FORCE CLOSE PROGRESS: currentProgress=%.2f%%, calculatedProgress=%.2f%%, using preferredProgress=%.2f%%", 
                    log: log, type: .info, currentProgress * 100, calculatedProgress * 100, preferredProgress * 100)
@@ -3979,6 +4073,17 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // Save to StateManager with maximum progress (synchronous and reliable)
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress, feedId: currentEpisode.feedId)
+
+            // The process exits when willTerminate returns, so the async saves above may never land.
+            if syncReason == "app_closed" {
+                saveProgressToCoreDataAndWait(episodeId: currentEpisode.id, feedId: currentEpisode.feedId, progress: maxProgress)
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated {
+                        PhoneWatchSyncManager.shared.sendEpisodeProgressBeforeTermination(
+                            episodeID: currentEpisode.id, feedID: currentEpisode.feedId, progress: maxProgress)
+                    }
+                }
+            }
             
             // Update in-memory cache directly
             Task { @MainActor in
