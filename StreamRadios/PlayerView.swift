@@ -149,7 +149,12 @@ struct PlayerView: View {
                             )
                             .frame(width: 64, height: 64)
                         
-                        if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
+                        if let statusSymbol = radioPlayer.networkStatus.transportSymbol {
+                            // Offline / failed: a quiet glyph instead of an endless spinner
+                            Image(systemName: statusSymbol)
+                                .font(.title)
+                                .foregroundColor(playbackControlIconColor)
+                        } else if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(1.2)
                                 .tint(playbackControlIconColor)
@@ -211,12 +216,6 @@ struct PlayerView: View {
             
             // Connection state indicator or bitrate information
             VStack(spacing: 4) {
-                // Show connection state indicator when not connected
-                ReconnectingIndicatorView(
-                    connectionState: radioPlayer.connectionState,
-                    isAttemptingReconnection: radioPlayer.connectionState == .buffering || radioPlayer.connectionState == .connecting
-                )
-                
                 // Bitrate information - compact and subtle
                 Text(bitrateMessage)
                     .font(.caption)

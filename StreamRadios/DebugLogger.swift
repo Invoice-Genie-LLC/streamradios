@@ -127,7 +127,24 @@ class DebugLogger: ObservableObject {
     }
     
     // MARK: - Properties
-    @Published private(set) var logEntries: [LogEntry] = []
+    /// Main thread only. Background work (persistence, crash and hang handlers) must read
+    /// `entriesSnapshot` instead: reading this array while the main thread appends to it races
+    /// on its storage and aborts with "deallocated with non-zero retain count".
+    @Published private(set) var logEntries: [LogEntry] = [] {
+        didSet {
+            snapshotLock.lock()
+            snapshotStorage = logEntries
+            snapshotLock.unlock()
+        }
+    }
+    private let snapshotLock = NSLock()
+    private var snapshotStorage: [LogEntry] = []
+    /// Thread-safe copy of `logEntries`.
+    private var entriesSnapshot: [LogEntry] {
+        snapshotLock.lock()
+        defer { snapshotLock.unlock() }
+        return snapshotStorage
+    }
     private let logQueue = DispatchQueue(label: "com.streamradios.debuglogger", qos: .utility)
     private let maxLogEntries = 1000
     private var currentUserAction: String?
@@ -534,9 +551,10 @@ class DebugLogger: ObservableObject {
             crashInfo: crashInfo
         )
         
-        // Immediately persist crash to disk using synchronous write
-        logEntries.append(logEntry)
-        persistLogsImmediately()
+        // Immediately persist crash to disk using synchronous write. Crash handlers can run on
+        // any thread, so the entry is written alongside the snapshot rather than appended to
+        // the main-thread `logEntries`.
+        persistLogsImmediately(including: logEntry)
         
         // Also write to system console for additional visibility
         print("💥💥💥 CRASH DETECTED 💥💥💥")
@@ -577,14 +595,19 @@ class DebugLogger: ObservableObject {
             "app_runtime_seconds": Date().timeIntervalSince(launchTime),
             "crash_timestamp": Date().timeIntervalSince1970,
             "user_action": currentUserAction ?? "None",
-            "total_log_entries": logEntries.count
+            "total_log_entries": entriesSnapshot.count
         ]
     }
     
-    private func persistLogsImmediately() {
+    private func persistLogsImmediately(including extraEntry: LogEntry? = nil) {
+        var entries = entriesSnapshot
+        if let extraEntry {
+            entries.append(extraEntry)
+        }
+        
         // Synchronous write to ensure crash data is saved
         do {
-            let data = try JSONEncoder().encode(logEntries)
+            let data = try JSONEncoder().encode(entries)
             try data.write(to: Self.logFileURL, options: .atomic)
             
             // Also create a specific crash file
@@ -592,7 +615,7 @@ class DebugLogger: ObservableObject {
             let crashFileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent(crashFileName)
             
-            if let lastEntry = logEntries.last, lastEntry.level == .critical {
+            if let lastEntry = entries.last, lastEntry.level == .critical {
                 let crashData = try JSONEncoder().encode([lastEntry])
                 try crashData.write(to: crashFileURL, options: .atomic)
             }
@@ -624,9 +647,10 @@ class DebugLogger: ObservableObject {
     
     // MARK: - Persistence
     private func persistLogs() {
+        let entries = entriesSnapshot
         logQueue.async {
             do {
-                let data = try JSONEncoder().encode(self.logEntries)
+                let data = try JSONEncoder().encode(entries)
                 try data.write(to: Self.logFileURL)
             } catch {
                 print("Failed to persist logs: \(error)")
@@ -756,12 +780,16 @@ class DebugLogger: ObservableObject {
     
     // MARK: - Log Management
     static func clearAllLogs() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { clearAllLogs() }
+            return
+        }
         shared.logEntries.removeAll()
         shared.persistLogs()
     }
     
     static func getLogStatistics() -> [String: Int] {
-        let entries = shared.logEntries
+        let entries = shared.entriesSnapshot
         var stats: [String: Int] = [:]
         
         for level in LogLevel.allCases {
@@ -772,16 +800,16 @@ class DebugLogger: ObservableObject {
     }
     
     static func getLogsForCategory(_ category: String) -> [LogEntry] {
-        return shared.logEntries.filter { $0.category == category }
+        return shared.entriesSnapshot.filter { $0.category == category }
     }
     
     static func getLogsForLevel(_ level: LogLevel) -> [LogEntry] {
-        return shared.logEntries.filter { $0.level == level }
+        return shared.entriesSnapshot.filter { $0.level == level }
     }
     
     // MARK: - Export Functionality
     static func getAllLogsForSharing() -> String {
-        let entries = shared.logEntries.sorted { $0.timestamp > $1.timestamp }
+        let entries = shared.entriesSnapshot.sorted { $0.timestamp > $1.timestamp }
         var output = """
         StreamRadios Debug Report
         Generated: \(Date().formatted(.dateTime))

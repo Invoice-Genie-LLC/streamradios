@@ -455,6 +455,8 @@ struct AddPodcastView: View {
     @State private var showAlert = false
     @State private var alertMessage: String = ""
     @Environment(\.colorScheme) var colorScheme
+    /// True when the system bars run down the side (iPhone Duo): header buttons move there.
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
     @EnvironmentObject var permissionManager: PermissionManager
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
@@ -512,11 +514,15 @@ struct AddPodcastView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text(navigationTitle)
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.adaptivePrimaryText)
+                if tabBarClearance.isBarOnSide {
+                    DuoLeadingTitleItem(title: navigationTitle)
+                } else {
+                    ToolbarItem(placement: .principal) {
+                        Text(navigationTitle)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.adaptivePrimaryText)
+                    }
                 }
                 
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -534,10 +540,18 @@ struct AddPodcastView: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(actionButtonText) {
-                        validateAndSavePodcast()
+                    if tabBarClearance.isBarOnSide {
+                        // A text-only item cannot go in the vertical bar; give it a symbol there.
+                        Button(action: validateAndSavePodcast) {
+                            Label(actionButtonText, systemImage: "checkmark")
+                        }
+                        .disabled(isAddingPodcast)
+                    } else {
+                        Button(actionButtonText) {
+                            validateAndSavePodcast()
+                        }
+                        .disabled(isAddingPodcast)
                     }
-                    .disabled(isAddingPodcast)
                 }
             }
             .onAppear {

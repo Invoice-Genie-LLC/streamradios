@@ -24,6 +24,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     private var shouldPlayAlarmStationOnReady = false
     private var pendingAlarmStationID: String?
     
+    /// Portrait only, except on a foldable iPhone (iPhone Duo), where the app
+    /// also rotates to landscape so the open inner display is used in every pose.
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        NSLog("DUODBG app delegate orientations asked, hasHinge=%d", FoldableDevice.shared.hasHinge ? 1 : 0)
+        return FoldableDevice.shared.hasHinge ? .allButUpsideDown : .portrait
+    }
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
                     // Initialize enhanced crash logging first
         initializeEnhancedCrashLogging()

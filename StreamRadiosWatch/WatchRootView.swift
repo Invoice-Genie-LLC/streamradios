@@ -641,6 +641,7 @@ struct WatchRootView: View {
             }
             await library.loadIfNeeded()
             refreshPlayerArtwork()
+            await podcasts.refreshAll(library.podcastFeeds)
         }
         .onChange(of: library.favoriteStations) { _, _ in
             refreshPlayerArtwork()
@@ -652,13 +653,18 @@ struct WatchRootView: View {
                 library.flushSync()
                 library.requestFullSyncIfDue()
                 Task { await entitlements.refresh() }
+                Task { await podcasts.refreshAll(library.podcastFeeds) }
             }
         }
         .onChange(of: library.recentStations) { _, _ in
             refreshPlayerArtwork()
         }
-        .onChange(of: library.podcastFeeds) { _, feeds in
+        .onChange(of: library.podcastFeeds) { old, feeds in
             player.refreshFeedArtwork(from: feeds)
+            // A subscription that just arrived from the iPhone has never been fetched here.
+            if Set(feeds.map(\.id)) != Set(old.map(\.id)) {
+                Task { await podcasts.refreshAll(feeds) }
+            }
         }
         .onChange(of: library.bootstrapEpisodes) { _, episodes in
             podcasts.installSeedEpisodes(episodes)

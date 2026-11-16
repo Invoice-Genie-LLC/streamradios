@@ -45,6 +45,8 @@ struct HiddenCountriesSettingsView: View {
     
     @AppStorage("hiddenCountries") private var hiddenCountriesData: Data = Data()
     @Environment(\.presentationMode) var presentationMode
+    /// True when the system bars run down the side (iPhone Duo): header buttons move there.
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     
@@ -158,7 +160,54 @@ struct HiddenCountriesSettingsView: View {
             )
         }
         .background(Color.adaptiveBackground)
-        .navigationBarHidden(true)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .navigationBarHidden(!tabBarClearance.isBarOnSide)
+        .toolbar {
+            // iPhone Duo: the header's buttons become system items in the vertical bar.
+            if tabBarClearance.isBarOnSide {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                }
+                if !isSearchPresented {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) { isSearchPresented = true }
+                        } label: {
+                            Label("Search", systemImage: "magnifyingglass")
+                        }
+                        Button {
+                            isAscendingSort.toggle()
+                        } label: {
+                            Label("Sort", systemImage: isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                        }
+                    }
+                    // Bulk actions go in the system overflow menu rather than a second
+                    // ellipsis menu of our own.
+                    if #available(iOS 27.0, *) {
+                        ToolbarOverflowMenu {
+                            Button("Hide All") { hideAllCountries() }
+                            Button("Show All") { showAllCountries() }
+                            Button("Reset to Default") { resetToDefault() }
+                        }
+                    } else {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Menu {
+                                Button("Hide All") { hideAllCountries() }
+                                Button("Show All") { showAllCountries() }
+                                Button("Reset to Default") { resetToDefault() }
+                            } label: {
+                                Label("More", systemImage: "ellipsis.circle")
+                            }
+                        }
+                    }
+                }
+            }
+        }
         .contentShape(Rectangle())
         .simultaneousGesture(
             TapGesture().onEnded { _ in
@@ -181,12 +230,15 @@ struct HiddenCountriesSettingsView: View {
             if isSearchPresented {
                 searchBar
             } else {
-                headerActionButton("chevron.left") {
-                    dismiss()
+                // On iPhone Duo Back lives in the system side bar with the other buttons.
+                if !tabBarClearance.isBarOnSide {
+                    headerActionButton("chevron.left") {
+                        dismiss()
+                    }
+                    .frame(height: 40)
+                    .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+                    .modifier(ConditionalLiquidGlass(cornerRadius: 20))
                 }
-                .frame(height: 40)
-                .background(Capsule().fill(Color.adaptiveSecondaryBackground))
-                .modifier(ConditionalLiquidGlass(cornerRadius: 20))
                 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Hidden Countries")
@@ -199,9 +251,12 @@ struct HiddenCountriesSettingsView: View {
                         .foregroundColor(.adaptiveSecondaryText)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: 40)
             }
             
-            headerActions
+            if !tabBarClearance.isBarOnSide || isSearchPresented {
+                headerActions
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)

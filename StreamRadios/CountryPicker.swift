@@ -141,6 +141,8 @@ struct CountryPicker: View {
     var stationCount: ((String) -> Int)?
     var onSelect: ((String) -> Void)? = nil
     @Environment(\.presentationMode) var presentationMode
+    /// True when the system bars run down the side (iPhone Duo): header buttons move there.
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
     
     @State private var searchText = ""
     @State private var isSearchPresented = false
@@ -174,6 +176,9 @@ struct CountryPicker: View {
     }
     
     var body: some View {
+        // The stack only exists to host the system toolbar on iPhone Duo; its bar is hidden
+        // everywhere else, where the custom header below carries the buttons.
+        NavigationStack {
         Group {
             VStack(spacing: 0) {
                 pickerHeader
@@ -230,6 +235,34 @@ struct CountryPicker: View {
             )
         }
         .background(Color.adaptiveBackground)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarHidden(!tabBarClearance.isBarOnSide)
+        .toolbar {
+            if tabBarClearance.isBarOnSide {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        presentationMode.wrappedValue.dismiss()
+                    } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                }
+                if !isSearchPresented {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) { isSearchPresented = true }
+                        } label: {
+                            Label("Search", systemImage: "magnifyingglass")
+                        }
+                        Button {
+                            isAscendingSort.toggle()
+                        } label: {
+                            Label("Sort", systemImage: isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                        }
+                    }
+                }
+            }
+        }
+        }
         .onAppear {
             loadRecentCountries()
             loadHiddenCountries()
@@ -307,21 +340,27 @@ struct CountryPicker: View {
             if isSearchPresented {
                 searchBar
             } else {
-                headerActionButton("chevron.left") {
-                    presentationMode.wrappedValue.dismiss()
+                // On iPhone Duo Back lives in the system side bar with the other buttons.
+                if !tabBarClearance.isBarOnSide {
+                    headerActionButton("chevron.left") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .frame(height: 40)
+                    .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+                    .modifier(ConditionalLiquidGlass(cornerRadius: 20))
                 }
-                .frame(height: 40)
-                .background(Capsule().fill(Color.adaptiveSecondaryBackground))
-                .modifier(ConditionalLiquidGlass(cornerRadius: 20))
 
                 Text("Select Country")
                     .font(.headline)
                     .foregroundColor(.adaptivePrimaryText)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: 40)
             }
 
-            headerActions
+            if !tabBarClearance.isBarOnSide || isSearchPresented {
+                headerActions
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -815,7 +854,7 @@ struct CountryPickerButton: View {
                 .foregroundColor(isDisabled ? .gray : .adaptiveSecondaryText)
         }
         .padding(.horizontal, 12)
-        .frame(height: 40)
+        .frame(height: 44)
         .background(Capsule().fill(Color.adaptiveFieldBackground))
         .contentShape(Capsule())
     }

@@ -2392,6 +2392,14 @@ class PodcastViewModel: ObservableObject {
     
     /// Background refresh: Full feed sync to match RSS feed exactly
     private func backgroundRefreshForNewEpisodes(feedId: String, isInitialLoad: Bool) async {
+        // A feed whose URL just answered 404/410 will answer the same way now. Without this,
+        // every feed-list reload that auto-selects it starts another fetch.
+        let feedUrl = await MainActor.run { self.podcastFeeds.first(where: { $0.id == feedId })?.url }
+        if let feedUrl, FeedAvailabilityStore.shared.shouldSkipAutomaticRefresh(url: feedUrl) {
+            print("🚫 BACKGROUND REFRESH: Feed \(feedId) is unavailable at its publisher - skipping until the next recheck window")
+            return
+        }
+        
         print("🔄 BACKGROUND REFRESH: Starting full feed sync for \(feedId)")
         
         // CRITICAL: Prevent concurrent syncs for the same feed
@@ -7194,15 +7202,26 @@ class PodcastViewModel: ObservableObject {
                             // Use public FeedManager to properly add feed with RSS parsing
                             guard let url = URL(string: feed.url) else {
                                 print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
+                                FeedAvailabilityStore.shared.markSetupLoadFailed(url: feed.url)
                                 return feed.title
                             }
                             
                             let feedManager = PodcastFeedManager()
                             let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false)
                             print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+                            if addedFeed.episodes.isEmpty {
+                                // A valid feed with no episodes is resolved too; setup must not wait for some.
+                                FeedAvailabilityStore.shared.markSetupLoadFailed(url: feed.url)
+                                FeedAvailabilityStore.shared.markSetupLoadFailed(url: addedFeed.url)
+                            } else {
+                                FeedAvailabilityStore.shared.clearSetupLoadFailure(url: feed.url)
+                            }
                             
                         } catch {
                             print("❌ Failed to process feed \(feed.title): \(error)")
+
+                            // Setup has its answer for this feed: nothing to load right now.
+                            FeedAvailabilityStore.shared.markSetupLoadFailed(url: feed.url)
                             
                             // Save feed without episodes if RSS parsing fails
                             try? await self.saveFeedToCoreData(feed)
@@ -7407,11 +7426,18 @@ class PodcastViewModel: ObservableObject {
                             // Use FeedManager to properly add feed with RSS parsing
                             guard let url = URL(string: feed.url) else {
                                 print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
+                                FeedAvailabilityStore.shared.markSetupLoadFailed(url: feed.url)
                                 return
                             }
                             
                             let addedFeed = try await self.feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true, enableProgressReporting: false)
                             print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+                            if addedFeed.episodes.isEmpty {
+                                FeedAvailabilityStore.shared.markSetupLoadFailed(url: feed.url)
+                                FeedAvailabilityStore.shared.markSetupLoadFailed(url: addedFeed.url)
+                            } else {
+                                FeedAvailabilityStore.shared.clearSetupLoadFailure(url: feed.url)
+                            }
                             
                             // CRITICAL: Preserve the order from CloudKit
                             await MainActor.run {
@@ -7423,6 +7449,9 @@ class PodcastViewModel: ObservableObject {
                             
                         } catch {
                             print("❌ Failed to process feed \(feed.title): \(error)")
+
+                            // Setup has its answer for this feed: nothing to load right now.
+                            FeedAvailabilityStore.shared.markSetupLoadFailed(url: feed.url)
                             
                             // Save feed without episodes if RSS parsing fails (preserving order)
                             try? await self.saveFeedToCoreData(feed)

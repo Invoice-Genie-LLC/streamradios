@@ -9,6 +9,7 @@ struct SubscriptionView: View {
     @State private var alertMessage = ""
     @State private var showTerms = false
     @State private var showPrivacy = false
+    @Environment(\.scenePhase) private var scenePhase
     
     // Parameter to track if view was opened from Settings (to show "You're all set!" screen)
     let showManagementScreen: Bool
@@ -17,6 +18,9 @@ struct SubscriptionView: View {
         self.showManagementScreen = showManagementScreen
     }
     
+    /// True when the system bars run down the side (iPhone Duo).
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -28,6 +32,12 @@ struct SubscriptionView: View {
                 )
                 .ignoresSafeArea()
                 
+                GeometryReader { geometry in
+                // iPhone Duo reserves a column down the trailing edge for the status items, which
+                // left this page sitting off-centre on its full-width gradient. Matching that
+                // inset on the leading side centres the content on the display again. On other
+                // devices the insets are zero and the padding stays 24 on both sides.
+                let sideColumn = tabBarClearance.isBarOnSide ? geometry.safeAreaInsets.trailing : 0
                 ScrollView {
                     VStack(spacing: 32) {
                         headerSection
@@ -57,7 +67,8 @@ struct SubscriptionView: View {
                         
                         footerSection
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.leading, sideColumn > 0 ? sideColumn + 8 : 24)
+                    .padding(.trailing, sideColumn > 0 ? 8 : 24)
                     .padding(.vertical, 32)
                 }
                 .safeAreaInset(edge: .top) {
@@ -67,6 +78,7 @@ struct SubscriptionView: View {
                     if subscriptionManager.isSubscribedOrInTrial || showManagementScreen {
                         header
                     }
+                }
                 }
             }
             .navigationBarHidden(true)
@@ -86,12 +98,21 @@ struct SubscriptionView: View {
             // Check subscription status when view appears to update trial expiration
             Task {
                 await subscriptionManager.updateSubscriptionStatus()
-                
+                await subscriptionManager.refreshIntroOfferEligibility()
+                await subscriptionManager.refreshYearlyRenewalState()
+
                 // Auto-dismiss if user is subscribed/in trial but view wasn't opened from Settings
                 if !showManagementScreen && subscriptionManager.isSubscribedOrInTrial {
                     print("✅ User is subscribed/in trial - auto-dismissing subscription view")
                     dismiss()
                 }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Coming back from Apple's Manage Subscription screen: re-check whether the yearly
+            // plan is still set to renew so the cancel reminder goes away once it is cancelled.
+            if phase == .active {
+                Task { await subscriptionManager.refreshYearlyRenewalState() }
             }
         }
         .onChange(of: subscriptionManager.subscriptionStatus) { oldStatus, newStatus in
@@ -186,6 +207,9 @@ struct SubscriptionView: View {
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .foregroundColor(primaryTextColor)
+                    // The centred column on iPhone Duo is narrow: shrink rather than wrap.
+                    .lineLimit(tabBarClearance.isBarOnSide ? 1 : nil)
+                    .minimumScaleFactor(tabBarClearance.isBarOnSide ? 0.6 : 1)
                     .shadow(color: colorScheme == .dark ? .clear : .clear, 
                            radius: 0)
                 
@@ -223,6 +247,11 @@ struct SubscriptionView: View {
                     .multilineTextAlignment(.center)
             }
             
+            // Lifetime owner whose yearly plan is still renewing: they would keep being charged.
+            if subscriptionManager.subscriptionStatus == .oneTimePurchased && subscriptionManager.yearlyStillRenewing {
+                cancelYearlyReminder
+            }
+            
             VStack(spacing: 12) {
                 // Show conversion option only for yearly subscribers
                 if subscriptionManager.isYearlySubscriber {
@@ -231,7 +260,13 @@ struct SubscriptionView: View {
                     }
                     .buttonStyle(PrimaryButtonStyle(colorScheme: colorScheme))
                     
-                    Text("Upgrade to lifetime access for $29.99")
+                    Text("Upgrade to lifetime access for \(subscriptionManager.lifetimeProduct?.displayPrice ?? "a one-time payment")")
+                        .font(.caption)
+                        .foregroundColor(tertiaryTextColor)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                    
+                    Text("Upgrading does not cancel your yearly subscription. After you upgrade, cancel it in Manage Subscription to avoid further yearly charges.")
                         .font(.caption)
                         .foregroundColor(tertiaryTextColor)
                         .multilineTextAlignment(.center)
@@ -255,6 +290,35 @@ struct SubscriptionView: View {
                 .fill(cardBackgroundMaterial)
                 .shadow(color: cardShadow, radius: cardShadowRadius, x: 0, y: 4)
         )
+    }
+    
+    private var cancelYearlyReminder: some View {
+        VStack(spacing: 12) {
+            Label("Your yearly subscription is still active", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.orange)
+                .multilineTextAlignment(.center)
+            
+            Text("You now have lifetime access, so you no longer need it. It will keep renewing\(yearlyPriceClause) until you cancel it.")
+                .font(.caption)
+                .foregroundColor(secondaryTextColor)
+                .multilineTextAlignment(.center)
+            
+            Button("Cancel Yearly Subscription") {
+                openManageSubscription()
+            }
+            .buttonStyle(PrimaryButtonStyle(colorScheme: colorScheme))
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.orange.opacity(0.7), lineWidth: 1)
+        )
+    }
+    
+    private var yearlyPriceClause: String {
+        guard let price = subscriptionPriceText else { return "" }
+        return " at \(price)"
     }
     
     // MARK: - Trial Section
@@ -282,12 +346,6 @@ struct SubscriptionView: View {
             }
             
             VStack(spacing: 12) {
-                Button("Upgrade to Full Subscription") {
-                    // This would upgrade trial to paid subscription immediately
-                    upgradeToFullSubscription()
-                }
-                .buttonStyle(PrimaryButtonStyle(colorScheme: colorScheme))
-                
                 Button("Manage Subscription") {
                     openManageSubscription()
                 }
@@ -338,7 +396,7 @@ struct SubscriptionView: View {
                 }
                 .buttonStyle(PrimaryButtonStyle(colorScheme: colorScheme))
                 
-                Button("Start New Trial") {
+                Button(subscriptionManager.availableTrialOffer != nil ? "Start Free Trial" : "Subscribe") {
                     purchaseSubscription()
                 }
                 .buttonStyle(SecondaryButtonStyle(colorScheme: colorScheme))
@@ -462,23 +520,42 @@ struct SubscriptionView: View {
                             .fontWeight(.semibold)
                             .foregroundColor(primaryTextColor)
                         
-                        Text("7-Day Free Trial")
-                            .font(.subheadline)
-                            .foregroundColor(.green)
+                        // Only promise a trial when Apple will actually grant one to this account.
+                        if let offer = subscriptionManager.availableTrialOffer {
+                            Text("\(trialLengthText(offer)) Free Trial")
+                                .font(.subheadline)
+                                .foregroundColor(.green)
+                        } else {
+                            Text("Billed yearly")
+                                .font(.subheadline)
+                                .foregroundColor(secondaryTextColor)
+                        }
                     }
-                    
+
                     Spacer()
-                    
+
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("$9.99/year")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.yellow)
-                        
+                        if let price = subscriptionPriceText {
+                            Text(price)
+                                .font(.title3)
+                                .fontWeight(.bold)
+                                .foregroundColor(.yellow)
+                        } else {
+                            ProgressView()
+                        }
+
                         Text("Cancel anytime")
                             .font(.caption)
                             .foregroundColor(tertiaryTextColor)
                     }
+                }
+
+                if let terms = subscriptionTermsText {
+                    Text(terms)
+                        .font(.caption)
+                        .foregroundColor(tertiaryTextColor)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(20)
@@ -493,6 +570,8 @@ struct SubscriptionView: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        // One purchase at a time: repeat taps each queue another App Store dialog.
+        .disabled(subscriptionManager.isLoading)
     }
     
     private var oneTimePricingCard: some View {
@@ -515,11 +594,14 @@ struct SubscriptionView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("$29.99")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            
-                        
+                        if let price = subscriptionManager.lifetimeProduct?.displayPrice {
+                            Text(price)
+                                .font(.title3)
+                                .fontWeight(.bold)
+                        } else {
+                            ProgressView()
+                        }
+
                         Text("Pay once, use forever")
                             .font(.caption)
                             .foregroundColor(tertiaryTextColor)
@@ -538,10 +620,47 @@ struct SubscriptionView: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        // One purchase at a time: repeat taps each queue another App Store dialog.
+        .disabled(subscriptionManager.isLoading)
     }
     
 
     
+    // MARK: - Pricing Text (from the App Store, never hard-coded)
+
+    private func unitText(_ unit: Product.SubscriptionPeriod.Unit) -> String {
+        switch unit {
+        case .day: return "day"
+        case .week: return "week"
+        case .month: return "month"
+        case .year: return "year"
+        @unknown default: return "period"
+        }
+    }
+
+    private func trialLengthText(_ offer: Product.SubscriptionOffer) -> String {
+        let count = offer.period.value * max(offer.periodCount, 1)
+        // StoreKit may report a one-week trial as either 1 week or 7 days.
+        if offer.period.unit == .week { return "\(count * 7)-Day" }
+        return "\(count)-\(unitText(offer.period.unit).capitalized)"
+    }
+
+    private var subscriptionPriceText: String? {
+        guard let product = subscriptionManager.subscriptionProduct,
+              let subscription = product.subscription else { return nil }
+        return "\(product.displayPrice)/\(unitText(subscription.subscriptionPeriod.unit))"
+    }
+
+    private var subscriptionTermsText: String? {
+        guard let product = subscriptionManager.subscriptionProduct,
+              let subscription = product.subscription else { return nil }
+        let period = unitText(subscription.subscriptionPeriod.unit)
+        if let offer = subscriptionManager.availableTrialOffer {
+            return "\(trialLengthText(offer).lowercased()) free trial, then \(product.displayPrice) per \(period). Renews automatically until canceled."
+        }
+        return "\(product.displayPrice) charged today, then every \(period). Renews automatically until canceled."
+    }
+
     // MARK: - Footer Section
     private var footerSection: some View {
         VStack(spacing: 12) {
@@ -604,35 +723,23 @@ struct SubscriptionView: View {
         }
     }
     
-    private func upgradeToFullSubscription() {
-        Task {
-            do {
-                try await subscriptionManager.upgradeTrialToFullSubscription()
-                if subscriptionManager.subscriptionStatus.isSubscribed {
-                    alertMessage = "Trial upgraded to full subscription! Welcome to StreamRadios Pro!"
-                    showingAlert = true
-                    // Auto-dismiss after successful upgrade
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        dismiss()
-                    }
-                }
-            } catch {
-                alertMessage = "Upgrade failed: \(error.localizedDescription)"
-                showingAlert = true
-            }
-        }
-    }
-    
     private func convertToLifetime() {
         Task {
             do {
                 try await subscriptionManager.convertYearlyToLifetime()
                 if subscriptionManager.subscriptionStatus == .oneTimePurchased {
-                    alertMessage = "Successfully upgraded to lifetime access! Welcome to StreamRadios Pro Lifetime!"
-                    showingAlert = true
-                    // Auto-dismiss after successful conversion
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        dismiss()
+                    await subscriptionManager.refreshYearlyRenewalState()
+                    if subscriptionManager.yearlyStillRenewing {
+                        // Stay on this screen so the cancel reminder and its button are visible.
+                        alertMessage = "You now have lifetime access. Your yearly subscription is still active and will keep renewing until you cancel it. Tap Cancel Yearly Subscription on this screen to turn it off."
+                        showingAlert = true
+                    } else {
+                        alertMessage = "Successfully upgraded to lifetime access! Welcome to StreamRadios Pro Lifetime!"
+                        showingAlert = true
+                        // Auto-dismiss after successful conversion
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            dismiss()
+                        }
                     }
                 }
             } catch {
@@ -754,6 +861,9 @@ struct PrimaryButtonStyle: ButtonStyle {
     
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            // Narrow column on iPhone Duo: shrink the label rather than wrap it.
+            .lineLimit(TabBarClearance.shared.isBarOnSide ? 1 : nil)
+            .minimumScaleFactor(TabBarClearance.shared.isBarOnSide ? 0.7 : 1)
             .frame(maxWidth: .infinity)
             .frame(height: 56)
             .background(
@@ -796,6 +906,9 @@ struct SecondaryButtonStyle: ButtonStyle {
     
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            // Narrow column on iPhone Duo: shrink the label rather than wrap it.
+            .lineLimit(TabBarClearance.shared.isBarOnSide ? 1 : nil)
+            .minimumScaleFactor(TabBarClearance.shared.isBarOnSide ? 0.7 : 1)
             .frame(maxWidth: .infinity)
             .frame(height: 48)
             .background(

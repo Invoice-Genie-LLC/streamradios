@@ -115,6 +115,12 @@ struct RadioPlayerSheetView: View {
     @StateObject private var permissionManager = PermissionManager()
     @Environment(\.presentationMode) var presentationMode
     @ObservedObject private var shazamViewModel = ShazamViewModel.shared
+    /// True when the system bars run down the side (iPhone Duo's short outer display).
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
+    /// True on iPhone Duo while the player is wider than tall (open inner display in landscape).
+    @State private var isDuoLandscape = false
+    /// True as the Now Playing half of the iPhone Duo split, where there is nothing to dismiss.
+    @Environment(\.isDuoSplitPane) private var isDuoSplitPane
     @State private var isShazaming = false
     @State private var pulse = false
     @State private var showingConfirmationDialog = false
@@ -217,6 +223,8 @@ struct RadioPlayerSheetView: View {
 
     /// Mirrors the radio home header: a leading capsule button plus a capsule segmented control.
     private var playerHeader: some View {        HStack(spacing: 10) {
+            // In the iPhone Duo split only the YouTube page has somewhere to go back to.
+            if !isDuoSplitPane || selectedTab == 2 {
             Button {
                 if selectedTab == 2 {
                     exitYouTubeTab()
@@ -237,12 +245,13 @@ struct RadioPlayerSheetView: View {
             .buttonStyle(PlainButtonStyle())
             .background(Capsule().fill(Color.adaptiveSecondaryBackground))
             .conditionalGlassEffect(cornerRadius: 20)
+            }
 
             playerTabBar
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
+        .padding(.top, isDuoSplitPane ? DuoSplit.headerTopPadding(isBarOnSide: tabBarClearance.isBarOnSide) : (tabBarClearance.isBarOnSide ? 14 : 8))
+        .padding(.bottom, tabBarClearance.isBarOnSide ? 4 : 10)
         .background(Color.adaptiveBackground)
     }
 
@@ -354,6 +363,11 @@ struct RadioPlayerSheetView: View {
                     }
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                // Network status floats over the top of the content, below the header.
+                .overlay(alignment: .top) {
+                    PlaybackStatusPill()
+                        .padding(.top, 6)
+                }
                 .animation(.easeInOut(duration: 0.3), value: selectedTab)
                 
                 // Bottom controls (hidden when YouTube tab is active)
@@ -362,6 +376,7 @@ struct RadioPlayerSheetView: View {
                 }
             }
             .background(Color.adaptiveBackground)
+            .trackDuoLandscape($isDuoLandscape)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarHidden(true)
@@ -419,7 +434,7 @@ struct RadioPlayerSheetView: View {
                 saveTimerState: saveTimerState,
                 clearTimerState: clearTimerState
             )
-            .presentationDetents([.height(450), .large])
+            .adaptiveSheetDetents([.height(450), .large], duoFraction: 0.68)
             .presentationDragIndicator(.visible)
         }
         .onAppear {
@@ -428,15 +443,38 @@ struct RadioPlayerSheetView: View {
     }
     
     // MARK: - Content Views
+
+    /// iPhone Duo's displays are short in landscape: full-size artwork there pushes the page up
+    /// under the header, so it shrinks. Other devices keep the regular sizes.
+    private var stationArtworkHeight: CGFloat {
+        if isDuoSplitPane { return (220 * DuoSplit.artworkScale).rounded() }
+        if tabBarClearance.isBarOnSide { return 220 }
+        if isDuoLandscape { return 200 }
+        return ShazamFeatureSwitch.isHideTapToShazamEnabled ? 280 : 240
+    }
+
+    private var shazamArtworkHeight: CGFloat {
+        if isDuoSplitPane { return (130 * DuoSplit.artworkScale).rounded() }
+        if tabBarClearance.isBarOnSide { return 130 }
+        if isDuoLandscape { return 150 }
+        return 240
+    }
+
     @ViewBuilder
     private var nowPlayingContentView: some View {
         VStack(spacing: hasChapters ? 8 : 10) {
-            // Conditional top spacing - more space when no Shazam tab
-            Spacer(minLength: ShazamFeatureSwitch.isHideTapToShazamEnabled ? 40 : 0)
+            // Conditional top spacing - more space when no Shazam tab.
+            // iPhone Duo's outer display is short: keep the artwork close under the header
+            // there instead of splitting the spare height above and below it.
+            if tabBarClearance.isBarOnSide {
+                Spacer().frame(height: 2)
+            } else {
+                Spacer(minLength: ShazamFeatureSwitch.isHideTapToShazamEnabled ? 40 : 0)
+            }
             
             // Station artwork - larger when no Shazam for better visual balance
             StationArtworkView
-                .frame(height: ShazamFeatureSwitch.isHideTapToShazamEnabled ? 280 : 240)
+                .frame(height: stationArtworkHeight)
             
             // Station title and metadata
             VStack(spacing: 8) {
@@ -481,11 +519,16 @@ struct RadioPlayerSheetView: View {
     private var shazamContentView: some View {
         VStack(spacing: hasChapters ? 8 : 10) {
             // Conditional top spacing
-            Spacer(minLength: 0)
+            if tabBarClearance.isBarOnSide {
+                Spacer().frame(height: 2)
+            } else {
+                Spacer(minLength: 0)
+            }
             
-            // Shazam artwork
+            // Shazam artwork. At full size this page is taller than iPhone Duo's outer
+            // display, which pushed the artwork up under the header.
             ShazamArtworkView
-                .frame(height: 240)
+                .frame(height: shazamArtworkHeight)
             
             // Song information
             VStack(spacing: 8) {
@@ -524,6 +567,11 @@ struct RadioPlayerSheetView: View {
                     isEnabled: shazamViewModel.youtubeVideoId != nil
                 ) {
                     wasRadioPlayingBeforeYouTube = radioPlayer.isPlaying
+                    // On iPhone Duo the embed does not take the audio session from the station,
+                    // so both would play at once. Leaving the YouTube page resumes the station.
+                    if FoldableDevice.shared.hasHinge && radioPlayer.isPlaying {
+                        radioPlayer.pause()
+                    }
                     youtubeReturnTab = selectedTab
                     selectedTab = 2
                     showYouTubePlayer = true
@@ -872,8 +920,12 @@ struct RadioPlayerSheetView: View {
             // Footer menu
             ZStack(alignment: .top) {
                 // Background that extends to bottom safe area
-                Color.adaptiveSecondaryBackground
-                    .edgesIgnoringSafeArea(.bottom)
+                // Also runs under a side tab-bar/status column (iPhone Duo); the horizontal
+                // safe-area insets are zero on portrait iPhone and iPad, so nothing changes there.
+                // No band in the iPhone Duo split: it would mark the player off as a screen of
+                // its own.
+                (isDuoSplitPane ? Color.clear : Color.adaptiveSecondaryBackground)
+                    .edgesIgnoringSafeArea([.bottom, .horizontal])
                 
                 // Menu content at natural size
                 bottomMenuView
@@ -959,7 +1011,9 @@ struct RadioPlayerSheetView: View {
     @ViewBuilder
     private var StationArtworkView: some View {
         GeometryReader { geometry in
-            let artworkSize = min(geometry.size.width * 0.65, 240)
+            // Never larger than the height it is given, so a shorter frame shrinks the artwork
+            // instead of letting it spill out.
+            let artworkSize = min(geometry.size.width * 0.65, 240, geometry.size.height)
             
             // Priority: iTunes artwork when playing > station artwork when playing > station icon > default
             if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
@@ -1030,7 +1084,9 @@ struct RadioPlayerSheetView: View {
     @ViewBuilder
     private var ShazamArtworkView: some View {
         GeometryReader { geometry in
-            let artworkSize = min(geometry.size.width * 0.65, 240)
+            // Never larger than the height it is given, so a shorter frame shrinks the artwork
+            // instead of letting it spill out.
+            let artworkSize = min(geometry.size.width * 0.65, 240, geometry.size.height)
             
             HStack {
                 Spacer()
@@ -1527,10 +1583,7 @@ struct RadioSleepTimerSheet: View {
                 // Header
                 VStack(spacing: 12) {
                     // Drag indicator
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.secondary.opacity(0.3))
-                        .frame(width: 36, height: 5)
-                        .padding(.top, 8)
+                    SheetGrabber()
                     
                     Text("Sleep Timer")
                         .font(.title2)
@@ -1605,10 +1658,11 @@ struct RadioSleepTimerSheet: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
-                    .padding(.bottom, 80)
+                    .padding(.bottom, TabBarClearance.shared.isBarOnSide ? 24 : 80)
                 }
                 .scrollIndicators(.hidden)
             }
+            .duoSheetBalance()
             .navigationBarHidden(true)
         }
         .onAppear {

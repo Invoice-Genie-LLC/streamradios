@@ -167,6 +167,9 @@ struct PodcastListView: View {
         self.isFooterMenuHidden = isFooterMenuHidden
     }
     
+    /// Tells the toolbar when the system bars run down the side (iPhone Duo).
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
+
     var body: some View {
         let _ = uiRefreshObserver // Force SwiftUI to observe uiRefreshTrigger
         return NavigationView {
@@ -226,31 +229,35 @@ struct PodcastListView: View {
                .navigationTitle("Podcasts")
                .navigationBarTitleDisplayMode(.inline)
                .toolbar {
-                   ToolbarItemGroup(placement: .navigationBarTrailing) {
-                       if !isEditing && selectedPodcast == nil {
-                           HStack(spacing: 8) {
-                               // Sort button
+                   if selectedPodcast == nil && tabBarClearance.isBarOnSide {
+                       ToolbarItemGroup(placement: .navigationBarTrailing) {
+                           if !isEditing {
+                               // iPhone Duo: plain title-and-symbol items, which the system can lay
+                               // out down the side. A custom view (the pill below) stays horizontal.
                                Button(action: {
-                                   // Show confirmation alert for podcast sorting
                                    alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
                                        viewModel.sortFeedsAlphabetically()
                                    })
                                }) {
-                                   Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                                       .foregroundColor(.adaptivePrimaryText)
-                                       .font(.system(size: 16, weight: .medium))
-                                       .frame(width: 32, height: 32)
+                                   Label("Sort", systemImage: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
                                }
-                               
-                               // Plus button
                                Button(action: { showingSearchPodcasts = true }) {
-                                   Image(systemName: "plus")
-                                       .foregroundColor(.adaptivePrimaryText)
-                                       .font(.system(size: 16, weight: .medium))
-                                       .frame(width: 32, height: 32)
+                                   Label("Add Podcast", systemImage: "plus")
+                               }
+                           } else {
+                               // Reorder mode on iPhone Duo: Done replaces the list actions.
+                               Button(action: finishReorderingPodcasts) {
+                                   Label("Done", systemImage: "checkmark")
                                }
                            }
                        }
+                   } else if !isEditing && selectedPodcast == nil {
+                       ToolbarItem(placement: .navigationBarTrailing) {
+                           podcastHeaderActions
+                       }
+                       // The pill draws its own capsule to match the radio header; the system's
+                       // lighter toolbar glass would otherwise sit behind it.
+                       .sharedBackgroundVisibility(.hidden)
                    }
                }
                .onAppear(perform: onAppear)
@@ -435,6 +442,58 @@ struct PodcastListView: View {
             .padding(.bottom, 16)
     }
     
+    /// Sort and add, styled like the radio header actions in ContentView.
+    private var podcastHeaderActions: some View {
+        HStack(spacing: 0) {
+            podcastHeaderButton(viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle") {
+                alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
+                    viewModel.sortFeedsAlphabetically()
+                })
+            }
+            podcastHeaderButton("plus") { showingSearchPodcasts = true }
+        }
+        .padding(.horizontal, 4)
+        .frame(height: 44)
+        // Drawn explicitly: inside the navigation bar the system flattens a view's own
+        // `glassEffect` into a faint rounded rectangle, so it never matched the radio pill.
+        .background(
+            Capsule()
+                .fill(Color.adaptiveSecondaryBackground)
+                .overlay(
+                    Capsule().strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.primary.opacity(0.28),
+                                Color.primary.opacity(0.08),
+                                Color.primary.opacity(0.2)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+                )
+        )
+        .contentShape(Capsule())
+    }
+    
+    private func podcastHeaderButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .medium))
+                .imageScale(.large)
+                .foregroundColor(.adaptivePrimaryText)
+                .frame(width: 40, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func finishReorderingPodcasts() {
+        isEditing = false
+        viewModel.saveFeedOrder()
+        refreshID = UUID()
+    }
     
     private var podcastList: some View {
         VStack(spacing: 0) {
@@ -451,10 +510,10 @@ struct PodcastListView: View {
                     Spacer()
                         .allowsHitTesting(false)
                     
+                    // On iPhone Duo, Done lives in the system side bar (see the toolbar).
+                    if !tabBarClearance.isBarOnSide {
                     Button("Done") {
-                        isEditing = false
-                        viewModel.saveFeedOrder()
-                        refreshID = UUID()
+                        finishReorderingPodcasts()
                     }
                     .font(.body)
                     .foregroundColor(.primary)
@@ -464,8 +523,10 @@ struct PodcastListView: View {
                         Capsule()
                             .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
                     )
+                    }
                     
                 }
+                .frame(minHeight: 36)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -2316,9 +2377,7 @@ struct EpisodeRowView: View {
     
     private func exportEpisodeFile() {
         // Check if episode has a local file path
-        guard let localFilePath = currentEpisode.localFilePath,
-              !localFilePath.isEmpty,
-              FileManager.default.fileExists(atPath: localFilePath) else {
+        guard let localFilePath = currentEpisode.resolvedDownloadedFilePath() else {
             showBannerAlert(message: "Downloaded file not found")
             return
         }
@@ -3253,9 +3312,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     
     private func exportEpisodeFile() {
         // Check if episode has a local file path
-        guard let localFilePath = currentEpisode.localFilePath,
-              !localFilePath.isEmpty,
-              FileManager.default.fileExists(atPath: localFilePath) else {
+        guard let localFilePath = currentEpisode.resolvedDownloadedFilePath() else {
             showBannerAlert(message: "Downloaded file not found")
             return
         }
@@ -3516,6 +3573,9 @@ struct PodcastPlayerView: View {
                         )
                     }
                 }
+                .onReceive(DuoSplit.shared.$isWide) { isWide in
+                    if isWide { showNowPlaying = false }
+                }
     }
     
     // MARK: - View Components
@@ -3632,6 +3692,29 @@ struct PodcastPlayerView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
+            } else if FeedAvailabilityStore.shared.isUnavailable(url: feed.url)
+                        && viewModel.episodesForDisplay(feedId: feed.id, tab: selectedTab).isEmpty {
+                // The publisher's feed URL answers 404/410. The subscription is kept so it
+                // comes back by itself if the feed does; say why the list is empty meanwhile.
+                ContentUnavailableView(
+                    "Podcast Unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("The publisher's feed for \(feed.title) can't be found. It may have moved or been removed. It stays in your library and will load again if the feed returns.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if FeedAvailabilityStore.shared.didSetupLoadFail(url: feed.url)
+                        && viewModel.episodesForDisplay(feedId: feed.id, tab: selectedTab).isEmpty {
+                // Setup could not load this feed (timeout, server error, bad feed data).
+                ContentUnavailableView {
+                    Label("Couldn't Load Episodes", systemImage: "arrow.clockwise.circle")
+                } description: {
+                    Text("\(feed.title) didn't load during setup. It stays in your library.")
+                } actions: {
+                    Button("Try Again") {
+                        Task { await viewModel.loadEpisodesForFeed(feed.id) }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 episodeList
             }
@@ -3765,7 +3848,7 @@ struct PodcastPlayerView: View {
                         playEpisode(episode)
                     },
                     onStop: { podcastPlayer.togglePlayPause() },
-                    onOpenNowPlaying: { showNowPlaying = true },
+                    onOpenNowPlaying: { if !DuoSplit.shared.isWide { showNowPlaying = true } },
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
                 )
@@ -4998,3 +5081,17 @@ class PodcastAppActivity: UIActivity {
 
 
 
+
+extension PodcastEpisode {
+    /// Absolute path of the downloaded audio file, if it is on disk.
+    /// The stored `localFilePath` can be nil (in-memory episode rebuilt from the feed) or stale
+    /// (absolute path from a previous app container), so fall back to looking the file up in
+    /// Documents/DownloadedEpisodes by filename / episode ID.
+    func resolvedDownloadedFilePath() -> String? {
+        if let path = localFilePath, !path.isEmpty, FileManager.default.fileExists(atPath: path) {
+            return path
+        }
+        let storedPath = (localFilePath?.isEmpty == false) ? localFilePath : nil
+        return PodcastModel.recoverDownloadedFilePath(for: id, originalPath: storedPath)
+    }
+}

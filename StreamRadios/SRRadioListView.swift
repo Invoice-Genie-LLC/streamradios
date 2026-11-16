@@ -48,6 +48,8 @@ private struct SRRadioListContent: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
 
     @Binding var isEditing: Bool
+    /// True when the system bars run down the side (iPhone Duo).
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
     @Binding var selectedSubTab: RadioSubTab
@@ -295,7 +297,9 @@ private struct SRRadioListContent: View {
         // case/diacritic-insensitive ordering and far cheaper than a selector-based comparison.
         let byName = NSSortDescriptor(key: "searchText", ascending: viewModel.isAscendingSort)
         let byNameAscending = NSSortDescriptor(key: "searchText", ascending: true)
-        let byRecency = NSSortDescriptor(key: "lastPlayed", ascending: false)
+        // Same direction as `RadioStationViewModel.recentStations()`, which drives next/previous:
+        // ascending lists the oldest play first.
+        let byRecency = NSSortDescriptor(key: "lastPlayed", ascending: viewModel.isAscendingSort)
 
         if isSearching {
             switch selectedSubTab {
@@ -492,15 +496,28 @@ private struct SRRadioListContent: View {
                 .font(SRFont.rowSubtitle)
                 .foregroundStyle(SRColor.secondaryText)
             Spacer()
-            Button("Done", action: finishReordering)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
+            // On iPhone Duo, Done lives in the system side bar (see the toolbar below).
+            if !tabBarClearance.isBarOnSide {
+                Button("Done", action: finishReordering)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.capsule)
+            }
         }
         .padding(.horizontal, SRSpacing.lg)
         .padding(.vertical, SRSpacing.md)
         .frame(maxWidth: .infinity)
         .background(.bar)
         .transition(.move(edge: .top).combined(with: .opacity))
+        .toolbar {
+            if tabBarClearance.isBarOnSide {
+                // A title plus a symbol, so the system can place it in the vertical bar.
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: finishReordering) {
+                        Label("Done", systemImage: "checkmark")
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder

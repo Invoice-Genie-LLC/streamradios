@@ -191,7 +191,31 @@ final class WatchPodcastLibrary {
         }
     }
 
-    func loadEpisodes(for feed: SRPodcastFeedRecord, force: Bool = false) async {
+    @ObservationIgnored private var isRefreshingAll = false
+
+    /// Checks every subscribed feed for new episodes, two at a time. Run when the app opens or returns to
+    /// the foreground; until now a feed was only fetched when its own episode list was opened, so a list
+    /// the Watch resumed straight into (or one never opened) kept showing old episodes. Unchanged feeds
+    /// answer the conditional request with a 304, so the sweep is cheap.
+    func refreshAll(_ feeds: [SRPodcastFeedRecord], minimumInterval: TimeInterval = 120) async {
+        guard !isRefreshingAll, !feeds.isEmpty else { return }
+        isRefreshingAll = true
+        defer { isRefreshingAll = false }
+        var remaining = feeds.makeIterator()
+        await withTaskGroup(of: Void.self) { group in
+            func addNext() {
+                guard let feed = remaining.next() else { return }
+                group.addTask { [weak self] in
+                    await self?.loadEpisodes(for: feed, minimumInterval: minimumInterval)
+                }
+            }
+            addNext()
+            addNext()
+            while await group.next() != nil { addNext() }
+        }
+    }
+
+    func loadEpisodes(for feed: SRPodcastFeedRecord, force: Bool = false, minimumInterval: TimeInterval = 900) async {
         guard let url = URL(string: feed.feedURL) else {
             errorsByFeedID[feed.id] = "This podcast has an invalid feed URL."
             return
@@ -215,7 +239,7 @@ final class WatchPodcastLibrary {
             let refreshKey = "watchFeedRefresh:\(feed.id)"
             let lastRefresh = UserDefaults.standard.double(forKey: refreshKey)
             if !force, episodesByFeedID[feed.id]?.isEmpty == false,
-               Date().timeIntervalSince1970 - lastRefresh < 900 { return }
+               Date().timeIntervalSince1970 - lastRefresh < minimumInterval { return }
             if !force, WatchEpisodeDownloads.shared.playbackIsActive,
                episodesByFeedID[feed.id]?.isEmpty == false { return }
 

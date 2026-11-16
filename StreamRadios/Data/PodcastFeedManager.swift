@@ -136,6 +136,11 @@ class PodcastFeedManager {
                     let result = try await parser.parseComplete()
                     continuation.resume(returning: result)
                 } catch {
+                    // This feed will never reach the artwork step below; count it so a
+                    // fresh-install artwork wait does not sit on it until its timeout.
+                    await MainActor.run {
+                        DataSyncManager.shared.reportArtworkDownloadFailed(feedTitle: customTitle ?? url.absoluteString, error: error)
+                    }
                     continuation.resume(throwing: error)
                 }
             }
@@ -875,6 +880,13 @@ enum FeedError: Error, LocalizedError {
     case feedDataCorrupted
     case retryLimitExceeded
     case missingRequiredData
+    /// The publisher answered with a permanent HTTP error (404, 410, ...). Retrying will not help.
+    case feedUnavailable(statusCode: Int)
+    
+    /// Client errors that mean "this URL has no feed". 408/425/429 are the transient exceptions.
+    static func isPermanentHTTPStatus(_ statusCode: Int) -> Bool {
+        (400...499).contains(statusCode) && ![408, 425, 429].contains(statusCode)
+    }
     
     var errorDescription: String? {
         switch self {
@@ -892,7 +904,90 @@ enum FeedError: Error, LocalizedError {
             return "Maximum retry attempts exceeded"
         case .missingRequiredData:
             return "Feed is missing required data (title, episodes, etc.)"
+        case .feedUnavailable(let statusCode):
+            return "Feed unavailable (HTTP \(statusCode))"
         }
+    }
+}
+
+// MARK: - Feed Availability
+
+/// Remembers feeds whose publisher URL answers with a permanent HTTP error, so a dead feed is
+/// treated as resolved-but-unavailable (kept in the library, shown as unavailable) instead of
+/// stalling first-run setup or being re-fetched on every reload. An entry clears itself the
+/// next time the same URL answers successfully.
+final class FeedAvailabilityStore {
+    static let shared = FeedAvailabilityStore()
+    
+    /// How long background refreshes leave a feed alone after a permanent error.
+    static let recheckInterval: TimeInterval = 30 * 60
+    
+    private let defaultsKey = "UnavailablePodcastFeeds"
+    private let lock = NSLock()
+    /// Feed URL -> ["status": HTTP status, "checkedAt": timeIntervalSince1970]
+    private var entries: [String: [String: Double]]
+    /// Feed URLs whose first-run load ended with nothing to show for any other reason (timeout,
+    /// 5xx, unparsable or empty feed). In memory only: these are worth trying again next launch.
+    private var setupLoadFailures: Set<String> = []
+    
+    private init() {
+        entries = UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: [String: Double]] ?? [:]
+    }
+    
+    private func key(_ url: String) -> String {
+        url.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    func markUnavailable(url: String, statusCode: Int) {
+        lock.lock()
+        entries[key(url)] = ["status": Double(statusCode), "checkedAt": Date().timeIntervalSince1970]
+        let snapshot = entries
+        lock.unlock()
+        UserDefaults.standard.set(snapshot, forKey: defaultsKey)
+    }
+    
+    /// First-run setup tried this feed and got no episodes. Setup stops waiting for it.
+    func markSetupLoadFailed(url: String) {
+        lock.lock()
+        setupLoadFailures.insert(key(url))
+        lock.unlock()
+    }
+    
+    func didSetupLoadFail(url: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return setupLoadFailures.contains(key(url))
+    }
+    
+    func clearSetupLoadFailure(url: String) {
+        lock.lock()
+        setupLoadFailures.remove(key(url))
+        lock.unlock()
+    }
+    
+    func markAvailable(url: String) {
+        lock.lock()
+        let removed = entries.removeValue(forKey: key(url)) != nil
+        let snapshot = entries
+        lock.unlock()
+        if removed {
+            UserDefaults.standard.set(snapshot, forKey: defaultsKey)
+        }
+    }
+    
+    func isUnavailable(url: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[key(url)] != nil
+    }
+    
+    /// True while a feed marked unavailable was checked recently enough that an automatic
+    /// refresh should not hit the network again.
+    func shouldSkipAutomaticRefresh(url: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let checkedAt = entries[key(url)]?["checkedAt"] else { return false }
+        return Date().timeIntervalSince1970 - checkedAt < Self.recheckInterval
     }
 }
 
@@ -936,13 +1031,19 @@ extension PodcastFeedManager {
                     os_log("📡 HTTP Response: %d for feed: %@", log: log, type: .info, httpResponse.statusCode, feedTitle)
                     
                     if httpResponse.statusCode == 304 {
+                        FeedAvailabilityStore.shared.markAvailable(url: url.absoluteString)
                         throw FeedNotModifiedError()
                     }
                     
                     // Check for server errors
                     guard 200...299 ~= httpResponse.statusCode else {
+                        if FeedError.isPermanentHTTPStatus(httpResponse.statusCode) {
+                            throw FeedError.feedUnavailable(statusCode: httpResponse.statusCode)
+                        }
                         throw FeedError.networkError
                     }
+                    
+                    FeedAvailabilityStore.shared.markAvailable(url: url.absoluteString)
                     
                     if let conditionalKey {
                         FeedHTTPCache.storeValidators(from: httpResponse, feedKey: conditionalKey)
@@ -992,6 +1093,11 @@ extension PodcastFeedManager {
             } catch is FeedNotModifiedError {
                 os_log("✅ 304 Not Modified for feed: %@ - no new episodes", log: log, type: .info, feedTitle)
                 throw FeedNotModifiedError()
+            } catch FeedError.feedUnavailable(let statusCode) {
+                // Permanent: the URL has no feed. Remember it and stop - another attempt gets the same answer.
+                FeedAvailabilityStore.shared.markUnavailable(url: url.absoluteString, statusCode: statusCode)
+                os_log("🚫 Feed unavailable (HTTP %d) for feed: %@ - not retrying", log: log, type: .error, statusCode, feedTitle)
+                throw FeedError.feedUnavailable(statusCode: statusCode)
             } catch {
                 lastError = error
                 let isDecodeError = (error as NSError).code == -1015

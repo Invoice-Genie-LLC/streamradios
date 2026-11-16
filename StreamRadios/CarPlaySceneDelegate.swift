@@ -458,6 +458,20 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         observeRadioListMetadata()
         observePodcastData()
         observeRecentStations()
+
+        // The new-episode sweep is normally started by the phone window appearing. When CarPlay launches
+        // the app on its own there is no phone window, so start it here (it throttles itself to one run per 5 min).
+        Task { @MainActor [weak self] in
+            await self?.dataInitializationTask?.value
+            let deadline = Date().addingTimeInterval(15)
+            while PodcastViewModel.shared.podcastFeeds.isEmpty, Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            guard !PodcastViewModel.shared.podcastFeeds.isEmpty else { return }
+            // Must finish first, or the refresh re-inserts legacy IDs as duplicates.
+            await PodcastCoreDataManager.shared.migrateUnstableEpisodeIDs()
+            await PodcastViewModel.shared.prefetchNewEpisodesForAllFeeds()
+        }
         
         // Install the root before restoration. Until this completion fires, CarPlay discards taps
         // on system affordances such as Now Playing while its template stack is transitioning.

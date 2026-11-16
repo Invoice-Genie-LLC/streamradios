@@ -22,6 +22,12 @@ struct PodcastPlayerSheetView: View {
     @ObservedObject var podcastPlayer: PodcastPlayer
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject private var episodeStateManager = EpisodeStateManager.shared
+    /// True when the system bars run down the side (iPhone Duo's short outer display).
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
+    /// True on iPhone Duo while the player is wider than tall (open inner display in landscape).
+    @State private var isDuoLandscape = false
+    /// True as the Now Playing half of the iPhone Duo split, where there is nothing to dismiss.
+    @Environment(\.isDuoSplitPane) private var isDuoSplitPane
     @Binding var isPresented: Bool
     
     @State private var showAudioSettings = false
@@ -203,6 +209,11 @@ struct PodcastPlayerSheetView: View {
                         .tag(2)
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                // Network status floats over the top of the content, below the header.
+                .overlay(alignment: .top) {
+                    PlaybackStatusPill()
+                        .padding(.top, 6)
+                }
                 .animation(.easeInOut(duration: 0.3), value: selectedTab)
                 .allowsHitTesting(!isDraggingProgress) // Disable swipe gestures when dragging progress bar
                 .onChange(of: selectedTab) { oldValue, newValue in
@@ -216,13 +227,14 @@ struct PodcastPlayerSheetView: View {
                 bottomMenuView
             }
             .background(Color.adaptiveBackground)
+            .trackDuoLandscape($isDuoLandscape)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarHidden(true)
         }
         .sheet(isPresented: $showAudioSettings) {
             AudioSettingsSheet(podcastPlayer: podcastPlayer)
-                .presentationDetents([.fraction(0.5), .large])
+                .adaptiveSheetDetents([.fraction(0.5), .large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showSleepTimer) {
@@ -236,7 +248,7 @@ struct PodcastPlayerSheetView: View {
                 saveTimerState: saveTimerState,
                 clearTimerState: clearTimerState
             )
-            .presentationDetents([.fraction(0.5), .large])
+            .adaptiveSheetDetents([.fraction(0.5), .large])
             .presentationDragIndicator(.visible)
         }
         .alert("Delete Download", isPresented: $showDeleteDownloadAlert) {
@@ -275,24 +287,26 @@ struct PodcastPlayerSheetView: View {
     /// Mirrors the radio player header: a leading capsule button plus a capsule segmented control.
     private var playerHeader: some View {
         HStack(spacing: 10) {
-            Button {
-                isPresented = false
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.adaptivePrimaryText)
-                    .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
+            if !isDuoSplitPane {
+                Button {
+                    isPresented = false
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.adaptivePrimaryText)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .background(Capsule().fill(Color.adaptiveSecondaryBackground))
+                .conditionalGlassEffect(cornerRadius: 20)
             }
-            .buttonStyle(PlainButtonStyle())
-            .background(Capsule().fill(Color.adaptiveSecondaryBackground))
-            .conditionalGlassEffect(cornerRadius: 20)
             
             playerTabBar
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
+        .padding(.top, isDuoSplitPane ? DuoSplit.headerTopPadding(isBarOnSide: tabBarClearance.isBarOnSide) : (tabBarClearance.isBarOnSide ? 14 : 8))
+        .padding(.bottom, tabBarClearance.isBarOnSide ? 4 : 10)
         .background(Color.adaptiveBackground)
     }
     
@@ -395,17 +409,39 @@ struct PodcastPlayerSheetView: View {
     
     @ViewBuilder
     private var nowPlayingContentView: some View {
+        if tabBarClearance.isBarOnSide || isDuoLandscape {
+            // iPhone Duo is too short for this page at full size in landscape, on the outer
+            // display and on the open inner one: the playback controls ended up behind the bottom
+            // menu with no way to reach them. Use a smaller artwork and let the page scroll;
+            // `minHeight` keeps it centred when it does fit.
+            GeometryReader { geometry in
+                ScrollView {
+                    nowPlayingStack(compact: true)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                }
+                .scrollIndicators(.hidden)
+                .scrollDisabled(isDraggingProgress)
+            }
+        } else {
+            nowPlayingStack(compact: false)
+        }
+    }
+    
+    @ViewBuilder
+    private func nowPlayingStack(compact: Bool) -> some View {
+        let baseArtworkSide: CGFloat = compact ? (hasChapters ? 120 : 170) : (hasChapters ? 200 : 240)
+        let artworkSide = isDuoSplitPane ? (baseArtworkSide * DuoSplit.artworkScale).rounded() : baseArtworkSide
         // Main content area without bottom menu (since it's now always visible)
         VStack(spacing: hasChapters ? 8 : 10) {
             // Conditional top spacing - more space when no chapters
-            Spacer(minLength: hasChapters ? 0 : 40)
+            Spacer(minLength: compact ? 0 : (hasChapters ? 0 : 40))
             
             // Podcast artwork - smaller when chapters present for better fit
             artworkView
-                .frame(width: hasChapters ? 200 : 240, height: hasChapters ? 200 : 240)
+                .frame(width: artworkSide, height: artworkSide)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
-                .padding(.top, hasChapters ? 10 : 20)
+                .padding(.top, compact ? 4 : (hasChapters ? 10 : 20))
             
             // Episode title and podcast name
             VStack(spacing: hasChapters ? 4 : 6) {
@@ -435,7 +471,7 @@ struct PodcastPlayerSheetView: View {
                 .padding(.top, hasChapters ? -8 : 0) // Tighter spacing when chapters present
             
             // Conditional bottom spacing - more space when no chapters
-            Spacer(minLength: hasChapters ? 5 : 60)
+            Spacer(minLength: compact ? 8 : (hasChapters ? 5 : 60))
         }
         .padding(.horizontal, 20)
     }
@@ -829,6 +865,11 @@ struct PodcastPlayerSheetView: View {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: playbackControlIconColor))
                                 .scaleEffect(1.2)
+                        } else if let statusSymbol = podcastPlayer.networkStatus.transportSymbol {
+                            // Offline / failed: a quiet glyph instead of an endless spinner
+                            Image(systemName: statusSymbol)
+                                .font(.title)
+                                .foregroundColor(playbackControlIconColor)
                         } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: playbackControlIconColor))
@@ -1002,7 +1043,10 @@ struct PodcastPlayerSheetView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 14)
-        .background(Color.adaptiveSecondaryBackground)
+        // Runs under a side status column (iPhone Duo); the horizontal safe-area insets are
+        // zero on portrait iPhone and iPad, so nothing changes there.
+        // No band in the iPhone Duo split: it would mark the player off as a screen of its own.
+        .background((isDuoSplitPane ? Color.clear : Color.adaptiveSecondaryBackground).ignoresSafeArea(.container, edges: [.horizontal, .bottom]))
     }
     
     private func menuIcon<Content: View>(
@@ -1739,10 +1783,7 @@ struct SleepTimerSheet: View {
                 // Header
                 VStack(spacing: 12) {
                     // Drag indicator
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.secondary.opacity(0.3))
-                        .frame(width: 36, height: 5)
-                        .padding(.top, 8)
+                    SheetGrabber()
                     
                     Text("Sleep Timer")
                         .font(.title2)
@@ -1799,6 +1840,8 @@ struct SleepTimerSheet: View {
                         .padding(.vertical, 16)
                         .background(Color.gray.opacity(0.08))
                         .cornerRadius(12)
+                        // Line the first card up with the one below it on iPhone Duo's narrow display.
+                        .padding(.horizontal, TabBarClearance.shared.isBarOnSide ? 16 : 0)
                         
                         // Timer options section
                         VStack(spacing: 16) {
@@ -1861,6 +1904,7 @@ struct SleepTimerSheet: View {
                     .padding(.bottom, 150)
                 }
             }
+            .duoSheetBalance()
             .navigationBarHidden(true)
         }
         .sheet(isPresented: $showCustomPicker) {

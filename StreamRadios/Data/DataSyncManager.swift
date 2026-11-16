@@ -1272,10 +1272,13 @@ class DataSyncManager: ObservableObject {
             return
         }
 
+        let unavailableFeedCount = unavailableEmptyFeeds(in: podcastViewModel.podcastFeeds).count
         podcastFeedsStatus = .completed
         podcastFeedsProgress = 1.0
         podcastFeedsCurrentCount = expectedFreshInstallPodcastFeedCount
-        podcastFeedsOperation = "✅ \(expectedFreshInstallPodcastFeedCount) podcast feeds and episodes loaded"
+        podcastFeedsOperation = unavailableFeedCount > 0
+            ? "✅ \(expectedFreshInstallPodcastFeedCount - unavailableFeedCount) podcast feeds loaded, \(unavailableFeedCount) couldn't be loaded"
+            : "✅ \(expectedFreshInstallPodcastFeedCount) podcast feeds and episodes loaded"
 
         // Final verification that all sync statuses are completed
         await waitForAllSyncStatusesToComplete()
@@ -1431,6 +1434,17 @@ class DataSyncManager: ObservableObject {
         print("📊 Final state: Podcast feeds: \(podcastViewModel.podcastFeeds.count), Radio stations: \(radioStationViewModel.stations.count)")
     }
 
+    /// Feeds with nothing to load: the publisher URL is permanently gone (404/410), or this
+    /// run's attempt ended without episodes (timeout, 5xx, unparsable or empty feed).
+    /// They are resolved: the subscription is kept and retried later, but setup must not
+    /// wait for episodes that are not coming.
+    private func unavailableEmptyFeeds(in feeds: [PodcastFeed]) -> [PodcastFeed] {
+        let store = FeedAvailabilityStore.shared
+        return feeds.filter {
+            $0.episodes.isEmpty && (store.isUnavailable(url: $0.url) || store.didSetupLoadFail(url: $0.url))
+        }
+    }
+
     @MainActor
     private func waitForFreshInstallPodcastData(_ podcastViewModel: PodcastViewModel) async -> Bool {
         let expectedFeedCount = expectedFreshInstallPodcastFeedCount
@@ -1443,18 +1457,19 @@ class DataSyncManager: ObservableObject {
             let feedsWithCaches = feedsWithEpisodes.filter {
                 !podcastViewModel.feedIsolationManager.getEpisodesForFeed($0.id).isEmpty
             }
+            let unavailableCount = unavailableEmptyFeeds(in: feeds).count
             let coreDataReady = await verifyCoreDataHasFeeds(expectedCount: expectedFeedCount)
 
             if feeds.count >= expectedFeedCount,
                orderedFeedCount >= expectedFeedCount,
-               feedsWithEpisodes.count >= expectedFeedCount,
-               feedsWithCaches.count >= expectedFeedCount,
+               feedsWithEpisodes.count + unavailableCount >= expectedFeedCount,
+               feedsWithCaches.count + unavailableCount >= expectedFeedCount,
                coreDataReady {
-                print("✅ FRESH INSTALL READINESS: \(expectedFeedCount)/\(expectedFeedCount) feeds, episode sets, and caches are available")
+                print("✅ FRESH INSTALL READINESS: \(expectedFeedCount)/\(expectedFeedCount) feeds resolved - \(feedsWithCaches.count) with episodes and caches, \(unavailableCount) unavailable")
                 return true
             }
 
-            print("⏳ FRESH INSTALL READINESS \(attempt)/10: feeds \(feeds.count)/\(expectedFeedCount), order \(orderedFeedCount)/\(expectedFeedCount), parsed \(feedsWithEpisodes.count)/\(expectedFeedCount), cached \(feedsWithCaches.count)/\(expectedFeedCount)")
+            print("⏳ FRESH INSTALL READINESS \(attempt)/10: feeds \(feeds.count)/\(expectedFeedCount), order \(orderedFeedCount)/\(expectedFeedCount), parsed \(feedsWithEpisodes.count)/\(expectedFeedCount), cached \(feedsWithCaches.count)/\(expectedFeedCount), unavailable \(unavailableCount)")
 
             guard attempt < 10 else { break }
             await podcastViewModel.forceSaveAndReload()
@@ -1475,7 +1490,8 @@ class DataSyncManager: ObservableObject {
         var totalEpisodes = 0
         
         // Update tracking
-        totalFeedsInCoreData = max(feedsWithEpisodes.count, expectedFreshInstallPodcastFeedCount)
+        let unavailableCount = unavailableEmptyFeeds(in: podcastViewModel.podcastFeeds).count
+        totalFeedsInCoreData = max(feedsWithEpisodes.count, expectedFreshInstallPodcastFeedCount - unavailableCount)
         feedsLoadedFromCoreData = 0
         
         for feed in podcastViewModel.podcastFeeds {

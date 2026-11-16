@@ -54,8 +54,24 @@ class SubscriptionManager: ObservableObject {
     }
     
     // MARK: - Published Properties
+    /// Treats the app as subscribed so the paywall never appears, for layout testing in the
+    /// simulator. Compiled only into Debug builds running in a simulator; device and Release
+    /// builds are unaffected.
+    ///
+    /// To get the paywall back in the simulator, tick the `-ShowPaywall` launch argument in
+    /// the StreamRadios scheme (Edit Scheme > Run > Arguments).
+    #if DEBUG && targetEnvironment(simulator)
+    static let isPaywallBypassedForTesting = !ProcessInfo.processInfo.arguments.contains("-ShowPaywall")
+    #else
+    static let isPaywallBypassedForTesting = false
+    #endif
+
     @Published var subscriptionStatus: SubscriptionStatus = .unknown {
         didSet {
+            if SubscriptionManager.isPaywallBypassedForTesting, subscriptionStatus != .subscribed {
+                subscriptionStatus = .subscribed
+                return
+            }
             SubscriptionManager.entitlementSnapshot = (
                 isEntitled: subscriptionStatus.isSubscribed,
                 isResolved: subscriptionStatus != .unknown
@@ -72,7 +88,53 @@ class SubscriptionManager: ObservableObject {
     // @Published var subscriptionGroupStatus: RenewalState? // Not available in simulation mode
     @Published var isInitialized = false
     @Published var isLoading = false
+
+    /// Whether Apple will grant this Apple Account the introductory offer on purchase. False until
+    /// StoreKit confirms it, so the paywall never promises a trial the customer will not get.
+    @Published var isEligibleForIntroOffer = false
+
+    var subscriptionProduct: Product? {
+        products.first(where: { $0.id == subscriptionProductId })
+    }
+
+    var lifetimeProduct: Product? {
+        products.first(where: { $0.id == oneTimeProductId })
+    }
+
+    /// The free trial this customer gets when they subscribe now, or nil when the purchase is
+    /// charged immediately (no introductory offer in App Store Connect, or trial already used).
+    var availableTrialOffer: Product.SubscriptionOffer? {
+        guard isEligibleForIntroOffer,
+              let offer = subscriptionProduct?.subscription?.introductoryOffer,
+              offer.paymentMode == .freeTrial else { return nil }
+        return offer
+    }
+
+    /// True while the yearly subscription is active and set to renew. Buying Lifetime does not
+    /// cancel it (only the customer can), so the app uses this to remind lifetime owners.
+    @Published var yearlyStillRenewing = false
     
+    func refreshYearlyRenewalState() async {
+        guard let subscription = subscriptionProduct?.subscription,
+              let statuses = try? await subscription.status else {
+            yearlyStillRenewing = false
+            return
+        }
+        yearlyStillRenewing = statuses.contains { status in
+            guard status.state == .subscribed || status.state == .inGracePeriod || status.state == .inBillingRetryPeriod,
+                  case .verified(let info) = status.renewalInfo else { return false }
+            return info.willAutoRenew
+        }
+    }
+    
+    func refreshIntroOfferEligibility() async {
+        guard let subscription = subscriptionProduct?.subscription else {
+            isEligibleForIntroOffer = false
+            return
+        }
+        isEligibleForIntroOffer = await subscription.isEligibleForIntroOffer
+    }
+
     // Product IDs
     private let subscriptionProductId = "StreamRadiosPro"  // $9.99/year subscription
     private let oneTimeProductId = "STR12RA"              // $29.99 one-time purchase
@@ -140,6 +202,13 @@ class SubscriptionManager: ObservableObject {
             log("🏪 SubscriptionManager: Running in App Store mode")
         }
         
+        if SubscriptionManager.isPaywallBypassedForTesting {
+            log("🧪 SubscriptionManager: Paywall bypassed for simulator testing")
+            // Property observers do not run during init, so resolve the snapshot directly.
+            subscriptionStatus = .subscribed
+            SubscriptionManager.entitlementSnapshot = (isEntitled: true, isResolved: true)
+        }
+
         Task {
             await updateSubscriptionStatus()
         }
@@ -176,14 +245,15 @@ class SubscriptionManager: ObservableObject {
             print("   - Price: \(introductoryOffer.displayPrice)")
             
             // Check if it's configured as expected (7-day free trial)
-            if introductoryOffer.paymentMode == .freeTrial && 
-               introductoryOffer.period.unit == .day && 
-               introductoryOffer.periodCount == 7 {
+            // StoreKit reports a one-week trial as a single period of "7 days" or "1 week".
+            let period = introductoryOffer.period
+            let trialDays = (period.unit == .week ? period.value * 7 : (period.unit == .day ? period.value : 0)) * introductoryOffer.periodCount
+            if introductoryOffer.paymentMode == .freeTrial && trialDays == 7 {
                 print("✅ Perfect! 7-day free trial is correctly configured")
             } else {
                 print("⚠️ Trial configuration doesn't match expected 7-day free trial:")
                 print("   - Expected: 7-day free trial")
-                print("   - Current: \(introductoryOffer.periodCount) \(introductoryOffer.period.unit) \(introductoryOffer.paymentMode)")
+                print("   - Current: \(introductoryOffer.periodCount) x \(introductoryOffer.period) \(introductoryOffer.paymentMode)")
             }
         } else {
             print("ℹ️ No introductory offer detected by StoreKit")
@@ -228,7 +298,8 @@ class SubscriptionManager: ObservableObject {
             
             // Validate subscription product configuration
             await validateSubscriptionConfiguration()
-            
+            await refreshIntroOfferEligibility()
+
             // Check current subscription status
             await updateSubscriptionStatus()
             
@@ -310,19 +381,12 @@ class SubscriptionManager: ObservableObject {
             return
         }
         
-        // Check if user has upgraded to full subscription (priority over StoreKit transactions)
-        let lastKnownStatus = UserDefaults.standard.string(forKey: lastKnownSubscriptionKey)
-        log("🔍 DEBUG: App Store - lastKnownStatus = \(lastKnownStatus ?? "nil")")
-        if lastKnownStatus == "subscribed" {
-            await MainActor.run {
-                self.subscriptionStatus = .subscribed
-                log("🔍 DEBUG: App Store - Found upgraded subscription status - setting to subscribed")
-            }
-            return
-        }
+        // A yearly subscription is only ever granted from StoreKit's current entitlements, which
+        // drop it when it expires, is cancelled or is refunded. Older builds saved a "subscribed"
+        // flag here that outlived the subscription; clear it so it can never unlock Pro again.
+        UserDefaults.standard.removeObject(forKey: lastKnownSubscriptionKey)
 
-        // Fall back to StoreKit transactions if no UserDefaults override found
-        log("🔍 DEBUG: App Store - No UserDefaults override, checking StoreKit transactions")
+        log("🔍 DEBUG: App Store - checking StoreKit transactions")
         for await result in Transaction.currentEntitlements {
             do {
                 let transaction = try checkVerified(result)
@@ -370,9 +434,46 @@ class SubscriptionManager: ObservableObject {
             }
         }
         
+        // No entitlement on this device. Record what Apple reports for the subscription so a
+        // mismatch ("currently subscribed" alert while the paywall is up) can be diagnosed.
+        await logSubscriptionDiagnostics()
+
         // No valid subscription found
         await MainActor.run {
             self.subscriptionStatus = .notSubscribed
+        }
+    }
+
+    private func logSubscriptionDiagnostics() async {
+        log("🔎 SUBSCRIPTION DIAGNOSTICS: no current entitlement found")
+
+        if let latest = await Transaction.latest(for: subscriptionProductId) {
+            switch latest {
+            case .verified(let transaction):
+                log("🔎 Latest transaction: verified, purchased \(transaction.purchaseDate), expires \(transaction.expirationDate?.description ?? "never"), revoked \(transaction.revocationDate?.description ?? "no"), upgraded \(transaction.isUpgraded), environment \(transaction.environment.rawValue)")
+            case .unverified(let transaction, let error):
+                log("🔎 Latest transaction: UNVERIFIED (\(error)), purchased \(transaction.purchaseDate), expires \(transaction.expirationDate?.description ?? "never")")
+            }
+        } else {
+            log("🔎 Latest transaction: none for \(subscriptionProductId)")
+        }
+
+        guard let subscription = subscriptionProduct?.subscription else {
+            log("🔎 Subscription status: product not loaded yet")
+            return
+        }
+        do {
+            let statuses = try await subscription.status
+            if statuses.isEmpty { log("🔎 Subscription status: none reported for the group") }
+            for status in statuses {
+                var renewal = "renewal info unverified"
+                if case .verified(let info) = status.renewalInfo {
+                    renewal = "product \(info.currentProductID), will auto-renew \(info.willAutoRenew), expiration reason \(String(describing: info.expirationReason))"
+                }
+                log("🔎 Subscription status: \(status.state.localizedDescription), \(renewal)")
+            }
+        } catch {
+            log("🔎 Subscription status: failed to load (\(error))")
         }
     }
     
@@ -384,32 +485,22 @@ class SubscriptionManager: ObservableObject {
         print("   - Offer Type: \(transaction.offerType?.rawValue.description ?? "none")")
         print("   - Environment: \(transaction.environment.rawValue)")
         
-        // Primary check: App Store Connect configured trial
-        if transaction.offerType == .introductory {
-            print("✅ App Store Connect trial detected")
+        // Only a transaction Apple itself marks as a free introductory period is a trial. A paid
+        // purchase must never be shown as a trial: the customer has already been charged.
+        if let offer = transaction.offer, offer.type == .introductory, offer.paymentMode == .freeTrial {
+            print("✅ App Store free trial detected")
             return true
         }
-        
-        // FALLBACK: If App Store Connect doesn't have trial configured,
-        // treat recent subscriptions (within 7 days) as trials
-        let sevenDaysAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-        let isRecentSubscription = transaction.purchaseDate > sevenDaysAgo
-        
-        if isRecentSubscription {
-            print("⚠️ App Store Connect trial NOT configured, but treating recent subscription as trial")
-            print("   - This subscription should have a 7-day trial period")
-            print("   - Please configure introductory offer in App Store Connect")
-            return true
-        }
-        
+
         print("❌ No trial detected - regular subscription")
         return false
     }
-    
+
     private func calculateTrialDaysRemaining(transaction: StoreKit.Transaction) -> Int {
         let trialDuration: TimeInterval = 7 * 24 * 60 * 60 // 7 days in seconds
         let purchaseDate = transaction.purchaseDate
-        let trialEndDate = purchaseDate.addingTimeInterval(trialDuration)
+        // For a trial transaction the expiration date is the moment the trial ends.
+        let trialEndDate = transaction.expirationDate ?? purchaseDate.addingTimeInterval(trialDuration)
         let now = Date()
         
         if now < trialEndDate {
@@ -487,22 +578,23 @@ class SubscriptionManager: ObservableObject {
         }
         
         let result = try await product.purchase()
-        
+
         switch result {
         case .success(let verification):
             let transaction = try checkVerified(verification)
             await updateSubscriptionStatus()
+            await refreshIntroOfferEligibility()
             await transaction.finish()
             return transaction
-            
+
         case .userCancelled, .pending:
             return nil
-            
+
         @unknown default:
             return nil
         }
     }
-    
+
     /// Purchase the one-time lifetime access
     func purchaseOneTime() async throws -> StoreKit.Transaction? {
         await MainActor.run {
@@ -618,86 +710,6 @@ class SubscriptionManager: ObservableObject {
         }
     }
     
-    /// Upgrade from free trial to full paid subscription immediately
-    /// This bypasses the trial period and activates yearly subscription right away
-    func upgradeTrialToFullSubscription() async throws {
-        await MainActor.run {
-            self.isLoading = true
-        }
-        
-        defer {
-            Task {
-                await MainActor.run {
-                    self.isLoading = false
-                }
-            }
-        }
-        
-        if isSimulationMode {
-            // In simulation mode, immediately convert trial to full subscription
-            await MainActor.run {
-                log("🔍 DEBUG: Upgrading trial to full subscription")
-                log("🔍 DEBUG: Before - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
-                log("🔍 DEBUG: Before - trialStartDate = \(String(describing: UserDefaults.standard.object(forKey: self.simulatedTrialStartKey) as? Date))")
-                
-                self.subscriptionStatus = .subscribed
-                UserDefaults.standard.set("subscribed", forKey: self.lastKnownSubscriptionKey)
-                UserDefaults.standard.set(true, forKey: self.hasEverPurchasedKey)
-                // Clear trial start date to prevent trial logic from overriding subscription
-                UserDefaults.standard.removeObject(forKey: self.simulatedTrialStartKey)
-                // Force immediate synchronization to disk to survive force close
-                UserDefaults.standard.synchronize()
-                
-                log("🔍 DEBUG: After - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
-                log("🔍 DEBUG: After - trialStartDate = \(String(describing: UserDefaults.standard.object(forKey: self.simulatedTrialStartKey) as? Date))")
-                log("🔍 DEBUG: UserDefaults synchronized to disk")
-                log("🧪 Simulated trial upgrade: Converted to full subscription immediately")
-            }
-            return
-        }
-        
-        // For real App Store implementation, purchase the subscription product
-        guard let product = products.first(where: { $0.id == subscriptionProductId }) else {
-            throw SubscriptionError.productNotFound
-        }
-        
-        print("🛒 Upgrading trial to full subscription:")
-        print("   - Product ID: \(product.id)")
-        print("   - Display Name: \(product.displayName)")
-        print("   - Price: \(product.displayPrice)")
-        
-        let result = try await product.purchase()
-        
-        switch result {
-        case .success(let verification):
-            let transaction = try checkVerified(verification)
-            // Immediately set status to subscribed (not trial)
-            await MainActor.run {
-                log("🔍 DEBUG: App Store - Upgrading trial to full subscription")
-                log("🔍 DEBUG: App Store - Before - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
-                
-                self.subscriptionStatus = .subscribed
-                // Also persist to UserDefaults for force close scenarios
-                UserDefaults.standard.set("subscribed", forKey: self.lastKnownSubscriptionKey)
-                UserDefaults.standard.set(true, forKey: self.hasEverPurchasedKey)
-                // Clear any trial data that might interfere
-                UserDefaults.standard.removeObject(forKey: self.simulatedTrialStartKey)
-                UserDefaults.standard.synchronize()
-                
-                log("🔍 DEBUG: App Store - After - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
-                log("🔍 DEBUG: App Store - UserDefaults synchronized to disk")
-                print("✅ Trial successfully upgraded to full subscription")
-            }
-            await transaction.finish()
-            
-        case .userCancelled, .pending:
-            break
-            
-        @unknown default:
-            break
-        }
-    }
-
     /// Legacy purchase method - now defaults to subscription
     func purchase() async throws -> StoreKit.Transaction? {
         return try await purchaseSubscription()

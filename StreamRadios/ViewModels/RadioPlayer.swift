@@ -66,10 +66,27 @@ class RadioPlayer: NSObject, ObservableObject {
     
     // MARK: - Network Reconnection Properties
     private var reachability: Reachability?
-    private var isAttemptingReconnection = false
     private var currentReconnectionAttempt = 0
-    private let maxReconnectionAttempts = 5
-    private var reconnectionTimer: Timer?
+    private let maxReconnectionAttempts = 8
+    /// How long a fresh item gets to start playing before the attempt counts as failed.
+    private let reconnectVerificationTimeout: TimeInterval = 10
+    /// The one pending reconnect attempt or its verification. Every path goes through this
+    /// single item, so observers firing together cannot start parallel reconnects.
+    private var reconnectionWorkItem: DispatchWorkItem?
+    private var stallWatchdogWorkItem: DispatchWorkItem?
+    /// Playback was lost to the network (not to the user) and must come back by itself.
+    private var streamRecoveryPending = false
+    /// The current player item failed or its live stream ended; it can never play again.
+    private var streamItemIsDead = false
+    /// The current item has produced audio at least once (distinguishes a mid-playback stall
+    /// from a station that is still doing its first buffering).
+    private var streamItemHasPlayed = false
+    private var streamItemObservers: [NSObjectProtocol] = []
+    private var streamItemStatusObservation: NSKeyValueObservation?
+    /// URL of the stream the current player was built for (also set for alarm stations).
+    private var activeStreamURL: URL?
+    private var lastNetworkChange = Date.distantPast
+    private var recoveryBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     
     // MARK: - Remote Command Center Properties
     private var isRemoteCommandCenterConfigured = false
@@ -277,99 +294,318 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
+    /// False only when Reachability positively reports no route; an unknown state counts as reachable.
+    private var isNetworkReachable: Bool {
+        guard let reachability else { return true }
+        return reachability.connection != .unavailable
+    }
+
+    /// Automatic recovery is only allowed while the user still expects audio: they started
+    /// playback, have not paused it themselves, and have not switched to a podcast.
+    private var shouldAutoRecoverStream: Bool {
+        userWantsToPlay && !wasManuallyPaused && PlaybackManager.shared.activePlayer != .podcast
+    }
+
+    /// What the network is doing to radio playback, for the shared status pill and play button.
+    var networkStatus: PlaybackNetworkStatus {
+        guard currentlyPlayingStation != nil, userWantsToPlay, !wasManuallyPaused else { return .normal }
+        switch connectionState {
+        case .error:
+            return .failed
+        case .disconnected:
+            return .offline
+        case .connecting:
+            // A first connection to a station is ordinary start-up, not a network problem.
+            return streamRecoveryPending ? .reconnecting : .normal
+        case .buffering:
+            return streamItemHasPlayed ? .buffering : .normal
+        case .connected, .paused:
+            return (streamRecoveryPending && !isNetworkReachable) ? .offline : .normal
+        }
+    }
+
     private func handleNetworkDisconnection() {
         // GPS FIX: Track network failures to help GPS protection system
         self.trackNetworkFailure()
-        
-        // If user wants to play but network is gone, mark for reconnection
-        if userWantsToPlay {
-            connectionState = .disconnected
-            isBuffering = false
-        }
+        lastNetworkChange = Date()
+
+        guard shouldAutoRecoverStream else { return }
+
+        // Only a stream that was actually running (or already waiting to come back) is resumed
+        // later. One paused by a phone call or a route change stays under that path's control.
+        let playerIsActive = player.map { $0.timeControlStatus != .paused } ?? false
+        guard isPlaying || isBuffering || playerIsActive || streamRecoveryPending else { return }
+
+        print("🌐 RadioPlayer: Network lost during playback - will resume when it returns")
+        streamRecoveryPending = true
+        // Nothing can succeed while offline: drop any scheduled attempt and wait for the
+        // reachability callback instead of burning retries.
+        cancelScheduledReconnect()
+        currentReconnectionAttempt = 0
+        connectionState = .disconnected
+        isBuffering = false
+        beginRecoveryBackgroundTask()
     }
-    
+
     private func handleNetworkReconnection() {
-        // Attempt reconnection if user wants to play, regardless of current isPlaying state
-        // because isPlaying might be stale when network was disconnected
-        guard userWantsToPlay else {
+        lastNetworkChange = Date()
+
+        guard shouldAutoRecoverStream else { return }
+
+        // Another app (Camera recording, a call) holds the audio session: reconnecting now
+        // would restart the stream over it. resumeAfterInterruption picks the recovery up.
+        guard !PlaybackManager.shared.isInterruptionActive else {
+            print("🌐 RadioPlayer: Network reconnected during audio interruption - not restarting stream")
             return
         }
-        
+
         // CRITICAL: Reset StreamQualityManager to re-evaluate network conditions
         streamQualityManager.resetNetworkEvaluation()
-        
-        isAttemptingReconnection = true
-        currentReconnectionAttempt = 0
-        attemptReconnection()
+
+        let isStalled = player?.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        if streamRecoveryPending || streamItemIsDead || isStalled {
+            // Reachability reports every flag change (Wi-Fi up, then cellular down, ...), so
+            // several callbacks arrive in a burst. The single work item coalesces them.
+            streamRecoveryPending = true
+            currentReconnectionAttempt = 0
+            scheduleReconnect(after: 0.3)
+        }
+        // Otherwise audio is still flowing (e.g. Wi-Fi joined while on cellular). If the old
+        // socket did die in the handover the buffer drains within seconds and the stall
+        // watchdog, shortened by lastNetworkChange, reconnects.
     }
-    
-    private func attemptReconnection() {
-        guard currentReconnectionAttempt < maxReconnectionAttempts else {
-            stopReconnectionAttempts(reportFailure: true)
+
+    /// The live stream stopped delivering audio for a reason other than the user (item failed,
+    /// server closed the connection, stall that never recovered).
+    private func noteStreamLost(reason: String) {
+        guard shouldAutoRecoverStream else { return }
+        print("🌐 RadioPlayer: Stream lost (\(reason))")
+        streamRecoveryPending = true
+        beginRecoveryBackgroundTask()
+
+        guard !PlaybackManager.shared.isInterruptionActive else { return }
+        guard isNetworkReachable else {
+            cancelScheduledReconnect()
+            connectionState = .disconnected
+            isBuffering = false
             return
         }
-        
-        currentReconnectionAttempt += 1
-        print("🌐 RadioPlayer: Attempting to reconnect (attempt \(currentReconnectionAttempt) of \(maxReconnectionAttempts))")
-        
-        // Set connecting state
+        // An attempt (or its verification) is already scheduled - don't stack another.
+        guard reconnectionWorkItem == nil else { return }
+        scheduleReconnect(after: reconnectBackoff(afterAttempt: currentReconnectionAttempt))
+    }
+
+    private func reconnectBackoff(afterAttempt attempt: Int) -> TimeInterval {
+        let delays: [TimeInterval] = [0.5, 2, 4, 8, 15, 30]
+        return delays[min(max(attempt, 0), delays.count - 1)]
+    }
+
+    private func cancelScheduledReconnect() {
+        reconnectionWorkItem?.cancel()
+        reconnectionWorkItem = nil
+        stallWatchdogWorkItem?.cancel()
+        stallWatchdogWorkItem = nil
+    }
+
+    private func scheduleReconnect(after delay: TimeInterval) {
+        cancelScheduledReconnect()
         connectionState = .connecting
-        
-        // CRITICAL: Recreate the player item entirely to get fresh network connections
-        // and reset all quality evaluations
-        if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
-            print("🌐 RadioPlayer: Recreating player item for fresh network connection")
-            
-            // Stop existing player completely
-            player?.pause()
-            player = nil
-            
-            // Set up fresh player with reset quality management
-            setStationURL(lastStationURL)
-            
-            // Ensure stream quality is reset
-            streamQualityManager.resetNetworkEvaluation()
-            
-            // Start playback after a brief delay to let everything settle
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.player?.play()
-                print("🌐 RadioPlayer: Started fresh playback after player recreation")
-            }
-        } else {
-            // Fallback: try to restart existing player
-            player?.play()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.reconnectionWorkItem = nil
+            self.performReconnect()
         }
-        
-        // Check status after a delay
-        reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
-            self?.checkReconnectionStatus()
-        }
+        reconnectionWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
-    
-    private func checkReconnectionStatus() {
-        if player?.timeControlStatus == .playing && isPlaying {
-            print("✅ RadioPlayer: Network reconnection successful")
-            stopReconnectionAttempts()
-            connectionState = .connected
-        } else {
-            print("⚠️ RadioPlayer: Reconnection attempt failed, trying again...")
-            attemptReconnection()
+
+    private func performReconnect() {
+        guard shouldAutoRecoverStream else {
+            cancelStreamRecovery()
+            return
         }
-    }
-    
-    private func stopReconnectionAttempts(reportFailure: Bool = false) {
-        reconnectionTimer?.invalidate()
-        reconnectionTimer = nil
-        isAttemptingReconnection = false
-        currentReconnectionAttempt = 0
-        
-        if reportFailure && player?.timeControlStatus != .playing {
+        // Leave streamRecoveryPending set in both cases: the interruption-end path and the
+        // next reachability callback pick it up.
+        guard !PlaybackManager.shared.isInterruptionActive else { return }
+        guard isNetworkReachable else {
+            connectionState = .disconnected
+            isBuffering = false
+            return
+        }
+        guard let url = activeStreamURL ?? userDefaults?.url(forKey: "lastStationURL") else {
+            cancelStreamRecovery()
+            return
+        }
+        guard currentReconnectionAttempt < maxReconnectionAttempts else {
             print("❌ RadioPlayer: Failed to reconnect after \(maxReconnectionAttempts) attempts")
+            cancelScheduledReconnect()
+            currentReconnectionAttempt = 0
+            isBuffering = false
             connectionState = .error
             // GPS FIX: Track multiple reconnection failures
-            self.trackNetworkFailure()
-            // Don't clear userWantsToPlay so they can try again manually
+            trackNetworkFailure()
+            endRecoveryBackgroundTask()
+            // streamRecoveryPending and userWantsToPlay stay set: the next network change,
+            // foreground or play tap starts a new round.
+            return
         }
+
+        currentReconnectionAttempt += 1
+        print("🌐 RadioPlayer: Reconnecting with a fresh player item (attempt \(currentReconnectionAttempt) of \(maxReconnectionAttempts))")
+
+        // A live stream cannot be resumed from the old item: its socket and buffer belong to
+        // the dead connection. forceSetStationURL also works while CarPlay is connected,
+        // where setStationURL would refuse because isPlaying can still be stale-true.
+        forceSetStationURL(url)
+        streamQualityManager.resetNetworkEvaluation()
+        connectionState = .connecting
+        player?.play()
+
+        // The timeControlStatus observer reports success (streamDidStartPlaying). If the new
+        // item has not started by then, back off and try again.
+        let attempt = currentReconnectionAttempt
+        let verification = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.reconnectionWorkItem = nil
+            if self.player?.timeControlStatus == .playing {
+                self.streamDidStartPlaying()
+            } else {
+                print("⚠️ RadioPlayer: Reconnection attempt \(attempt) did not start playback")
+                self.scheduleReconnect(after: self.reconnectBackoff(afterAttempt: attempt))
+            }
+        }
+        reconnectionWorkItem = verification
+        DispatchQueue.main.asyncAfter(deadline: .now() + reconnectVerificationTimeout, execute: verification)
+    }
+
+    /// Stops every automatic recovery path. Called for anything the user does themselves
+    /// (pause, stop, play, switching station or service).
+    private func cancelStreamRecovery() {
+        cancelScheduledReconnect()
+        streamRecoveryPending = false
+        currentReconnectionAttempt = 0
+        endRecoveryBackgroundTask()
+    }
+
+    // Kept under its old name for the service-switch path.
+    private func stopReconnectionAttempts() {
+        cancelStreamRecovery()
+    }
+
+    /// Recovery entry point for paths that regain control after an outage (foreground,
+    /// interruption end). Returns false when there is nothing to recover.
+    @discardableResult
+    private func recoverStreamIfNeeded() -> Bool {
+        guard streamRecoveryPending || streamItemIsDead, shouldAutoRecoverStream else { return false }
+        streamRecoveryPending = true
+        if isNetworkReachable {
+            currentReconnectionAttempt = 0
+            scheduleReconnect(after: 0.2)
+        } else {
+            connectionState = .disconnected
+        }
+        return true
+    }
+
+    // MARK: Stream health signals (driven by the timeControlStatus and item observers)
+
+    private func streamDidStartPlaying() {
+        if streamRecoveryPending || currentReconnectionAttempt > 0 {
+            print("✅ RadioPlayer: Stream is playing again")
+        }
+        cancelScheduledReconnect()
+        streamRecoveryPending = false
+        streamItemIsDead = false
+        streamItemHasPlayed = true
+        currentReconnectionAttempt = 0
+        endRecoveryBackgroundTask()
+    }
+
+    private func streamDidStall() {
+        guard shouldAutoRecoverStream else { return }
+        if !isNetworkReachable {
+            // Offline: show that rather than an endless buffering spinner.
+            streamRecoveryPending = true
+            connectionState = .disconnected
+            isBuffering = false
+            return
+        }
+        // A reconnect or its verification already covers this stall.
+        guard reconnectionWorkItem == nil, stallWatchdogWorkItem == nil else { return }
+
+        // Right after a network change a stall almost certainly means the old socket died in
+        // the handover, so react fast; otherwise give AVPlayer time to rebuffer by itself.
+        let recentNetworkChange = Date().timeIntervalSince(lastNetworkChange) < 20
+        let delay: TimeInterval = (recentNetworkChange && streamItemHasPlayed) ? 2 : reconnectVerificationTimeout
+        let watchedPlayer = player
+        let watchdog = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.stallWatchdogWorkItem = nil
+            guard self.player === watchedPlayer,
+                  self.player?.timeControlStatus != .playing else { return }
+            self.noteStreamLost(reason: "stalled for \(Int(delay))s")
+        }
+        stallWatchdogWorkItem = watchdog
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: watchdog)
+    }
+
+    private func streamDidPause() {
+        // AVPlayer drops to .paused when the item dies. While a recovery is pending that is
+        // not a user pause, so don't present it as one.
+        guard streamRecoveryPending, shouldAutoRecoverStream else { return }
+        connectionState = isNetworkReachable ? .connecting : .disconnected
+    }
+
+    private func observeStreamItem() {
+        streamItemObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        streamItemObservers.removeAll()
+        streamItemStatusObservation?.invalidate()
+        streamItemStatusObservation = nil
+        streamItemIsDead = false
+        streamItemHasPlayed = false
+
+        guard let item = playerItem else { return }
+
+        let markDead: (String) -> Void = { [weak self, weak item] reason in
+            guard let self, let item, self.playerItem === item else { return }
+            self.streamItemIsDead = true
+            self.noteStreamLost(reason: reason)
+        }
+
+        streamItemObservers.append(NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
+        ) { note in
+            let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            markDead("failed to play to end: \(error?.localizedDescription ?? "unknown error")")
+        })
+
+        // A live stream only "ends" when the server or the network closes the connection.
+        // A finite file used as a station must not be replayed in a loop.
+        streamItemObservers.append(NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak item] _ in
+            guard let item, item.duration.isIndefinite || !item.duration.isValid else { return }
+            markDead("live stream ended")
+        })
+
+        streamItemStatusObservation = item.observe(\.status, options: [.new]) { item, _ in
+            guard item.status == .failed else { return }
+            let description = item.error?.localizedDescription ?? "unknown error"
+            DispatchQueue.main.async { markDead("item failed: \(description)") }
+        }
+    }
+
+    private func beginRecoveryBackgroundTask() {
+        guard recoveryBackgroundTask == .invalid else { return }
+        recoveryBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "RadioStreamRecovery") { [weak self] in
+            self?.endRecoveryBackgroundTask()
+        }
+    }
+
+    private func endRecoveryBackgroundTask() {
+        guard recoveryBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(recoveryBackgroundTask)
+        recoveryBackgroundTask = .invalid
     }
 
     
@@ -755,6 +991,13 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     @objc private func handleAppWillEnterForeground() {
+        // The app may have been suspended while offline and missed the reachability callback.
+        // A stream lost to the network needs a fresh item, not play() on the dead one.
+        if !PlaybackManager.shared.isInterruptionActive, recoverStreamIfNeeded() {
+            DebugLogger.logInfo("App entering foreground with a radio stream lost to the network - reconnecting", category: "BackgroundAudio")
+            return
+        }
+        
         // CRITICAL FIX: Only restore playback if it was interrupted by the system, not if user paused
         // We should only resume if:
         // 1. User wants to play (userWantsToPlay = true)
@@ -945,7 +1188,9 @@ class RadioPlayer: NSObject, ObservableObject {
             let isFirstInterruption = !wasPlayingBeforeInterruption
             if isFirstInterruption {
                 // Check both our state AND PlaybackManager state (in case PlaybackManager captured it first)
-                let actuallyWasPlaying = isPlaying || (PlaybackManager.shared.activePlayer == .radio && PlaybackManager.shared.radioWasPlayingBeforeInterruption)
+                // A stream that is mid-recovery from a network drop counts as playing: the user
+                // expects it back once both the call and the outage are over.
+                let actuallyWasPlaying = isPlaying || (streamRecoveryPending && shouldAutoRecoverStream) || (PlaybackManager.shared.activePlayer == .radio && PlaybackManager.shared.radioWasPlayingBeforeInterruption)
                 wasPlayingBeforeInterruption = actuallyWasPlaying
                 print("🔧 RadioPlayer: Set wasPlayingBeforeInterruption = \(wasPlayingBeforeInterruption) (FIRST interruption - coordinated with PlaybackManager)")
             } else {
@@ -1006,8 +1251,11 @@ class RadioPlayer: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
             
-            // Resume playback
-            player.play()
+            // Resume playback. If the stream died during the interruption (network dropped
+            // mid-call), the old item cannot resume - reconnect with a fresh one instead.
+            if !self.recoverStreamIfNeeded() {
+                (self.player ?? player).play()
+            }
             self.isPlaying = true
             self.wasPlayingBeforeInterruption = false // Reset the flag
             
@@ -1035,6 +1283,8 @@ class RadioPlayer: NSObject, ObservableObject {
         // Create new player item and player - NO interruptions from this point on
         playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
+        activeStreamURL = url
+        observeStreamItem()
         
         // Configure the player item with seamless stream quality management
         if let newPlayerItem = playerItem {
@@ -1053,6 +1303,7 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.isPlaying = true
                         self?.isBuffering = false
                         self?.connectionState = .connected
+                        self?.streamDidStartPlaying()
                         
                         // Start elapsed time tracking when player starts playing
                         if self?.playbackStartTime == nil {
@@ -1086,12 +1337,14 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.isBuffering = true
                         self?.connectionState = .buffering
                         print("⏳ Player buffering - seamless quality adaptation in progress")
+                        self?.streamDidStall()
                         
                     case .paused:
                         self?.isPlaying = false
                         self?.isBuffering = false
                         // If user paused, stay in paused state; do not show connecting/buffering
                         self?.connectionState = .paused
+                        self?.streamDidPause()
                         
                     @unknown default:
                         break
@@ -1118,6 +1371,8 @@ class RadioPlayer: NSObject, ObservableObject {
         // Create new player item and player
         playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
+        activeStreamURL = url
+        observeStreamItem()
         print("🔄 Station Setup: Created new player and player item")
         
         // Configure the player item with seamless stream quality management
@@ -1139,6 +1394,7 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.isPlaying = true
                         self?.isBuffering = false
                         self?.connectionState = .connected
+                        self?.streamDidStartPlaying()
                         print("✅ Station Transition: Player now PLAYING")
                         
                         // Reset buffering attempts counter when successfully playing
@@ -1176,11 +1432,12 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.isBuffering = true
                         self?.connectionState = .buffering
                         print("⏳ Station Transition: Player BUFFERING (normal for new streams)")
+                        self?.streamDidStall()
                         
                         // Add timeout protection for buffering state with rate limiting
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                             guard let self = self else { return }
-                            if self.connectionState == .buffering {
+                            if self.connectionState == .buffering, self.userWantsToPlay, !self.wasManuallyPaused {
                                 let now = Date()
                                 
                                 // Rate limit buffering logs - only log first 3 attempts, then once every 10 seconds
@@ -1203,6 +1460,7 @@ class RadioPlayer: NSObject, ObservableObject {
                         print("⏸️ Station Transition: Player PAUSED")
                         // Always show paused for a paused status; never connecting
                         self?.connectionState = .paused
+                        self?.streamDidPause()
                         
                     @unknown default:
                         print("❓ Station Transition: Unknown player status")
@@ -1367,6 +1625,17 @@ class RadioPlayer: NSObject, ObservableObject {
         streamQualityManager.resetNetworkEvaluation()
         print("🌐 Play: Reset network evaluation for fresh quality assessment")
         
+        // An explicit play supersedes any automatic recovery in flight.
+        cancelStreamRecovery()
+        
+        // A failed or ended item can never play again; resuming it would leave the UI
+        // "connecting" forever. Rebuild it so play always reaches the live stream.
+        if streamItemIsDead || self.player?.currentItem?.status == .failed,
+           let url = activeStreamURL ?? userDefaults?.url(forKey: "lastStationURL") {
+            print("🔄 Play: Current stream item is dead - rebuilding player")
+            forceSetStationURL(url)
+        }
+        
         // Ensure we have a player
         guard let player = player else { 
             print("❌ Play: No player available")
@@ -1435,6 +1704,9 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // CRITICAL FIX: Mark as manually paused to prevent auto-resume
         wasManuallyPaused = true
+        
+        // A user pause ends every pending reconnect, watchdog and retry.
+        cancelStreamRecovery()
         
         connectionState = .paused
         isBuffering = false
@@ -1543,6 +1815,7 @@ class RadioPlayer: NSObject, ObservableObject {
         // CRITICAL FIX: Clear user intent and manual pause flags when stopping
         userWantsToPlay = false
         wasManuallyPaused = false
+        cancelStreamRecovery()
         
         player?.pause()
         player = nil
@@ -1802,6 +2075,9 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
+        // Recovery state belongs to the previous station.
+        cancelStreamRecovery()
+        
         // Use forceSetStationURL for user-initiated station changes to work during CarPlay
         forceSetStationURL(url)
         
@@ -1928,6 +2204,7 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func stopCurrentStation() {
+        cancelStreamRecovery()
         player?.pause()
         player = nil
         isPlaying = false
@@ -5204,8 +5481,10 @@ class RadioPlayer: NSObject, ObservableObject {
         reachability = nil
         
         // Stop reconnection attempts
-        reconnectionTimer?.invalidate()
-        reconnectionTimer = nil
+        reconnectionWorkItem?.cancel()
+        stallWatchdogWorkItem?.cancel()
+        streamItemObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        streamItemStatusObservation?.invalidate()
         
         // Cancel all observers
         statusCancellable?.cancel()

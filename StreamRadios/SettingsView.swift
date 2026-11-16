@@ -164,7 +164,9 @@ struct SettingsView: View {
 
     
     var body: some View {
-        NavigationView {
+        // NavigationStack rather than the deprecated NavigationView: under NavigationView, the
+        // second-level pushes from About (Terms, Privacy) popped straight back off the stack.
+        NavigationStack {
             VStack(spacing: 0) {
                 ScrollView {
                                                              LazyVStack(spacing: 24) {

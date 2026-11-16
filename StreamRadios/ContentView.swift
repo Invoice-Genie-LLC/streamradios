@@ -203,6 +203,7 @@ struct ContentView: View {
     
     @Environment(\.horizontalSizeClass) var sizeClass
     @StateObject private var tabBarClearance = TabBarClearance.shared
+    @StateObject private var duoSplit = DuoSplit.shared
     
     // MARK: - Device Detection
     
@@ -228,6 +229,8 @@ struct ContentView: View {
     // MARK: - Layout Properties
     
     private var topPadding: CGFloat {
+        // iPhone Duo matches no listed screen; give it the modern-iPhone value, not the old default.
+        if FoldableDevice.shared.hasHinge { return 10 }
         switch deviceType {
         case .iPhone15ProMax, .iPhone14Plus: return 10
         case .iPhone16Pro: return 10
@@ -307,6 +310,7 @@ struct ContentView: View {
                 TabView(selection: $selectedTab) {
             // Radio Tab - Contains the original full interface
             radioTabContent
+            .padding(.trailing, duoSplitTabInset)
             .tabItem {
                 Image(systemName: Tab.radio.icon)
                 Text(Tab.radio.title)
@@ -318,6 +322,7 @@ struct ContentView: View {
             .id("podcast-\(syncCompletionRefreshID)") // Force PodcastListView to recreate when sync completes
             .environmentObject(podcastPlayer)
             .environmentObject(podcastViewModel)
+            .padding(.trailing, duoSplitTabInset)
             .tabItem {
                 Image(systemName: Tab.podcast.icon)
                 Text(Tab.podcast.title)
@@ -331,6 +336,7 @@ struct ContentView: View {
             .environmentObject(viewModel)
             .environmentObject(podcastPlayer)
             .environmentObject(podcastViewModel)
+            .padding(.trailing, duoSplitTabInset)
             .tabItem {
                 Image(systemName: Tab.settings.icon)
                 Text(Tab.settings.title)
@@ -465,11 +471,38 @@ struct ContentView: View {
             }
         }
         // Removed tab state persistence - app always starts on radio tab
+        // Presented from the tab view, not from the Radio tab's content: a cover attached to a
+        // tab that is not on screen never appears, so the mini player could not open the radio
+        // player from the Podcast or Settings tab.
+        .fullScreenCover(isPresented: $isPlayerSheetPresented) {
+            RadioPlayerSheetView()
+                .environmentObject(radioPlayer)
+                .environmentObject(viewModel)
+        }
+        // iPhone Duo split: the full player is already on screen in the trailing half, so it
+        // never also opens as a cover, and an open cover closes when the split appears.
+        .onChange(of: isPlayerSheetPresented) { _, isPresented in
+            guard isPresented, duoSplit.isWide, radioPlayer.currentlyPlayingStation != nil else { return }
+            isPlayerSheetPresented = false
+            // The radio mini player on another tab: go to the stations, where its player is.
+            selectedTab = .radio
+        }
+        .onChange(of: duoSplit.isWide) { _, isWide in
+            if isWide { isPlayerSheetPresented = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: DuoSplit.showPodcastPlayer)) { _ in
+            // The podcast mini player on another tab: go to the podcasts, where its player is.
+            selectedTab = .podcast
+        }
+        .overlay(alignment: .trailing) { duoSplitPane }
+        // Measure the tab bar even when no mini player is showing: the headers need to know
+        // whether the system bars run down the side before anything has been played.
+        .background(TabBarClearanceProbe(isActive: !isFooterMenuHidden))
         .overlay(alignment: .bottom) {
             // Global Player positioned above tab bar, never covering it
             // Hide during search unless something is actively playing
             let isActivelyPlaying = radioPlayer.isPlaying || podcastPlayer.isPlaying
-            if shouldShowGlobalPlayer && (!isSearchPresented || isActivelyPlaying) {
+            if shouldShowGlobalPlayer && (!isSearchPresented || isActivelyPlaying) && !duoSplitReplacesMiniPlayer {
                 GlobalPlayerView(
                     selectedPodcast: $selectedPodcast,
                     isPlayerSheetPresented: $isPlayerSheetPresented,
@@ -487,9 +520,13 @@ struct ContentView: View {
                     // absorb the difference, so a constant tuned on iPhone lands on the bar.
                     // With the bar hidden there is nothing to clear, so cancel the safe-area inset
                     // out and let the player sit near the physical screen edge.
-                    isFooterMenuHidden ? 15 - tabBarClearance.bottomInset : tabBarClearance.height + 6
+                    // On iPhone Duo the bar can run down the side instead; nothing sits along
+                    // the bottom then either.
+                    (isFooterMenuHidden || tabBarClearance.isBarOnSide) ? 15 - tabBarClearance.bottomInset : tabBarClearance.height + 6
                 }())
                 .background(TabBarClearanceProbe(isActive: !isFooterMenuHidden))
+                // iPhone Duo split: stay within the list's half.
+                .padding(.trailing, duoSplitReservedWidth)
                 // Add smooth sliding animation when TabView shows/hides
                 .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
                 // Add subtle scale and opacity animation for enhanced visual feedback
@@ -524,6 +561,103 @@ struct ContentView: View {
                         print("🔄 ContentView: Updated syncCompletionRefreshID to force UI refresh")
                     }
                 }
+        }
+        .onGeometryChange(for: CGRect.self) { proxy in
+            // Size of the content area, with the trailing safe-area inset carried in the origin.
+            CGRect(origin: CGPoint(x: proxy.safeAreaInsets.trailing, y: 0), size: proxy.size)
+        } action: { area in
+            duoSplit.update(contentSize: area.size, trailingInset: area.origin.x)
+        }
+    }
+    
+    // MARK: - iPhone Duo Split
+    
+    private enum DuoSplitContent: Equatable {
+        case radio
+        case podcast(episodeID: String)
+    }
+    
+    /// Which player the mini player is showing: the last one used, when it has something loaded.
+    private var activePlayerContent: DuoSplitContent? {
+        let podcastEpisodeID = podcastPlayer.currentFeed != nil ? podcastPlayer.currentEpisode?.id : nil
+        let hasRadio = radioPlayer.currentlyPlayingStation != nil
+        
+        if let podcastEpisodeID, PlaybackManager.shared.getLastActivePlayer() == .podcast || !hasRadio {
+            return .podcast(episodeID: podcastEpisodeID)
+        }
+        return hasRadio ? .radio : nil
+    }
+    
+    /// Which full player fills the trailing half on iPhone Duo's open inner display in landscape.
+    /// It always matches the tab beside it: the radio player next to the stations, the podcast
+    /// player next to the podcasts. Settings belongs to neither, so it follows the mini player.
+    /// Nil when the split is off: on every other device and pose, and while the tab's player has
+    /// nothing loaded to show.
+    private var duoSplitContent: DuoSplitContent? {
+        guard duoSplit.isWide else { return nil }
+        switch selectedTab {
+        case .radio:
+            return radioPlayer.currentlyPlayingStation != nil ? .radio : nil
+        case .podcast:
+            guard podcastPlayer.currentFeed != nil, let episodeID = podcastPlayer.currentEpisode?.id else { return nil }
+            return .podcast(episodeID: episodeID)
+        default:
+            return activePlayerContent
+        }
+    }
+    
+    /// The mini player would only repeat the Now Playing half beside it. It stays when it is the
+    /// other player's (a podcast playing while the stations are open), as the way to control it.
+    private var duoSplitReplacesMiniPlayer: Bool {
+        guard let content = duoSplitContent else { return false }
+        return content == activePlayerContent
+    }
+    
+    /// Trailing space the mini player gives up to the Now Playing half.
+    private var duoSplitReservedWidth: CGFloat {
+        duoSplitContent != nil ? duoSplit.paneWidth : 0
+    }
+    
+    /// Trailing space each tab gives up to the Now Playing half. A tab's navigation stack keeps
+    /// its content clear of the system's side column even when it no longer sits beside it, so
+    /// the stack runs that far under the Now Playing half for its content to end at the divider.
+    private var duoSplitTabInset: CGFloat {
+        max(0, duoSplitReservedWidth - duoSplit.sideColumnWidth)
+    }
+    
+    @ViewBuilder
+    private var duoSplitPane: some View {
+        if let content = duoSplitContent {
+            Group {
+                switch content {
+                case .radio:
+                    RadioPlayerSheetView()
+                        .environmentObject(radioPlayer)
+                        .environmentObject(viewModel)
+                case .podcast(let episodeID):
+                    if let episode = podcastPlayer.currentEpisode, let feed = podcastPlayer.currentFeed {
+                        PodcastPlayerSheetView(
+                            episode: episode,
+                            feed: feed,
+                            podcastPlayer: podcastPlayer,
+                            viewModel: podcastViewModel,
+                            isPresented: .constant(true)
+                        )
+                        // The player derives its chapters when it is created.
+                        .id(episodeID)
+                    }
+                }
+            }
+            .environment(\.isDuoSplitPane, true)
+            .environment(\.horizontalSizeClass, .compact)
+            .frame(width: duoSplit.paneWidth)
+            .frame(maxHeight: .infinity)
+            .background(Color.adaptiveBackground.ignoresSafeArea(.container, edges: .vertical))
+            // The players' backgrounds run out to the display edge; cut them off at the pane so
+            // they neither paint over the system tab bar and toolbar in the column beside it
+            // nor take its touches.
+            .mask(Rectangle().ignoresSafeArea(.container, edges: .vertical))
+            .contentShape(Rectangle())
         }
     }
     
@@ -750,7 +884,11 @@ struct ContentView: View {
                                 )
                             }
 
-                            headerActions
+                            // With a vertical system bar (iPhone Duo) these actions live in
+                            // that bar instead; only Cancel stays inline while searching.
+                            if !tabBarClearance.isBarOnSide || isSearchPresented {
+                                headerActions
+                            }
                         }
                         .padding(.horizontal, 16)
 
@@ -842,11 +980,6 @@ struct ContentView: View {
                 }
             }
 
-            .fullScreenCover(isPresented: $isPlayerSheetPresented) {
-                RadioPlayerSheetView()
-                    .environmentObject(radioPlayer)
-                    .environmentObject(viewModel)
-            }
             .fullScreenCover(isPresented: $showingSubscriptionView) {
                 SubscriptionView()
                     .environmentObject(subscriptionManager)
@@ -891,7 +1024,24 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .switchToAllTab)) { _ in
                 handleSwitchToAllStations()
             }
-            .navigationBarHidden(true)
+            .navigationBarHidden(!tabBarClearance.isBarOnSide)
+            .toolbar {
+                // iPhone Duo: standard toolbar items, which the system lays out down the side.
+                // Each has a title and a symbol so it can also appear in the overflow menu.
+                if tabBarClearance.isBarOnSide && !isSearchPresented {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button(action: presentRadioSearch) {
+                            Label("Search", systemImage: "magnifyingglass")
+                        }
+                        Button(action: sortCurrentRadioList) {
+                            Label("Sort", systemImage: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                        }
+                        Button(action: addRadioStation) {
+                            Label("Add Station", systemImage: "plus")
+                        }
+                    }
+                }
+            }
             .navigationDestination(item: $selectedStationForEdit) { station in
                 EditStationView(station: station)
                     .environmentObject(viewModel)
@@ -935,46 +1085,59 @@ struct ContentView: View {
                 .foregroundColor(.adaptivePrimaryText)
                 .padding(.horizontal, 14)
             } else {
-                headerActionButton("magnifyingglass") {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        isSearchPresented = true
-                    }
-                }
+                headerActionButton("magnifyingglass", action: presentRadioSearch)
                 
-                headerActionButton(viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle") {
-                    switch viewModel.selectedSubTab {
-                    case .recent:
-                        viewModel.sortRecentStationsAlphabetically()
-                    case .favorites:
-                        // Favorites tab - show alert to warn about modifying order
-                        alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
-                            viewModel.sortFavoritesAlphabetically()
-                        }
-                    case .all:
-                        viewModel.sortStationsAlphabetically()
-                    }
-                }
+                headerActionButton(viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle",
+                                   action: sortCurrentRadioList)
                 
-                headerActionButton("plus") {
-                    if viewModel.selectedCountry == "Select Country" {
-                        alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                    } else {
-                        activeSheet = .addStation
-                    }
-                }
+                headerActionButton("plus", action: addRadioStation)
             }
         }
-        .frame(height: 40)
+        .padding(.horizontal, isSearchPresented ? 0 : 4)
+        // Matches the 44 pt glass pill the system draws around the Podcasts toolbar buttons.
+        .frame(height: 44)
         .background(Capsule().fill(Color.adaptiveSecondaryBackground))
-        .modifier(ConditionalLiquidGlass(cornerRadius: 20))
+        .modifier(ConditionalLiquidGlass(cornerRadius: 22))
+    }
+    
+    // Shared by the inline header buttons and the system toolbar items used on iPhone Duo.
+    
+    private func presentRadioSearch() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isSearchPresented = true
+        }
+    }
+    
+    private func sortCurrentRadioList() {
+        switch viewModel.selectedSubTab {
+        case .recent:
+            viewModel.sortRecentStationsAlphabetically()
+        case .favorites:
+            // Favorites tab - show alert to warn about modifying order
+            alertManager.showCustomAlert(for: .confirmFavoritesSortChange) {
+                viewModel.sortFavoritesAlphabetically()
+            }
+        case .all:
+            viewModel.sortStationsAlphabetically()
+        }
+    }
+    
+    private func addRadioStation() {
+        if viewModel.selectedCountry == "Select Country" {
+            alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+        } else {
+            activeSheet = .addStation
+        }
     }
     
     private func headerActionButton(_ systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 17, weight: .medium))
+                // Toolbar buttons (Podcasts) get the large image scale; match it here.
+                .imageScale(.large)
                 .foregroundColor(.adaptivePrimaryText)
-                .frame(width: 34, height: 40)
+                .frame(width: 40, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
@@ -1055,7 +1218,7 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 40)
+        .frame(height: 44)
         .background(Capsule().fill(Color.adaptiveFieldBackground))
         .onAppear {
             // Automatically focus the search field when it appears
@@ -1274,9 +1437,6 @@ struct CompactPlayerView: View {
                                     .foregroundColor(metadataTextColor)
                                     .lineLimit(1)
                             }
-                            
-                            // Connection status indicator
-                            connectionStatusView
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1319,7 +1479,12 @@ struct CompactPlayerView: View {
                             )
                             .frame(width: 44, height: 44)
                         
-                        if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
+                        if let statusSymbol = radioPlayer.networkStatus.transportSymbol {
+                            // Offline / failed: a quiet glyph instead of an endless spinner
+                            Image(systemName: statusSymbol)
+                                .font(.headline)
+                                .foregroundColor(playbackControlIconColor)
+                        } else if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(0.8)
                                 .tint(playbackControlIconColor)
@@ -1393,9 +1558,6 @@ struct CompactPlayerView: View {
                                     .foregroundColor(metadataTextColor)
                                     .lineLimit(1)
                             }
-                            
-                            // Connection status indicator
-                            connectionStatusView
                         }
                     }
                 }
@@ -1437,7 +1599,12 @@ struct CompactPlayerView: View {
                             )
                             .frame(width: 44, height: 44)
                         
-                        if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
+                        if let statusSymbol = radioPlayer.networkStatus.transportSymbol {
+                            // Offline / failed: a quiet glyph instead of an endless spinner
+                            Image(systemName: statusSymbol)
+                                .font(.headline)
+                                .foregroundColor(playbackControlIconColor)
+                        } else if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(0.8)
                                 .tint(playbackControlIconColor)
@@ -1494,40 +1661,6 @@ struct CompactPlayerView: View {
                 Image(systemName: "radio")
                     .font(.title3)
                     .foregroundColor(.adaptivePrimaryText)
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private var connectionStatusView: some View {
-        HStack(spacing: 2) {
-            switch radioPlayer.connectionState {
-            case .connecting:
-                ProgressView()
-                    .scaleEffect(0.5)
-                    .tint(.orange)
-                Text("•")
-                    .foregroundColor(.orange)
-                    .font(.caption2)
-            case .disconnected:
-                Image(systemName: "wifi.slash")
-                    .font(.caption2)
-                    .foregroundColor(.red)
-            case .buffering:
-                Image(systemName: "arrow.clockwise")
-                    .font(.caption2)
-                    .foregroundColor(.orange)
-                    .rotationEffect(.degrees(360))
-                    .animation(
-                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false), 
-                        value: radioPlayer.connectionState
-                    )
-            case .connected, .paused:
-                EmptyView()
-            case .error:
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.caption2)
-                    .foregroundColor(.red)
             }
         }
     }
@@ -1670,7 +1803,12 @@ struct UnifiedPodcastPlayerView: View {
                 HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
                     // Tappable area that includes artwork and episode info - opens detailed player
                     Button(action: {
-                        showDetailedPlayer = true
+                        // iPhone Duo split: the full player lives beside the podcasts, never in a cover.
+                        if DuoSplit.shared.isWide {
+                            NotificationCenter.default.post(name: DuoSplit.showPodcastPlayer, object: nil)
+                        } else {
+                            showDetailedPlayer = true
+                        }
                     }) {
                         HStack(alignment: .center, spacing: 4) {
                             // Artwork
@@ -1696,7 +1834,6 @@ struct UnifiedPodcastPlayerView: View {
                     
                     // Player controls with timer aligned under play button
                     VStack(spacing: 1) {
-                        Spacer().frame(height: 4)
                         // Simplified controls - only play/pause and 30s fast forward
                         HStack(spacing: 12) {
                             // Play/Pause button - centered
@@ -1737,6 +1874,11 @@ struct UnifiedPodcastPlayerView: View {
                                         ProgressView()
                                             .progressViewStyle(CircularProgressViewStyle(tint: playbackControlIconColor))
                                             .scaleEffect(0.8)
+                                    } else if let statusSymbol = podcastPlayer.networkStatus.transportSymbol {
+                                        // Offline / failed: a quiet glyph instead of an endless spinner
+                                        Image(systemName: statusSymbol)
+                                            .font(.system(size: playIconSize))
+                                            .foregroundColor(playbackControlIconColor)
                                     } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
                                         // Show spinning indicator when reconnecting or buffering
                                         ProgressView()
@@ -1770,13 +1912,10 @@ struct UnifiedPodcastPlayerView: View {
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
-                        
-                        // Connection status indicator for podcast player
-                        podcastConnectionStatusView
                     }
                 }
                 .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, 2)
+                .padding(.vertical, 5)
                 .background(
                     // Same background as radio player
                     RoundedRectangle(cornerRadius: 16)
@@ -1801,7 +1940,7 @@ struct UnifiedPodcastPlayerView: View {
             }
             .sheet(isPresented: $showAudioSettings) {
                 AudioSettingsSheet(podcastPlayer: podcastPlayer)
-                    .presentationDetents([.fraction(0.5), .large])
+                    .adaptiveSheetDetents([.fraction(0.5), .large])
                     .presentationDragIndicator(.visible)
             }
             .fullScreenCover(isPresented: $showDetailedPlayer) {
@@ -1813,13 +1952,21 @@ struct UnifiedPodcastPlayerView: View {
                     isPresented: $showDetailedPlayer
                 )
             }
+            .onReceive(DuoSplit.shared.$isWide) { isWide in
+                if isWide { showDetailedPlayer = false }
+            }
         } else {
             // Fallback for earlier iOS versions
             // Compact single-row layout with center alignment for Dynamic Type support
                 HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
                     // Tappable area that includes artwork and episode info - opens detailed player
                     Button(action: {
-                        showDetailedPlayer = true
+                        // iPhone Duo split: the full player lives beside the podcasts, never in a cover.
+                        if DuoSplit.shared.isWide {
+                            NotificationCenter.default.post(name: DuoSplit.showPodcastPlayer, object: nil)
+                        } else {
+                            showDetailedPlayer = true
+                        }
                     }) {
                         HStack(alignment: .center, spacing: 4) {
                             // Artwork
@@ -1861,6 +2008,11 @@ struct UnifiedPodcastPlayerView: View {
                                         ProgressView()
                                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                             .scaleEffect(0.8)
+                                    } else if let statusSymbol = podcastPlayer.networkStatus.transportSymbol {
+                                        // Offline / failed: a quiet glyph instead of an endless spinner
+                                        Image(systemName: statusSymbol)
+                                            .font(.system(size: playIconSize))
+                                            .foregroundColor(playbackControlIconColor)
                                     } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
                                         // Show spinning indicator when reconnecting or buffering
                                         ProgressView()
@@ -1894,9 +2046,6 @@ struct UnifiedPodcastPlayerView: View {
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
-                        
-                        // Connection status indicator for podcast player
-                        podcastConnectionStatusView
                     }
                 }
                 .padding(.horizontal, horizontalPadding)
@@ -1922,7 +2071,7 @@ struct UnifiedPodcastPlayerView: View {
             }
             .sheet(isPresented: $showAudioSettings) {
                 AudioSettingsSheet(podcastPlayer: podcastPlayer)
-                    .presentationDetents([.fraction(0.5), .large])
+                    .adaptiveSheetDetents([.fraction(0.5), .large])
                     .presentationDragIndicator(.visible)
             }
             .fullScreenCover(isPresented: $showDetailedPlayer) {
@@ -1933,6 +2082,9 @@ struct UnifiedPodcastPlayerView: View {
                     viewModel: viewModel,
                     isPresented: $showDetailedPlayer
                 )
+            }
+            .onReceive(DuoSplit.shared.$isWide) { isWide in
+                if isWide { showDetailedPlayer = false }
             }
         }
     }
@@ -1996,57 +2148,6 @@ struct UnifiedPodcastPlayerView: View {
         let seconds = Int(time) % 60
         
         return String(format: "%02d:%02d", minutes, seconds)
-    }
-    
-    @ViewBuilder
-    private var podcastConnectionStatusView: some View {
-        HStack(spacing: 2) {
-            switch podcastPlayer.connectionState {
-            case .loading:
-                ProgressView()
-                    .scaleEffect(0.4)
-                    .tint(.blue)
-                Text("Loading...")
-                    .font(.caption2)
-                    
-            case .connecting:
-                ProgressView()
-                    .scaleEffect(0.4)
-                    .tint(.orange)
-                Text("•")
-                    .foregroundColor(.orange)
-                    .font(.caption2)
-            case .disconnected:
-                Image(systemName: "wifi.slash")
-                    .font(.caption2)
-                    .foregroundColor(.red)
-                Text("Offline")
-                    .font(.caption2)
-                    .foregroundColor(.red)
-            case .buffering:
-                Image(systemName: "arrow.clockwise")
-                    .font(.caption2)
-                    .foregroundColor(.orange)
-                    .rotationEffect(.degrees(360))
-                    .animation(
-                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false), 
-                        value: podcastPlayer.connectionState
-                    )
-                Text("Buffering")
-                    .font(.caption2)
-                    .foregroundColor(.orange)
-            case .connected:
-                EmptyView()
-            case .error:
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.caption2)
-                    .foregroundColor(.red)
-                Text("Error")
-                    .font(.caption2)
-                    .foregroundColor(.red)
-            }
-        }
-        .frame(height: 12)
     }
 }
 

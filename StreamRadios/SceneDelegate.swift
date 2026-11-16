@@ -63,6 +63,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
+    /// Portrait only, except on a foldable iPhone (iPhone Duo), where the app
+    /// rotates so the open inner display is used in landscape too. Explicit selector so the system
+    /// finds it whatever Swift name the SDK gives this new iOS 27 callback.
+    @objc(supportedInterfaceOrientationsForWindowScene:)
+    func supportedInterfaceOrientations(for windowScene: UIWindowScene) -> UIInterfaceOrientationMask {
+        NSLog("DUODBG scene orientations asked, hasHinge=%d", FoldableDevice.shared.hasHinge ? 1 : 0)
+        return FoldableDevice.shared.hasHinge ? .allButUpsideDown : .portrait
+    }
+
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         handleUserActivity(userActivity)
     }

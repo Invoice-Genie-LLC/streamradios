@@ -16,6 +16,8 @@ extension Notification.Name {
 struct SearchPodcastsView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
+    /// True when the system bars run down the side (iPhone Duo): header buttons move there.
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
     @StateObject private var searchService = PodcastSearchService()
     @State private var searchText = ""
     @State private var searchFieldID = UUID()
@@ -24,6 +26,15 @@ struct SearchPodcastsView: View {
     @State private var showingAddPodcast = false
     @State private var selectedPodcast: PodcastFeed?
     @State private var presentedPodcast: PodcastFeed?
+
+    /// Three columns on a phone. iPhone Duo's displays are much wider, where three columns
+    /// blow the artwork up; fit as many columns as the width allows instead.
+    private var popularGridColumns: [GridItem] {
+        if FoldableDevice.shared.hasHinge {
+            return [GridItem(.adaptive(minimum: 120, maximum: 180), spacing: 12)]
+        }
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    }
     
     private var showingPreview: Binding<Bool> {
         Binding(
@@ -95,11 +106,15 @@ struct SearchPodcastsView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Search Podcasts")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.adaptivePrimaryText)
+                if tabBarClearance.isBarOnSide {
+                    DuoLeadingTitleItem(title: "Search Podcasts")
+                } else {
+                    ToolbarItem(placement: .principal) {
+                        Text("Search Podcasts")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.adaptivePrimaryText)
+                    }
                 }
                 
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -113,6 +128,26 @@ struct SearchPodcastsView: View {
                 }
                 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    if tabBarClearance.isBarOnSide {
+                        // iPhone Duo: plain title-and-symbol items so the system can place them
+                        // in the vertical bar. The custom HStack below would stay horizontal.
+                        if !isSearchPresented {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    isSearchPresented = true
+                                }
+                            } label: {
+                                Label("Search", systemImage: "magnifyingglass")
+                            }
+                            Button {
+                                newPodcastTitle = ""
+                                newPodcastURL = ""
+                                showingAddPodcast = true
+                            } label: {
+                                Label("Add URL", systemImage: "link.badge.plus")
+                            }
+                        }
+                    } else {
                     Group {
                         if !isSearchPresented {
                             HStack(spacing: 8) {
@@ -142,6 +177,7 @@ struct SearchPodcastsView: View {
                                 
                             }
                         }
+                    }
                     }
                 }
             }
@@ -388,7 +424,7 @@ struct SearchPodcastsView: View {
                                 
                                 // Album-style grid for category
                                 LazyVGrid(
-                                    columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), 
+                                    columns: popularGridColumns,
                                     spacing: 16
                                 ) {
                                     ForEach(categoryData.podcasts, id: \.id) { podcast in

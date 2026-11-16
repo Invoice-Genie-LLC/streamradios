@@ -52,9 +52,25 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     weak var viewModel: PodcastViewModel?
     private var reachability: Reachability?
     @Published var isAttemptingReconnection: Bool = false
-    private var reconnectionTimer: Timer?
-    private let maxReconnectionAttempts = 5
+    private let maxReconnectionAttempts = 6
     private var currentReconnectionAttempt = 0
+    /// The one pending recovery attempt or its verification. Every path goes through this
+    /// single item, so observers firing together cannot start parallel reconnects.
+    private var reconnectionWorkItem: DispatchWorkItem?
+    private var stallWatchdogWorkItem: DispatchWorkItem?
+    /// Streaming playback was lost to the network (not to the user) and must come back by itself.
+    private var streamRecoveryPending = false
+    /// The current streaming item failed; it can never play again and has to be rebuilt.
+    private var streamItemIsDead = false
+    /// Position a rebuilt item must start from; set until that item is ready and confirmed there.
+    private var pendingRecoverySeekTime: Double?
+    /// A seek the user made while the stream was down; wins over the last played position.
+    private var recoveryResumeOverride: Double?
+    private var timeControlObservation: NSKeyValueObservation?
+    private weak var timeControlObservedPlayer: AVPlayer?
+    private var streamItemObservers: [NSObjectProtocol] = []
+    private var lastNetworkChange = Date.distantPast
+    private var recoveryBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var remoteCommandCenter: MPRemoteCommandCenter?
     @Published var currentEpisodeIndex: Int?
     private var allEpisodesInFeed: [PodcastEpisode] = []
@@ -175,6 +191,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // 3. Was NOT manually paused by user
         // 4. There was an actual audio interruption (wasPlayingBeforeInterruption = true)
         // 5. CARPLAY FIX: Not currently playing in CarPlay to prevent progress reset
+        
+        // The app may have been suspended while offline and missed the reachability callback.
+        if !PlaybackManager.shared.isInterruptionActive, recoverStreamIfNeeded() {
+            DebugLogger.logInfo("App entering foreground with a podcast stream lost to the network - recovering", category: "BackgroundAudio")
+            return
+        }
         
         let isCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
         let hadAudioInterruption = wasPlayingBeforeInterruption
@@ -339,37 +361,92 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            }
        }
        
-           private func handleNetworkDisconnection() {
+    // MARK: - Network recovery
+
+    /// False only when Reachability positively reports no route; an unknown state counts as reachable.
+    private var isNetworkReachable: Bool {
+        guard let reachability else { return true }
+        return reachability.connection != .unavailable
+    }
+
+    /// What the player is really playing. The episode's stored `localFilePath` is not a reliable
+    /// answer: it can be stale (file gone, so playback fell back to the stream).
+    private var isStreamingCurrentItem: Bool {
+        guard let asset = player?.currentItem?.asset as? AVURLAsset else { return false }
+        return !asset.url.isFileURL
+    }
+
+    /// Automatic recovery is only allowed for a streamed episode the user still expects to hear:
+    /// they started it, have not paused it themselves, and have not switched to radio.
+    private var shouldAutoRecoverStream: Bool {
+        userWantsToPlay && !wasManuallyPaused && currentEpisode != nil && isStreamingCurrentItem
+            && PlaybackManager.shared.activePlayer != .radio
+    }
+
+    /// True while a network-stalled stream is silent although `isPlaying` still holds the intent.
+    private var isStalledForNetwork: Bool {
+        streamRecoveryPending && player?.timeControlStatus != .playing
+    }
+
+    /// Rate advertised to the lock screen / CarPlay: 0 while stalled so the elapsed time there
+    /// does not keep running during an outage.
+    private var advertisedPlaybackRate: Double {
+        isPlaying && !isStalledForNetwork ? 1.0 : 0.0
+    }
+
+    /// What the network is doing to podcast playback, for the shared status pill and play button.
+    var networkStatus: PlaybackNetworkStatus {
+        guard currentEpisode != nil else { return .normal }
+        if connectionState == .error { return .failed }
+        // Downloaded episodes and user-paused ones are never a network matter.
+        guard userWantsToPlay, !wasManuallyPaused, isStreamingCurrentItem else { return .normal }
+
+        let isAudible = player?.timeControlStatus == .playing
+        if !isNetworkReachable {
+            if isAudible { return .offlinePlayingBuffer }
+            return (streamRecoveryPending || isPlaying) ? .offline : .normal
+        }
+        if streamRecoveryPending || isAttemptingReconnection {
+            return isAudible ? .normal : .reconnecting
+        }
+        return connectionState == .buffering ? .buffering : .normal
+    }
+
+    private func handleNetworkDisconnection() {
         os_log("🌐 PodcastPlayer: Handling network disconnection", log: log, type: .info)
-        
-        // Stop any ongoing reconnection attempts
-        stopReconnectionAttempts()
-        
-        // Pause playback if we're playing from a remote URL (not local file)
-        if isPlaying && userWantsToPlay {
-            if let currentEpisode = currentEpisode {
-                // Check if we're playing from a local file (offline) or streaming
-                let isPlayingLocalFile = currentEpisode.localFilePath != nil && !currentEpisode.localFilePath!.isEmpty
-                if !isPlayingLocalFile {
-                    os_log("🌐 PodcastPlayer: Network lost during streaming, pausing playback", log: log, type: .info)
-                    player?.pause()
-                    isPlaying = false
-                    // Keep userWantsToPlay = true so we can resume when network returns
-                    // Show connecting state to indicate we're waiting to reconnect (spinning button)
-                    connectionState = .connecting
-                } else {
-                    os_log("🌐 PodcastPlayer: Network lost but playing local file, continuing playback", log: log, type: .info)
-                    // For local files, we can continue playing even without network
-                    connectionState = .connected
-                }
-            }
-        } else if userWantsToPlay && currentEpisode != nil {
-            // User wants to play but isn't currently playing - show connecting state (spinning button)
-            os_log("🌐 PodcastPlayer: Network lost while user wants to play, showing connecting state", log: log, type: .info)
-            connectionState = .connecting
-        } else {
-            // User doesn't want to play or no episode - show disconnected state
+        lastNetworkChange = Date()
+        // Reachability is not @Published; views that show networkStatus need a nudge.
+        objectWillChange.send()
+
+        // Nothing can succeed while offline; wait for the reachability callback instead.
+        cancelScheduledRecovery()
+        currentReconnectionAttempt = 0
+        isAttemptingReconnection = false
+
+        guard currentEpisode != nil else {
             connectionState = .disconnected
+            return
+        }
+
+        // Downloaded episodes do not depend on the network at all.
+        guard isStreamingCurrentItem else { return }
+
+        // Paused by the user (or stopped): stay exactly as is, no spinner, no pending resume.
+        guard shouldAutoRecoverStream else { return }
+
+        // Only a stream that was running (or already waiting to come back) is resumed later.
+        // One paused by a phone call or route change stays under that path's control.
+        let playerIsActive = player.map { $0.timeControlStatus != .paused } ?? false
+        guard isPlaying || playerIsActive || streamRecoveryPending else { return }
+
+        os_log("🌐 PodcastPlayer: Network lost during streaming - playing out the buffer, will resume when it returns", log: log, type: .info)
+        // Deliberately no pause(): AVPlayer keeps playing what it has buffered, which makes
+        // short drops inaudible. The stall / failure observers take over if the buffer runs dry.
+        streamRecoveryPending = true
+        beginRecoveryBackgroundTask()
+        if player?.timeControlStatus != .playing {
+            connectionState = .connecting
+            updateNowPlayingInfo()
         }
     }
     
@@ -403,13 +480,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func setupCrossDeviceProgressSync() {
-        // Listen for real-time progress changes from other devices
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleCrossDeviceProgressSync(_:)),
-            name: .init("EpisodeProgressChangedInstantly"),
-            object: nil
-        )
+        // "EpisodeProgressChangedInstantly" is deliberately not observed here. It is posted for every local
+        // save (pause, Core Data reload, iCloud merge), not just for other devices, so seeking to it dragged a
+        // playing episode back to its last saved position, e.g. when the phone UI opened during CarPlay
+        // playback. Positions from the Watch arrive through applyRemoteProgress instead.
         
         // Listen for enhanced cross-device progress updates via CloudKit
         NotificationCenter.default.addObserver(
@@ -422,79 +496,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     // REMOVED: Old handleInterruption method replaced with handleAudioInterruption for better CarPlay support
     
-    @objc private func handleCrossDeviceProgressSync(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let episodeId = userInfo["episodeId"] as? String,
-              let feedId = userInfo["feedId"] as? String,
-              let newProgress = userInfo["progress"] as? Double,
-              let currentEpisode = currentEpisode,
-              currentEpisode.id == episodeId,
-              currentEpisode.feedId == feedId,
-              isPlaying else {
-            return
-        }
-        
-        // Get the current progress threshold for sync
-        let currentPlayerProgress = currentProgress
-        let progressDifference = abs(newProgress - currentPlayerProgress)
-        
-        // Only sync if the difference is significant (more than 5 seconds worth of content)
-        let significantDifferenceThreshold = duration > 0 ? (5.0 / duration) : 0.05
-        
-        if progressDifference > significantDifferenceThreshold {
-            let newTime = newProgress * duration
-            
-            // CRITICAL FIX: Check if we're in chapter protection period before allowing CloudKit sync
-            let isChapterProtected = isInChapterProtectionPeriod()
-            
-            if isChapterProtected {
-                os_log("🛡️ CLOUDKIT SYNC BLOCKED: Skipping cross-device sync during chapter protection (%.2f%% -> %.2f%% blocked)", 
-                       log: log, type: .info, currentPlayerProgress * 100, newProgress * 100)
-                return // Block CloudKit sync during chapter seeks
-            }
-            
-            // CRITICAL FIX: Check if we're in navigation protection period before allowing CloudKit sync
-            let isNavigationProtected = isInNavigationProtectionPeriod()
-            
-            print("🔍 DEBUG: CloudKit sync check - chapter protected: \(isChapterProtected), navigation protected: \(isNavigationProtected)")
-            if let lastNavTime = lastNavigationTime {
-                let timeSinceNav = Date().timeIntervalSince(lastNavTime)
-                print("🔍 DEBUG: Time since navigation: \(timeSinceNav) seconds (protection: \(navigationProtectionInterval) seconds)")
-            } else {
-                print("🔍 DEBUG: No navigation time recorded")
-            }
-            
-            if isNavigationProtected {
-                print("🛡️ DEBUG: CLOUDKIT SYNC BLOCKED due to navigation protection")
-                os_log("🛡️ CLOUDKIT SYNC BLOCKED: Skipping cross-device sync during navigation protection (%.2f%% -> %.2f%% blocked)", 
-                       log: log, type: .info, currentPlayerProgress * 100, newProgress * 100)
-                return // Block CloudKit sync during app navigation
-            }
-            
-            os_log("🔄 Cross-device sync: Updating playback position from %.2f%% to %.2f%% (%.1f seconds)", 
-                   log: log, type: .info, currentPlayerProgress * 100, newProgress * 100, newTime)
-            
-            // Update the player position to match the new progress from other device
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                
-                self.currentTime = newTime
-                self.currentProgress = newProgress
-                
-                // Seek to the new position
-                self.player?.seek(to: CMTime(seconds: newTime, preferredTimescale: 1), 
-                                toleranceBefore: .zero, 
-                                toleranceAfter: .zero) { completed in
-                    if completed {
-                        DispatchQueue.main.async {
-                            self.updateNowPlayingInfo()
-                            os_log("✅ Cross-device sync: Successfully synced to %.2f%% (%.1f seconds)", 
-                                   log: self.log, type: .info, newProgress * 100, newTime)
-                        }
-                    }
-                }
-            }
-        }
+    /// True while this device is itself playing the episode, which makes its position the newest one.
+    func isPlayingLive(episodeId: String, feedId: String?) -> Bool {
+        guard isPlaying, let currentEpisode, currentEpisode.id == episodeId else { return false }
+        guard let feedId, !feedId.isEmpty else { return true }
+        return currentEpisode.feedId == feedId
     }
     
     /// Check for the latest progress from other devices when resuming playback
@@ -712,81 +718,376 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func handleNetworkReconnection() {
+        lastNetworkChange = Date()
+        objectWillChange.send()
+
         // Only attempt reconnection if the user wants to play and we have an episode
-        guard userWantsToPlay, let currentEpisode = currentEpisode else {
+        guard userWantsToPlay, currentEpisode != nil else {
             os_log("Network reconnection skipped - user doesn't want to play or no current episode", log: log, type: .info)
             connectionState = .connected
             return
         }
-        
-        // Check if we're playing from a remote URL (not local file)
-        let isPlayingLocalFile = currentEpisode.localFilePath != nil && !currentEpisode.localFilePath!.isEmpty
-        
-        // If we're not currently playing and not playing a local file, attempt to resume
-        if !isPlaying && !isPlayingLocalFile {
-            os_log("🌐 PodcastPlayer: Network reconnected, attempting to resume streaming playback", log: log, type: .info)
-            connectionState = .connecting
-            isAttemptingReconnection = true
+
+        // Downloaded episodes never needed the network.
+        guard isStreamingCurrentItem else {
+            connectionState = .connected
+            return
+        }
+
+        // Paused by the user: stay paused. (Reachability also fires on every Wi-Fi/cellular
+        // handover, so without this a paused episode started playing on a network change.)
+        guard !wasManuallyPaused else {
+            if connectionState == .connecting || connectionState == .disconnected {
+                connectionState = .connected
+            }
+            return
+        }
+
+        // Another app (Camera recording, a call) holds the audio session: do not restart
+        // playback over it. resumeAfterInterruption picks a pending recovery up.
+        guard !PlaybackManager.shared.isInterruptionActive else { return }
+
+        let isStalled = player?.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        let itemFailed = streamItemIsDead || player?.currentItem?.status == .failed
+        if streamRecoveryPending || itemFailed || isStalled {
+            os_log("🌐 PodcastPlayer: Network reconnected, resuming streaming playback", log: log, type: .info)
+            // Reachability reports every flag change, so callbacks arrive in bursts; the single
+            // work item coalesces them into one attempt.
+            streamRecoveryPending = true
             currentReconnectionAttempt = 0
-            attemptReconnection()
-        } else if isPlayingLocalFile {
-            os_log("🌐 PodcastPlayer: Network reconnected, local file playback continuing", log: log, type: .info)
-            connectionState = .connected
+            scheduleRecovery(after: 0.3)
         } else {
-            // Already playing, just update state
-            connectionState = .connected
+            // Still playing (buffer or surviving connection), or paused by something other
+            // than the network - nothing to do.
+            if connectionState == .connecting || connectionState == .disconnected {
+                connectionState = .connected
+            }
         }
     }
-    
-    private func attemptReconnection() {
+
+    /// The stream stopped delivering audio for a reason other than the user.
+    private func noteStreamLost(reason: String) {
+        guard shouldAutoRecoverStream else { return }
+        os_log("🌐 PodcastPlayer: Stream lost (%@)", log: log, type: .info, reason)
+        streamRecoveryPending = true
+        beginRecoveryBackgroundTask()
+        updateNowPlayingInfo()
+
+        guard !PlaybackManager.shared.isInterruptionActive else { return }
+        guard isNetworkReachable else {
+            cancelScheduledRecovery()
+            isAttemptingReconnection = false
+            connectionState = .connecting
+            return
+        }
+        // An attempt (or its verification) is already scheduled - don't stack another.
+        guard reconnectionWorkItem == nil else { return }
+        scheduleRecovery(after: recoveryBackoff(afterAttempt: currentReconnectionAttempt))
+    }
+
+    private func recoveryBackoff(afterAttempt attempt: Int) -> TimeInterval {
+        let delays: [TimeInterval] = [0.5, 2, 4, 8, 15, 30]
+        return delays[min(max(attempt, 0), delays.count - 1)]
+    }
+
+    private func cancelScheduledRecovery() {
+        reconnectionWorkItem?.cancel()
+        reconnectionWorkItem = nil
+        stallWatchdogWorkItem?.cancel()
+        stallWatchdogWorkItem = nil
+    }
+
+    private func scheduleRecovery(after delay: TimeInterval) {
+        cancelScheduledRecovery()
+        isAttemptingReconnection = true
+        connectionState = .connecting
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.reconnectionWorkItem = nil
+            self.performRecovery()
+        }
+        reconnectionWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func performRecovery() {
+        guard shouldAutoRecoverStream, let player else {
+            cancelStreamRecovery()
+            return
+        }
+        // Leave streamRecoveryPending set in both cases: the interruption-end path and the
+        // next reachability callback pick it up.
+        guard !PlaybackManager.shared.isInterruptionActive else { return }
+        guard isNetworkReachable else {
+            isAttemptingReconnection = false
+            connectionState = .connecting
+            return
+        }
         guard currentReconnectionAttempt < maxReconnectionAttempts else {
-            stopReconnectionAttempts(reportFailure: true)
-            return
-        }
-        
-        guard let currentEpisode = currentEpisode else {
-            os_log("No current episode available for reconnection", log: log, type: .error)
-            stopReconnectionAttempts()
-            return
-        }
-        
-        currentReconnectionAttempt += 1
-        os_log("🔄 PodcastPlayer: Attempting reconnection %d of %d for episode: %@", 
-               log: log, type: .info, currentReconnectionAttempt, maxReconnectionAttempts, currentEpisode.title)
-        
-        // Try to resume playback
-        play()
-        
-        // Check if reconnection was successful after a delay
-        reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
-            self?.checkReconnectionStatus()
-        }
-    }
-    
-    private func checkReconnectionStatus() {
-        if player?.timeControlStatus == .playing && isPlaying {
-            os_log("✅ PodcastPlayer: Network reconnection successful", log: log, type: .info)
-            connectionState = .connected
-            stopReconnectionAttempts()
-        } else {
-            os_log("⚠️ PodcastPlayer: Reconnection attempt failed, trying again...", log: log, type: .info)
-            attemptReconnection()
-        }
-    }
-    
-    private func stopReconnectionAttempts(reportFailure: Bool = false) {
-        reconnectionTimer?.invalidate()
-        reconnectionTimer = nil
-        isAttemptingReconnection = false
-        currentReconnectionAttempt = 0
-        
-        if reportFailure && player?.timeControlStatus != .playing {
             os_log("❌ PodcastPlayer: Failed to reconnect after %d attempts", log: log, type: .error, maxReconnectionAttempts)
+            cancelScheduledRecovery()
+            currentReconnectionAttempt = 0
+            isAttemptingReconnection = false
+            isPlaying = false
             connectionState = .error
-            // Don't clear userWantsToPlay so they can try again manually
-        } else if player?.timeControlStatus == .playing {
+            endRecoveryBackgroundTask()
+            updateNowPlayingInfo()
+            if let episodeId = currentEpisode?.id {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("PodcastPlaybackStateChanged"),
+                    object: nil,
+                    userInfo: ["episodeId": episodeId, "isPlaying": false]
+                )
+            }
+            // streamRecoveryPending and userWantsToPlay stay set: the next network change,
+            // foreground or play tap starts a new round.
+            return
+        }
+
+        currentReconnectionAttempt += 1
+        isAttemptingReconnection = true
+        connectionState = .connecting
+        os_log("🔄 PodcastPlayer: Recovery attempt %d of %d", log: log, type: .info, currentReconnectionAttempt, maxReconnectionAttempts)
+
+        let itemIsDead = streamItemIsDead || player.currentItem?.status == .failed
+        if itemIsDead {
+            // A failed item never plays again: build a new one at the same position.
+            rebuildCurrentStreamItem()
+        } else {
+            // The item is intact (paused or stalled): it continues from its own position.
+            isPlaying = true
+            player.play()
+            applyCurrentAudioSettings()
+        }
+
+        // The timeControlStatus observer reports success (streamDidStartPlaying). If nothing
+        // is playing by then, back off; an intact item that would not resume is rebuilt next.
+        let attempt = currentReconnectionAttempt
+        let timeout: TimeInterval = itemIsDead ? 12 : 6
+        let verification = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.reconnectionWorkItem = nil
+            if self.player?.timeControlStatus == .playing {
+                self.streamDidStartPlaying()
+            } else {
+                os_log("⚠️ PodcastPlayer: Recovery attempt %d did not start playback", log: self.log, type: .info, attempt)
+                self.streamItemIsDead = true
+                self.scheduleRecovery(after: self.recoveryBackoff(afterAttempt: attempt))
+            }
+        }
+        reconnectionWorkItem = verification
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: verification)
+    }
+
+    /// Replaces a dead streaming item with a fresh one that starts at the position playback
+    /// had reached, so recovery neither restarts the episode nor skips ahead.
+    private func rebuildCurrentStreamItem() {
+        guard let player, let episode = currentEpisode, let url = URL(string: episode.audioUrl) else { return }
+
+        let playerTime = player.currentTime().seconds
+        let knownTime = (playerTime.isFinite && playerTime > 0) ? playerTime : currentTime
+        let resumeTime = max(0, recoveryResumeOverride ?? pendingRecoverySeekTime ?? knownTime)
+        recoveryResumeOverride = nil
+        pendingRecoverySeekTime = resumeTime
+        os_log("🔄 PodcastPlayer: Rebuilding stream item at %.1fs for episode: %@", log: log, type: .info, resumeTime, episode.title)
+
+        let item = AVPlayerItem(url: url)
+        if resumeTime > 0 {
+            // Seeking before the item loads makes it start (and buffer) from this position.
+            item.seek(to: CMTime(seconds: resumeTime, preferredTimescale: 600),
+                      toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
+        }
+        player.replaceCurrentItem(with: item)
+
+        // The saved-progress restore must not run for this item; recovery owns its position.
+        hasRestoredPositionForCurrentEpisode = true
+        currentEpisodeIdForRestoration = episode.id
+        currentTime = resumeTime
+
+        setupPlayerItemObserver()
+        isPlaying = true
+        player.play()
+        applyCurrentAudioSettings()
+    }
+
+    /// Runs when a rebuilt item becomes ready: confirms it really is at the resume position.
+    private func finishRecoverySeek(on item: AVPlayerItem, to resumeTime: Double) {
+        guard player?.currentItem === item else { return }
+        pendingRecoverySeekTime = nil
+
+        let itemTime = item.currentTime().seconds
+        if !itemTime.isFinite || abs(itemTime - resumeTime) > 2 {
+            player?.seek(to: CMTime(seconds: resumeTime, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        currentTime = resumeTime
+        if duration > 0 {
+            currentProgress = min(resumeTime / duration, 1)
+        }
+        if isPlaying {
+            applyCurrentAudioSettings()
+        }
+        updateNowPlayingInfo()
+    }
+
+    /// Stops every automatic recovery path. Called for anything the user does themselves
+    /// (pause, stop, starting another episode).
+    private func cancelStreamRecovery() {
+        cancelScheduledRecovery()
+        streamRecoveryPending = false
+        currentReconnectionAttempt = 0
+        isAttemptingReconnection = false
+        endRecoveryBackgroundTask()
+    }
+
+    /// Recovery entry point for paths that regain control after an outage (foreground,
+    /// interruption end, play tap on a dead item). Returns false when there is nothing to recover.
+    @discardableResult
+    private func recoverStreamIfNeeded() -> Bool {
+        let itemFailed = streamItemIsDead || player?.currentItem?.status == .failed
+        guard streamRecoveryPending || itemFailed, shouldAutoRecoverStream else { return false }
+        streamRecoveryPending = true
+        if isNetworkReachable {
+            currentReconnectionAttempt = 0
+            scheduleRecovery(after: 0.2)
+        } else {
+            connectionState = .connecting
+        }
+        return true
+    }
+
+    /// Decides whether a failed item is a network casualty (recoverable) or a broken episode.
+    /// Returns true when recovery has taken ownership of the failure.
+    private func handleStreamItemFailure(_ item: AVPlayerItem) -> Bool {
+        guard isStreamingCurrentItem else { return false }
+        let networkCodes: Set<Int> = [
+            NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost, NSURLErrorDNSLookupFailed,
+            NSURLErrorDataNotAllowed, NSURLErrorInternationalRoamingOff, NSURLErrorCallIsActive,
+            NSURLErrorSecureConnectionFailed
+        ]
+        var isNetworkError = !isNetworkReachable || streamRecoveryPending
+        var error = item.error as NSError?
+        while let current = error, !isNetworkError {
+            if current.domain == NSURLErrorDomain, networkCodes.contains(current.code) {
+                isNetworkError = true
+            }
+            error = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        guard isNetworkError else { return false }
+
+        streamItemIsDead = true
+        loadingEpisodeId = nil
+        // When the user had paused, just remember the item is dead; play() rebuilds it.
+        noteStreamLost(reason: "item failed: \(item.error?.localizedDescription ?? "unknown error")")
+        return true
+    }
+
+    // MARK: Stream health signals (driven by the timeControlStatus and item observers)
+
+    private func observePlayerTimeControlStatus() {
+        guard let player, timeControlObservedPlayer !== player else { return }
+        timeControlObservation?.invalidate()
+        timeControlObservedPlayer = player
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            DispatchQueue.main.async {
+                guard let self, self.player === player, self.isStreamingCurrentItem else { return }
+                switch player.timeControlStatus {
+                case .playing:
+                    self.streamDidStartPlaying()
+                case .waitingToPlayAtSpecifiedRate:
+                    self.streamDidStall()
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    private func streamDidStartPlaying() {
+        let wasRecovering = streamRecoveryPending || currentReconnectionAttempt > 0 || isAttemptingReconnection
+        cancelScheduledRecovery()
+        streamRecoveryPending = false
+        streamItemIsDead = false
+        currentReconnectionAttempt = 0
+        isAttemptingReconnection = false
+        endRecoveryBackgroundTask()
+
+        if wasRecovering || connectionState == .connecting || connectionState == .buffering || connectionState == .error {
             connectionState = .connected
         }
+        guard wasRecovering else { return }
+
+        os_log("✅ PodcastPlayer: Stream is playing again", log: log, type: .info)
+        isPlaying = true
+        updateNowPlayingInfo()
+        if let episodeId = currentEpisode?.id {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PodcastPlaybackStateChanged"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "isPlaying": true]
+            )
+        }
+    }
+
+    private func streamDidStall() {
+        guard shouldAutoRecoverStream, isPlaying else { return }
+        if !isNetworkReachable {
+            // The buffer ran dry while offline: show the waiting spinner until the network returns.
+            streamRecoveryPending = true
+            connectionState = .connecting
+            updateNowPlayingInfo()
+            return
+        }
+        if loadingEpisodeId == nil, reconnectionWorkItem == nil {
+            connectionState = .buffering
+        }
+        // A recovery attempt or its verification already covers this stall.
+        guard reconnectionWorkItem == nil, stallWatchdogWorkItem == nil else { return }
+
+        // Right after a network change a stall most likely means the old connection died in
+        // the handover; otherwise (seeking, slow server) give AVPlayer time to rebuffer.
+        let recentNetworkChange = Date().timeIntervalSince(lastNetworkChange) < 20
+        let delay: TimeInterval = recentNetworkChange ? 4 : 15
+        let watchedItem = player?.currentItem
+        let watchdog = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.stallWatchdogWorkItem = nil
+            guard self.player?.currentItem === watchedItem,
+                  self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
+            self.noteStreamLost(reason: "stalled for \(Int(delay))s")
+        }
+        stallWatchdogWorkItem = watchdog
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: watchdog)
+    }
+
+    private func observeStreamItemFailure() {
+        streamItemObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        streamItemObservers.removeAll()
+        streamItemIsDead = false
+
+        guard let item = player?.currentItem else { return }
+        streamItemObservers.append(NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
+        ) { [weak self, weak item] note in
+            guard let self, let item, self.player?.currentItem === item, self.isStreamingCurrentItem else { return }
+            let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            // A stream that breaks off mid-episode is a transport failure, whatever the code.
+            self.streamItemIsDead = true
+            self.noteStreamLost(reason: "failed to play to end: \(error?.localizedDescription ?? "unknown error")")
+        })
+    }
+
+    private func beginRecoveryBackgroundTask() {
+        guard recoveryBackgroundTask == .invalid else { return }
+        recoveryBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PodcastStreamRecovery") { [weak self] in
+            self?.endRecoveryBackgroundTask()
+        }
+    }
+
+    private func endRecoveryBackgroundTask() {
+        guard recoveryBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(recoveryBackgroundTask)
+        recoveryBackgroundTask = .invalid
     }
     
     func setupRemoteCommandCenter() {
@@ -1150,6 +1451,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Reset restoration attempts counter for fresh configuration
         restorationAttempts = 0
         hasSuccessfullyRestored = false
+
+        // CarPlay (or a Watch/remote command) can launch the app and start an episode before the phone UI
+        // exists. Restoring "the last played episode" then would reload the player item and reset the
+        // position to the last saved value, so keep the session that is already loaded.
+        if currentEpisode != nil, player?.currentItem != nil {
+            hasSuccessfullyRestored = true
+            print("ℹ️ PodcastPlayer: Skipping startup restoration - an episode is already loaded in this process")
+            return
+        }
         
         // IMMEDIATE UI RESTORATION: Set up basic UI state immediately for instant player display
         // This ensures the podcast player shows up immediately like the radio player
@@ -1891,6 +2201,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Reset network state when loading a new episode
         resetNetworkState()
+        pendingRecoverySeekTime = nil
+        recoveryResumeOverride = nil
         
         // Completely stop radio playback to prevent it from getting stuck in "connecting" state
         RadioPlayer.shared.stop()
@@ -2122,12 +2434,20 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     private func setupPlayerItemObserver() {
             playerItemObserver?.invalidate()
+            observePlayerTimeControlStatus()
+            observeStreamItemFailure()
             playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
                 guard let self = self else { return }
                 if playerItem.status == .readyToPlay {
                     self.duration = playerItem.duration.seconds
                     self.updatePlaybackInfo()
                     Task { @MainActor in
+                        // An item rebuilt after a network failure resumes where playback
+                        // stopped; the saved-progress restore must not move it.
+                        if let resumeTime = self.pendingRecoverySeekTime {
+                            self.finishRecoverySeek(on: playerItem, to: resumeTime)
+                            return
+                        }
                         guard !self.isRestorationInProgress else {
                             print("🔧 PodcastPlayer: Restoration owns the initial seek")
                             return
@@ -2143,6 +2463,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 } else if playerItem.status == .failed {
                     DispatchQueue.main.async {
                         guard self.player?.currentItem === playerItem else { return }
+
+                        // A stream killed by the network is recovered, not reported as a
+                        // broken episode (which also dropped the user's intent to play).
+                        if self.handleStreamItemFailure(playerItem) { return }
 
                         let episodeId = self.currentEpisode?.id
                         self.loadingEpisodeId = nil
@@ -2442,6 +2766,18 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return
         }
         
+        // A failed streaming item cannot be resumed with play(); rebuild it at the same position.
+        if isStreamingCurrentItem, streamItemIsDead || player.currentItem?.status == .failed {
+            os_log("▶️ Play requested on a dead stream item - rebuilding", log: log, type: .info)
+            PlaybackManager.shared.setActivePlayer(.podcast)
+            configurePodcastRemoteCommands()
+            streamItemIsDead = true
+            isPlaying = true
+            recoverStreamIfNeeded()
+            updateNowPlayingInfo()
+            return
+        }
+        
         // LOADING STATE: Keep loading state active until playback actually starts
         // loadingEpisodeId will be cleared when playback begins in the time observer
         connectionState = .connected
@@ -2574,7 +2910,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         os_log("🌐 PodcastPlayer: Resetting network state for fresh connection", log: log, type: .info)
         
         // Clear any pending reconnection attempts
-        stopReconnectionAttempts()
+        cancelStreamRecovery()
         
         // Reset connection state based on current network availability
         if let reachability = reachability {
@@ -2603,6 +2939,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // CRITICAL FIX: Mark as manually paused to prevent auto-resume
         wasManuallyPaused = true
+        
+        // A user pause ends every pending reconnect, watchdog and retry.
+        cancelStreamRecovery()
         
         // CRITICAL FIX: Preserve user intent when pausing (don't clear userWantsToPlay)
         // This ensures the podcast player remains visible in the UI after pausing from lock screen
@@ -2698,6 +3037,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL FIX: Clear user intent and manual pause flags when stopping
         userWantsToPlay = false
         wasManuallyPaused = false
+        cancelStreamRecovery()
+        pendingRecoverySeekTime = nil
+        recoveryResumeOverride = nil
         
         // Save progress before stopping if we have a current episode
         if let currentEpisode = currentEpisode {
@@ -2836,8 +3178,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
 
-            player.play()
+            // If the stream died during the interruption (network dropped mid-call), the old
+            // item cannot resume - recover it at the same position instead.
             self.isPlaying = true
+            if !self.recoverStreamIfNeeded() {
+                player.play()
+            }
             self.wasPlayingBeforeInterruption = false
             self.updateNowPlayingInfo()
 
@@ -2948,6 +3294,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL: Mark when we did a chapter seek to protect from time observer override
         lastChapterSeekTime = Date()
         
+        // The item is dead or being rebuilt: the new one must start from the seek target.
+        if streamItemIsDead || pendingRecoverySeekTime != nil {
+            recoveryResumeOverride = time
+            if pendingRecoverySeekTime != nil { pendingRecoverySeekTime = time }
+        }
+        
         os_log("🎯 SEEK PROTECTION: Starting seek to %.1fs (%.2f%%) in episode: %@ - protected for %.1fs", 
                log: log, type: .info, time, newProgress * 100, currentEpisode.title, chapterSeekProtectionInterval)
         
@@ -2959,7 +3311,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             for: currentEpisode.id, 
             progress: newProgress, 
             isPlaying: isPlaying, 
-            currentTime: time
+            currentTime: time,
+            feedId: currentEpisode.feedId,
+            authoritative: true
         )
         
         // Update view model cache immediately
@@ -2984,7 +3338,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     for: currentEpisode.id, 
                     progress: newProgress, 
                     isPlaying: self.isPlaying, 
-                    currentTime: time
+                    currentTime: time,
+                    feedId: currentEpisode.feedId,
+                    authoritative: true
                 )
                 
                 // CRITICAL FIX: Update Now Playing info immediately after seek for lock screen sync
@@ -3137,7 +3493,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             for: currentEpisode.id,
             progress: progress,
             isPlaying: isPlaying,
-            currentTime: validPlayerTime
+            currentTime: validPlayerTime,
+            feedId: currentEpisode.feedId
         )
         saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: reason)
         os_log("💾 Persisted live player progress for %@: %.2f%% (%@)",
@@ -3629,31 +3986,42 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
-    private var lastBackgroundCheckpoint = Date.distantPast
+    private var lastProgressCheckpoint = Date.distantPast
 
-    /// UI time updates are skipped in the background, so keep EpisodeStateManager (Watch, CarPlay lists,
-    /// force-close saves) current at a low cadence.
+    /// Saves the live position to EpisodeStateManager every 15s while playing, on every surface. The phone
+    /// list, CarPlay lists, the Watch link and force-close saves all read it from there. This used to run
+    /// only while the app was in the background; a CarPlay scene keeps the app active, so a CarPlay
+    /// session saved nothing until it was paused. Forward-only on purpose: seeks save themselves.
     @MainActor
-    private func checkpointBackgroundProgress(player: AVPlayer) {
-        guard isPlaying, let currentEpisode, !isInChapterProtectionPeriod(),
-              Date().timeIntervalSince(lastBackgroundCheckpoint) >= 15 else { return }
+    private func checkpointLiveProgress(player: AVPlayer, updatePublishedTime: Bool) {
+        // A rebuilt item reports 0 until its recovery seek lands; never checkpoint that.
+        guard pendingRecoverySeekTime == nil, !streamItemIsDead else { return }
+        guard isPlaying, let currentEpisode, loadingEpisodeId == nil, !isInChapterProtectionPeriod(),
+              player.currentItem?.status == .readyToPlay,
+              Date().timeIntervalSince(lastProgressCheckpoint) >= 15 else { return }
         let seconds = player.currentTime().seconds
         let itemDuration = player.currentItem?.duration.seconds ?? 0
         let total = itemDuration.isFinite && itemDuration > 0 ? itemDuration : duration
         guard seconds.isFinite, seconds > 0, total > 0 else { return }
-        lastBackgroundCheckpoint = Date()
-        currentTime = seconds
-        currentProgress = min(seconds / total, 1)
-        stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true,
+        lastProgressCheckpoint = Date()
+        let progress = min(seconds / total, 1)
+        if updatePublishedTime {
+            currentTime = seconds
+            currentProgress = progress
+        }
+        stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: true,
                                     currentTime: seconds, feedId: currentEpisode.feedId)
     }
 
     // Lightweight method that only updates time values without heavy operations
     private func updateCurrentTimeOnly() {
         guard let player = player else { return }
+        // A rebuilt item reports 0 until its recovery seek lands; keep the last real position.
+        guard pendingRecoverySeekTime == nil, !streamItemIsDead else { return }
         
         // PERFORMANCE: Skip all updates during scrolling to prevent hangs
         if isUserScrolling {
+            Task { @MainActor in self.checkpointLiveProgress(player: player, updatePublishedTime: false) }
             return
         }
         
@@ -3661,9 +4029,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     Task { @MainActor in
         // Skip updates if app is in background to save battery and resources
         guard UIApplication.shared.applicationState == .active else {
-            self.checkpointBackgroundProgress(player: player)
+            self.checkpointLiveProgress(player: player, updatePublishedTime: true)
             return
         }
+        self.checkpointLiveProgress(player: player, updatePublishedTime: false)
         
         Task { [weak self] in
                 guard let self = self else { return }
@@ -3790,7 +4159,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Update only the elapsed time - this is lightweight and prevents lock screen rewind
         let elapsedTime = max(0, currentTime)
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = advertisedPlaybackRate
         
         // Set the updated info immediately - no debouncing for elapsed time
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
@@ -3838,7 +4207,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = totalDuration
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = advertisedPlaybackRate
         nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
         
         os_log("Podcast Now Playing: Elapsed=%.1fs, Duration=%.1fs, Rate=%.1f", log: log, type: .debug, elapsedTime, totalDuration, isPlaying ? 1.0 : 0.0)
@@ -4108,7 +4477,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = advertisedPlaybackRate
         
         // Enhanced artwork priority: imageData -> iconData -> artworkUrl (same as CarPlay)
         var artworkSet = false
@@ -4209,7 +4578,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         
         // Clean up network reconnection resources
-        stopReconnectionAttempts()
+        cancelScheduledRecovery()
+        timeControlObservation?.invalidate()
+        streamItemObservers.forEach { NotificationCenter.default.removeObserver($0) }
         
         // Stop reachability monitoring
         reachability?.stopNotifier()

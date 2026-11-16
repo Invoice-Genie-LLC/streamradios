@@ -28,10 +28,7 @@ struct AudioSettingsSheet: View {
                 // Header
                 VStack(spacing: 12) {
                     // Drag indicator
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.secondary.opacity(0.3))
-                        .frame(width: 36, height: 5)
-                        .padding(.top, 8)
+                    SheetGrabber()
                     
                     Text("Audio Settings")
                         .font(.title2)
@@ -163,6 +160,7 @@ struct AudioSettingsSheet: View {
                     .padding(.bottom, 150) // Extra padding for bottom safe area and note readability
                 }
             }
+            .duoSheetBalance(sidePadding: 12)
             .navigationBarHidden(true)
         }
         .onAppear {

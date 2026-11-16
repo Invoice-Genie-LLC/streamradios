@@ -39,6 +39,11 @@ class PlaybackManager: ObservableObject {
     // PHONE CALL FIX: Made internal so individual players can coordinate state
     internal var radioWasPlayingBeforeInterruption = false
     internal var podcastWasPlayingBeforeInterruption = false
+
+    /// True between an interruption's `.began` and its `.ended`. While it is set another app
+    /// (Camera video recording, a call, an alarm) owns the audio session, so no timer, route
+    /// change or reconnect path may reactivate the session and restart playback.
+    private(set) var isInterruptionActive = false
     
     private init() {
         setupAudioInterruptionHandling()
@@ -228,6 +233,12 @@ class PlaybackManager: ObservableObject {
         _ player: ActivePlayer,
         completion: ((Bool) -> Void)? = nil
     ) {
+        guard !isInterruptionActive else {
+            print("🔇 PlaybackManager: Interruption still active - not resuming \(player)")
+            completion?(false)
+            return
+        }
+
         setActivePlayer(player, shouldActivateSession: true) { activated in
             guard activated else {
                 completion?(false)
@@ -280,6 +291,16 @@ class PlaybackManager: ObservableObject {
         switch type {
         case .began:
             print("🔇 PlaybackManager: Audio interruption began - activePlayer: \(activePlayer), background: \(isInBackground)")
+
+            // An interruption reported only because iOS suspended the app has no matching
+            // `.ended`, so it must not latch the "another app owns the session" state.
+            let reasonValue = userInfo[AVAudioSessionInterruptionReasonKey] as? UInt
+            let wasSuspendedBySystem = reasonValue.flatMap(AVAudioSession.InterruptionReason.init(rawValue:)) == .appWasSuspended
+            if !wasSuspendedBySystem {
+                isInterruptionActive = true
+                // Any resume polling left over from an earlier interruption must not fire now.
+                stopBackgroundInterruptionTimer()
+            }
             
             // PHONE CALL FIX: Multiple interruption protection - only capture state on FIRST interruption
             // Subsequent interruptions should not overwrite the original state
@@ -340,32 +361,32 @@ class PlaybackManager: ObservableObject {
                 print("🎧 PlaybackManager: Podcast state unchanged (subsequent interruption) = \(podcastWasPlayingBeforeInterruption)")
             }
             
-            if isInBackground {
-                print("🌙 PlaybackManager: Background interruption detected - checking network conditions")
-                // GPS FIX: Check network conditions before starting aggressive timer
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    guard let self = self else { return }
-                    let shouldMonitor = (self.activePlayer == .radio && self.radioWasPlayingBeforeInterruption) ||
-                                      (self.activePlayer == .podcast && self.podcastWasPlayingBeforeInterruption)
-                    if shouldMonitor {
-                        // GPS FIX: Only start timer if network conditions are good
-                        if self.isNetworkConditionGoodForTimer() {
-                            self.startBackgroundInterruptionTimer()
-                        } else {
-                            print("🛰️ PlaybackManager: Poor network detected - skipping timer to protect GPS")
-                            UserDefaults.standard.set(true, forKey: "NetworkInterruptionActive")
-                        }
-                    }
-                }
-            }
+            // Do NOT start the resume timer here. The interruption has only just begun: the
+            // interrupting app (e.g. Camera recording video) plays no audio, so the timer's
+            // `isOtherAudioPlaying` check passed and playback restarted over the recording.
+            // Resume is decided when the system reports `.ended`.
             
         case .ended:
             print("🔊 PlaybackManager: Audio interruption ended, background: \(isInBackground)")
             
             // PHONE CALL FIX: For phone calls, iOS doesn't always provide shouldResume correctly
             // We need to be more intelligent about when to resume
-            let shouldResume = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt == AVAudioSession.InterruptionOptions.shouldResume.rawValue
+            let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
             print("📞 PlaybackManager: Interruption end - shouldResume: \(shouldResume)")
+            isInterruptionActive = false
+
+            // The interruption is over. Resume when the system says so, and also when it omits
+            // `.shouldResume` (Camera does after a video recording, and so do some phone calls)
+            // as long as nothing else is using audio. Otherwise stay paused until the user
+            // presses play.
+            let sessionIsFree = !AVAudioSession.sharedInstance().isOtherAudioPlaying && !isPhoneCallActive()
+            guard shouldResume || sessionIsFree else {
+                print("🔇 PlaybackManager: Interruption ended without shouldResume and audio session is busy - staying paused")
+                stopBackgroundInterruptionTimer()
+                resetInterruptionState()
+                return
+            }
             
             // PHONE CALL FIX: Log current state for debugging
             print("📞 PlaybackManager: Current interruption state - Radio: \(radioWasPlayingBeforeInterruption), Podcast: \(podcastWasPlayingBeforeInterruption)")
@@ -388,7 +409,7 @@ class PlaybackManager: ObservableObject {
             if isInBackground {
                 print("🌙 PlaybackManager: Background interruption end - using aggressive resume strategy")
                 handleBackgroundInterruptionEnd()
-            } else if shouldResume || shouldAttemptRadioResume || shouldAttemptPodcastResume {
+            } else if shouldAttemptRadioResume || shouldAttemptPodcastResume {
                 print("🌅 PlaybackManager: Foreground interruption end - attempting resume")
                 
                 // Resume with delay to ensure audio session is ready
@@ -500,6 +521,10 @@ class PlaybackManager: ObservableObject {
     @objc private func handleAppDidBecomeActive() {
         // Stop any background timer since we're now in foreground
         stopBackgroundInterruptionTimer()
+
+        // The user is back in the app. iOS does not guarantee an `.ended` for every `.began`,
+        // so do not leave resume blocked by an interruption that may never be closed.
+        isInterruptionActive = false
         
         // PHONE CALL FIX: Check if we have interrupted playback that should resume for ANY player
         let shouldResumeRadio = (radioWasPlayingBeforeInterruption || RadioPlayer.shared.wasPlayingBeforeInterruption) && 
@@ -570,6 +595,13 @@ class PlaybackManager: ObservableObject {
             }
             
             print("⏰ PlaybackManager: Timer tick \(retryCount) - checking resume conditions")
+
+            if self.isInterruptionActive {
+                print("⏰ PlaybackManager: Timer - interruption active, stopping timer")
+                timer.invalidate()
+                self.backgroundInterruptionTimer = nil
+                return
+            }
             
             // PHONE CALL FIX: Check if we should still be trying to resume ANY player
             let radioStillNeedsResume = (self.radioWasPlayingBeforeInterruption || RadioPlayer.shared.wasPlayingBeforeInterruption) && 
@@ -716,7 +748,7 @@ class PlaybackManager: ObservableObject {
         
         let shouldAttemptResume = radioNeedsImmediateResume || podcastNeedsImmediateResume
         
-        if !shouldAttemptResume {
+        if !shouldAttemptResume || isInterruptionActive {
             return
         }
         
@@ -806,7 +838,7 @@ class PlaybackManager: ObservableObject {
                                        !PodcastPlayer.shared.wasManuallyPaused && 
                                        !PodcastPlayer.shared.isPlaying
         
-        let shouldAttemptResume = radioNeedsDelayedResume || podcastNeedsDelayedResume
+        let shouldAttemptResume = (radioNeedsDelayedResume || podcastNeedsDelayedResume) && !isInterruptionActive
         
         if !shouldAttemptResume {
             print("🔄 PlaybackManager: No longer need delayed resume")
@@ -940,7 +972,7 @@ class PlaybackManager: ObservableObject {
                                 PodcastPlayer.shared.userWantsToPlay &&
                                 !PodcastPlayer.shared.wasManuallyPaused
 
-        guard radioNeedsResume || podcastNeedsResume else { return }
+        guard !isInterruptionActive, radioNeedsResume || podcastNeedsResume else { return }
 
         let player: ActivePlayer = radioNeedsResume ? .radio : .podcast
         setActivePlayer(player, shouldActivateSession: true) { [weak self] activated in

@@ -30,6 +30,8 @@ struct AddStationView: View {
     @State private var activeSheet: AddStationSheetType?
     @State private var keyboardHeight: CGFloat = 0
     @Environment(\.colorScheme) var colorScheme
+    /// True when the system bars run down the side (iPhone Duo): header buttons move there.
+    @ObservedObject private var tabBarClearance = TabBarClearance.shared
     @EnvironmentObject var viewModel: RadioStationViewModel
     @EnvironmentObject var permissionManager: PermissionManager
     @StateObject private var subscriptionManager = SubscriptionManager.shared
@@ -96,11 +98,15 @@ struct AddStationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Add Station")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.adaptivePrimaryText)
+            if tabBarClearance.isBarOnSide {
+                DuoLeadingTitleItem(title: "Add Station")
+            } else {
+                ToolbarItem(placement: .principal) {
+                    Text("Add Station")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.adaptivePrimaryText)
+                }
             }
 
             ToolbarItem(placement: .navigationBarLeading) {
@@ -114,8 +120,15 @@ struct AddStationView: View {
             }
 
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Add") {
-                    saveStation()
+                if tabBarClearance.isBarOnSide {
+                    // A text-only item cannot go in the vertical bar; give it a symbol there.
+                    Button(action: saveStation) {
+                        Label("Add", systemImage: "checkmark")
+                    }
+                } else {
+                    Button("Add") {
+                        saveStation()
+                    }
                 }
             }
         }

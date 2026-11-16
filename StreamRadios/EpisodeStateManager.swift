@@ -141,6 +141,20 @@ class EpisodeStateManager: ObservableObject {
     private static let stateKeySeparator = "\u{1F}"
     private static let completionProgressThreshold = 0.99
 
+    /// When this device last set a position on purpose (a seek in its own player, or a newer position
+    /// accepted from the Apple Watch). Main thread only. Incoming iCloud values carry no usable timestamp, so
+    /// this is what keeps an older remote value from undoing a position that was just set here.
+    private var localPositionSetAt: [String: Date] = [:]
+    private let localPositionGuardWindow: TimeInterval = 60
+
+    private func markLocalPositionSet(_ stateKey: String) {
+        if Thread.isMainThread {
+            localPositionSetAt[stateKey] = Date()
+        } else {
+            DispatchQueue.main.async { self.localPositionSetAt[stateKey] = Date() }
+        }
+    }
+
     private static func stateKey(episodeId: String, feedId: String?) -> String {
         guard let feedId, !feedId.isEmpty else { return episodeId }
         return "\(feedId)\(stateKeySeparator)\(episodeId)"
@@ -1232,7 +1246,9 @@ class EpisodeStateManager: ObservableObject {
             // Check if Core Data loading failed and we need to restore from emergency backup
             if episodeStates.isEmpty && episodeProgress.isEmpty && hasEmergencyBackup() {
                 print("🚨 EpisodeStateManager: Core Data appears empty but emergency backup exists - attempting recovery")
-                restoreFromEmergencyBackup()
+                // This async load runs off the main thread, and the restore assigns @Published
+                // properties, which SwiftUI requires to change on the main thread.
+                await MainActor.run { self.restoreFromEmergencyBackup() }
             }
         }
         
@@ -2517,8 +2533,11 @@ class EpisodeStateManager: ObservableObject {
         performRealTimeSyncForEpisode(episodeId, reason: "episode_replayed", feedId: feedId)
     }
     
-    func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool, currentTime: Double? = nil, feedId: String? = nil) {
+    /// `authoritative` marks a position the listener chose on this device (a seek). It may move the saved
+    /// position backwards; every other caller stays forward-only so a not-yet-restored player can't erase it.
+    func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool, currentTime: Double? = nil, feedId: String? = nil, authoritative: Bool = false) {
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+        if authoritative { markLocalPositionSet(stateKey) }
         let newState: EpisodePlaybackState
         
         // Prevent overwriting existing progress with 0.0 unless it's a genuine reset
@@ -2533,7 +2552,7 @@ class EpisodeStateManager: ObservableObject {
             let isRewindProtected = PodcastPlayer.shared.isInRewindProtectionPeriod()
             
             // PROGRESS PROTECTION: Only update if progress moves forward, unless in chapter or rewind protection
-            if progress >= existingProgress || isChapterProtected || isRewindProtected {
+            if progress >= existingProgress || isChapterProtected || isRewindProtected || authoritative {
                 if isChapterProtected && progress < existingProgress {
                     print("🎯 UPDATE CHAPTER PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - chapter seek override")
                 } else if isRewindProtected && progress < existingProgress {
@@ -2733,6 +2752,7 @@ class EpisodeStateManager: ObservableObject {
         // ENHANCED PROTECTION: Critical check for accidental reset to 0
         if allowRegression {
             finalProgress = min(max(progress, 0), 1)
+            markLocalPositionSet(stateKey)
         } else if progress == 0.0 && existingProgress > 0.0 && !isRewindProtected {
             print("🛡️ CRITICAL PROTECTION: Blocked progress reset from \(String(format: "%.4f", existingProgress)) to 0.0 for episode \(episodeId) - preserving existing progress")
             finalProgress = existingProgress // Block accidental reset to 0
@@ -3566,6 +3586,19 @@ extension EpisodeStateManager {
         }
 
         let stateKey = Self.stateKey(episodeId: episodeId, feedId: feedId)
+
+        // The episode playing on this device (phone or CarPlay) is the newest position there is. A value
+        // from iCloud or a Core Data reload is older, and re-announcing the saved value here used to flip
+        // the episode out of `.playing` and make the player seek back to where the session started.
+        if PodcastPlayer.shared.isPlayingLive(episodeId: episodeId, feedId: feedId) {
+            return
+        }
+        // A position just set on purpose here (seek, or one accepted from the Watch) has not reached iCloud
+        // yet, so whatever iCloud returns in this window predates it.
+        if let setAt = localPositionSetAt[stateKey], Date().timeIntervalSince(setAt) < localPositionGuardWindow {
+            return
+        }
+
         // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
         let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
         
